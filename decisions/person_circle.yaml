@@ -1,0 +1,27 @@
+# Which circle of the agent's life a person belongs to, the way a person files
+# who they know: a father is family, a classmate is school. Asked whenever a
+# person's relation is learned or changes, with `relation` in the state, e.g.
+# "Busta is Daniel's father.". {agent} is filled with the agent's name.
+# Family from the life story is filed as family without asking.
+id: person_circle
+version: 1
+primary: circle
+
+questions:
+  - name: circle
+    type: choice
+    instructions: According to `relation`, which circle of {agent}'s life does the person belong to?
+    choices:
+      - {value: family, description: "Relatives: parents, siblings, children, grandparents, aunts, uncles, cousins, in-laws."}
+      - {value: partner, description: "A romantic partner: girlfriend, boyfriend, wife, husband, fiancé."}
+      - {value: friend, description: "A friend, chosen and close: best friend, old friend, good friend."}
+      - {value: school, description: "From learning: classmates, schoolmates, teachers, tutors, mentors."}
+      - {value: work, description: "From work: colleagues, bosses, clients, collaborators, business contacts."}
+      - {value: community, description: "From where {agent} lives or belongs: neighbours, church or mosque members, club or team mates."}
+      - {value: acquaintance, description: "Someone known only casually or met briefly."}
+      - {value: stranger, description: "Someone {agent} does not know yet."}
+      - {value: other, description: "None of the above."}
+
+thresholds:
+  act: 0.5 # unused: the most likely circle is stored, with its confidence in the log
+  ask: 0.5

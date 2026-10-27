@@ -1,0 +1,18 @@
+# Which remembered facts should System 2 see? One yes/no question per
+# candidate fact, all in one System 1 call. `{fact}` is replaced by a path to
+# each fact in the state, e.g. `facts[3]`, and {agent} by the agent's name.
+# Message and facts are name-resolved first, so "What is your church?" and
+# "I go to Grace Chapel" arrive as "What is Tobi's church?" and "Sam go to
+# Grace Chapel", and each church is matched to the right person.
+id: fact_relevance
+version: 1
+primary: relevant
+
+questions:
+  - name: relevant
+    type: predicate
+    instructions: Would knowing {fact} help {agent} reply to `message`?
+
+thresholds:
+  act: 0.5 # at or above: the fact goes to System 2
+  ask: 0.5 # unused

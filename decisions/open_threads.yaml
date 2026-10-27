@@ -1,0 +1,22 @@
+# When someone just says hi, which things they told the agent recently are
+# worth asking about, the way a friend asks "how did the interview go?".
+# Used instead of fact_relevance when the first read is small talk: "Would
+# knowing this help reply to 'Hi'?" says no to an interview, but a friend
+# would ask about it.
+#
+# One yes/no question per candidate, all in one call. Candidates are the
+# speaker's facts from the last 30 days; that window is applied in code,
+# because dates in the state made the answers worse. `{fact}` is replaced by
+# a path to each fact, `{speaker}` by their name.
+id: open_threads
+version: 1
+primary: open
+
+questions:
+  - name: open
+    type: predicate
+    instructions: Is {fact} something coming up or still going on in {speaker}'s life that a friend would ask about when they say hi?
+
+thresholds:
+  act: 0.5 # at or above: the fact goes to System 2, so it can ask about it
+  ask: 0.5 # unused

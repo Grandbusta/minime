@@ -1,0 +1,51 @@
+# Which part of life a text is about, the way a person files what they hear:
+# "What is my church?" is personal and about religion. Used on every incoming
+# message and on every fact when it is saved, so memory is organised by area.
+#
+# `area` is one choice, but every area at or above `thresholds.label` counts,
+# so a text can have several ("I live with my parents" → home + family).
+#
+# The text is name-resolved first ("What is your church?" → "What is Tobi's
+# church?"), and {agent} / {speaker} below are filled in with the agent's and
+# the speaker's names.
+id: life_area
+version: 1
+
+questions:
+  - name: area
+    type: choice
+    instructions: Which part of life is `text` about?
+    choices:
+      - {value: identity, description: "Who someone is: name, age, gender, appearance, nationality, personality."}
+      - {value: family, description: "Parents, siblings, children, partner, relatives."}
+      - {value: relationships, description: "Friends, colleagues as people, community, social life."}
+      - {value: home, description: "Where someone lives, their house, neighbourhood, household."}
+      - {value: work, description: "Job, employer, career, business, colleagues at work."}
+      - {value: education, description: "School, university, courses, qualifications, learning."}
+      - {value: health, description: "Body, illness, symptoms, medicine, allergies, doctors, dentists, fitness."}
+      - {value: money, description: "Income, spending, bills, banking, debts, savings, investments."}
+      - {value: religion, description: "Faith, beliefs, church, mosque, worship, spirituality."}
+      - {value: preferences, description: "Likes and dislikes: food, drink, music, style, tastes."}
+      - {value: leisure, description: "Hobbies, sports, entertainment, games, free time."}
+      - {value: travel, description: "Trips, transport, places to go or visited."}
+      - {value: possessions, description: "Things someone owns: car, phone, devices, belongings."}
+      - {value: admin, description: "Documents and paperwork: passport, IDs, licences, forms, government offices."}
+      - {value: plans, description: "Upcoming events, appointments, deadlines, things to do."}
+      - {value: world, description: "General knowledge, news, or the world at large, not anyone's own life."}
+      - {value: other, description: "None of the above."} # never kept as a label
+
+  # Does the text concern {agent}'s or {speaker}'s own life? If not, memory is not searched.
+  - name: personal
+    type: predicate
+    instructions: Is `text` about {agent}'s or {speaker}'s own life, rather than general knowledge or the world?
+
+  # "What do you know about me?" scored personal 0.25 but broad 1.00, so broad wins:
+  # every remembered fact about them goes to System 2.
+  - name: broad
+    type: predicate
+    instructions: Does `text` ask about {agent} or {speaker} in general, across many parts of their life, such as who they are or what is known about them?
+
+thresholds:
+  act: 0.5    # personal and broad count as yes at or above this
+  ask: 0.5    # unused
+  label: 0.15 # an area counts at or above this

@@ -1,0 +1,18 @@
+# Is the person answering what the agent just asked? Asked in its own System 1
+# call, with the agent's previous reply in the state, and only when there is a
+# recent reply. It must not share a call with incoming_message: adding
+# `previous_reply` to that state dropped clear intents from 0.93 to 0.50.
+# A replay of 11 exchanges: 10/11 right; the miss ("Thanks, I found one")
+# only changes the note System 2 gets, which is harmless.
+id: follow_up
+version: 1
+primary: answers_previous
+
+questions:
+  - name: answers_previous
+    type: predicate
+    instructions: Did `previous_reply` ask the other person a question, and is `message` their answer to it rather than a new request?
+
+thresholds:
+  act: 0.5 # at or above: the message continues the conversation, so System 2 answers it
+  ask: 0.5 # unused for a yes/no follow-up check

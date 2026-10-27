@@ -1,0 +1,51 @@
+# How the agent reads a message from someone it knows, the way a person does:
+# what are they doing with it? All questions are answered in one System 1
+# call. Bump `version` whenever questions or thresholds change, so the
+# decision log shows which version decided.
+#
+# Every text message gets a reply in the agent's own words (System 2). This
+# read is passed to System 2 in plain words and recorded as the decision's
+# action.
+#
+# Design notes:
+# - The state is only `message`. Unrelated fields (e.g. a timestamp) moved
+#   confidence by up to 0.2.
+# - The message is read as written. Unlike memory checks, this read is worse
+#   with names in place of I/you: "I" versus "you" is part of what the writer
+#   is doing.
+# - Short examples in each description sharpen the boundaries between choices.
+#   A replay on 36 real and fresh messages: 35/36, median confidence 0.91.
+id: incoming_message
+version: 1
+primary: intent
+
+questions:
+  - name: intent
+    type: choice
+    instructions: "`message` is a chat message from the writer to the reader, who know each other. What is the writer doing with it?"
+    choices:
+      - value: share
+        description: "Telling the reader about the writer's own life, work, health, family, feelings or situation, including short answers to a question: \"I'm a software engineer\", \"I live with my parents\", \"Pain\", \"It's March 2027\"."
+      - value: ask_about_reader
+        description: "Asking about the reader's own life: who or what the reader is, their age, likes, family or past: \"Who are you?\", \"How old are you?\", \"What do you like to do?\"."
+      - value: ask_reader_abilities
+        description: "Asking what the reader can do, is good at, or plans or hopes to do: \"What are your capabilities?\", \"Can you play the piano?\", \"What are you good at?\", \"Will you learn that someday?\"."
+      - value: ask_about_writer
+        description: "Asking the reader about the writer's own life, as something the reader may know or remember: \"How old am I?\", \"Where do I live?\", \"When does my passport expire?\", \"What do you know about me?\"."
+      - value: ask_for_help
+        description: "Asking for information, advice, an explanation, or help with a need or task: \"I need a dentist\", \"What should I tell my manager?\", \"What's the capital of France?\"."
+      - value: remind
+        description: "Asking to be reminded of something later: \"Remind me to call mum at 6\", \"Don't let me forget the bank tomorrow\"."
+      - value: small_talk
+        description: "Greetings, thanks, reactions or chit-chat that needs only a friendly reply: \"Hi\", \"Thanks\", \"I'll tell you later\", \"Interesting\"."
+      - value: other
+        description: None of the above.
+
+  # For reminders.
+  - name: mentions_time
+    type: predicate
+    instructions: Does `message` name a specific time, date or moment for something to happen?
+
+thresholds:
+  act: 0.75 # at or above: the first read is clear
+  ask: 0.50 # between ask and act: fairly sure; below: unsure

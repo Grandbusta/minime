@@ -1,0 +1,59 @@
+# ${VAR} references are filled in from the environment (see .env.example).
+
+# Who the agent is: its name and life story, written by you.
+self:
+  life: self/life.yaml
+
+database:
+  url: ${DATABASE_URL}
+
+telegram:
+  token: ${TELEGRAM_BOT_TOKEN}
+  # Only these Telegram user IDs are listened to. If empty, every message is
+  # ignored and the sender's ID is logged, which is how you find yours.
+  owner_ids: [${TELEGRAM_OWNER_ID}]
+  poll_timeout_seconds: 30
+
+# System 1: fast typed decisions. Switch providers by changing these lines.
+decision:
+  provider: openai # openai | typesafe (Jev, not implemented yet)
+  model: gpt-6-luna # empty: the provider's default
+  api_key: ${OPENAI_API_KEY}
+  question_sets: decisions # directory of question set files
+
+# System 2: slow reasoning and writing. Used when a reply needs words, or when
+# System 1 is unsure. Switch providers by changing these lines.
+reasoning:
+  provider: openai # openai
+  model: ${OPENAI_MODEL}
+  api_key: ${OPENAI_API_KEY}
+  prompt: prompts/reply.md # who the agent is and how it replies
+  # How hard System 2 thinks before replying: none | low | medium | high. In a
+  # timing test, low replied in 2.0–2.5s against 3.2–4.4s at the model's default
+  # (medium), just as well; medium is also where the 12–29s spikes happened.
+  effort: low
+
+# Working memory: how much of the current conversation System 2 sees, so
+# follow-ups like "Let's say Lagos" make sense.
+working_memory:
+  turns: 8    # earlier exchanges (message + reply); 0 turns recall off
+  window: 30m # older exchanges are left out; 2h pulled finished topics into new ones
+
+# Long-term memory: facts about the agent and the people it knows. Before each System 2
+# reply, System 1 checks the newest facts for relevance (~170 input tokens,
+# ~$0.00002 each with gpt-6-luna) and passes on the ones that help.
+memory:
+  recall_candidates: 30
+
+# USD per 1M tokens, from OpenAI's pricing page (standard tier), used to record
+# what each decision cost. cache_write is the 30-minute rate, the default TTL.
+# A model missing here is recorded at $0. The Decisions API bills gpt-6-luna's
+# input and cache rates; its output is free.
+pricing:
+  gpt-6-astra:   {input: 10.00, output: 50.00, cached_input: 1.00, cache_write: 12.50}
+  gpt-6.1-sol:   {input: 2.00,  output: 10.00, cached_input: 0.10, cache_write: 2.50}
+  gpt-6.1-terra: {input: 1.00,  output: 5.00,  cached_input: 0.05, cache_write: 1.25}
+  gpt-6-luna:    {input: 0.10,  output: 0.50,  cached_input: 0.01, cache_write: 0.125}
+
+log:
+  level: info # debug | info | warn | error

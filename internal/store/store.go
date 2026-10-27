@@ -1,0 +1,351 @@
+// Package store persists percepts and decisions in PostgreSQL.
+package store
+
+import (
+	"context"
+	"embed"
+	"encoding/json"
+	"fmt"
+	"io/fs"
+	"slices"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/oklog/ulid/v2"
+	"github.com/pressly/goose/v3"
+
+	"minime/internal/decision"
+	"minime/internal/memory"
+	"minime/internal/perception"
+)
+
+//go:embed migrations/*.sql
+var migrations embed.FS
+
+type Store struct {
+	pool *pgxpool.Pool
+}
+
+// Open connects to Postgres and applies any pending migrations.
+func Open(ctx context.Context, url string) (*Store, error) {
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		return nil, fmt.Errorf("connect: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+	if err := migrate(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return &Store{pool: pool}, nil
+}
+
+func migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	dir, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		return err
+	}
+	db := stdlib.OpenDBFromPool(pool)
+	defer db.Close()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, dir)
+	if err != nil {
+		return fmt.Errorf("migrations: %w", err)
+	}
+	if _, err := p.Up(ctx); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) Close() { s.pool.Close() }
+
+// SavePercept stores p and reports whether it was new; a percept already seen
+// from the same source (same ExternalID) is not stored again.
+func (s *Store) SavePercept(ctx context.Context, p perception.Percept) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+		INSERT INTO percepts (id, source, external_id, thread, speaker, kind, text, payload, at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (source, external_id) DO NOTHING`,
+		p.ID.String(), p.Source, p.ExternalID, p.Thread, p.Speaker, p.Kind, p.Text, nullJSON(p.Payload), p.At)
+	if err != nil {
+		return false, fmt.Errorf("save percept: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (s *Store) SaveDecision(ctx context.Context, d decision.Decision) error {
+	answers, err := json.Marshal(d.Answers)
+	if err != nil {
+		return err
+	}
+	if d.Answers == nil {
+		answers = []byte("{}")
+	}
+	var outcome []byte
+	if d.Outcome != nil {
+		if outcome, err = json.Marshal(d.Outcome); err != nil {
+			return err
+		}
+	}
+	var parent *string
+	if d.ParentID != nil {
+		id := d.ParentID.String()
+		parent = &id
+	}
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO decisions (id, parent_id, at, percept_id, set_id, tier, provider, answers,
+		                       action, reply, gate, latency_ms, cost_usd, outcome, affect)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		d.ID.String(), parent, d.At, d.PerceptID.String(), d.SetID, string(d.Tier), d.Provider,
+		answers, d.Action, nullString(d.Reply), string(d.Gate), float64(d.Latency)/float64(time.Millisecond),
+		d.CostUSD, nullJSON(outcome), nullJSON(d.Affect))
+	if err != nil {
+		return fmt.Errorf("save decision: %w", err)
+	}
+	return nil
+}
+
+// RecentDecisions returns the newest n decisions, newest first.
+func (s *Store) RecentDecisions(ctx context.Context, n int) ([]decision.Decision, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, parent_id, at, percept_id, set_id, tier, provider, answers,
+		       action, coalesce(reply, ''), gate, latency_ms, cost_usd::float8, outcome, affect
+		FROM decisions ORDER BY at DESC LIMIT $1`, n)
+	if err != nil {
+		return nil, fmt.Errorf("query decisions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []decision.Decision
+	for rows.Next() {
+		var (
+			d                        decision.Decision
+			id, perceptID            string
+			parentID                 *string
+			tier, gate               string
+			answers, outcome, affect []byte
+			latencyMS                float64
+		)
+		if err := rows.Scan(&id, &parentID, &d.At, &perceptID, &d.SetID, &tier, &d.Provider,
+			&answers, &d.Action, &d.Reply, &gate, &latencyMS, &d.CostUSD, &outcome, &affect); err != nil {
+			return nil, err
+		}
+		if d.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if d.PerceptID, err = ulid.Parse(perceptID); err != nil {
+			return nil, err
+		}
+		if parentID != nil {
+			pid, err := ulid.Parse(*parentID)
+			if err != nil {
+				return nil, err
+			}
+			d.ParentID = &pid
+		}
+		d.Tier, d.Gate = decision.Tier(tier), decision.Gate(gate)
+		d.Latency = time.Duration(latencyMS * float64(time.Millisecond))
+		if err := json.Unmarshal(answers, &d.Answers); err != nil {
+			return nil, err
+		}
+		if outcome != nil {
+			d.Outcome = &decision.Outcome{}
+			if err := json.Unmarshal(outcome, d.Outcome); err != nil {
+				return nil, err
+			}
+		}
+		d.Affect = affect
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// RecentExchanges returns up to limit messages in a conversation since
+// the given time, oldest first, each with the reply it got. The percept
+// being handled is left out.
+func (s *Store) RecentExchanges(ctx context.Context, source, thread string, since time.Time,
+	exclude ulid.ULID, limit int) ([]memory.Exchange, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT p.at, p.text, coalesce(r.reply, '')
+		FROM percepts p
+		LEFT JOIN LATERAL (
+			SELECT d.reply FROM decisions d
+			WHERE d.percept_id = p.id AND d.reply IS NOT NULL
+			ORDER BY d.at DESC LIMIT 1
+		) r ON true
+		WHERE p.source = $1 AND p.thread = $2 AND p.at >= $3 AND p.id <> $4 AND p.text <> ''
+		ORDER BY p.at DESC, p.id DESC
+		LIMIT $5`, source, thread, since, exclude.String(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("query recent exchanges: %w", err)
+	}
+	defer rows.Close()
+
+	var out []memory.Exchange
+	for rows.Next() {
+		var e memory.Exchange
+		if err := rows.Scan(&e.At, &e.Message, &e.Reply); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	slices.Reverse(out) // oldest first, the order a conversation is read in
+	return out, nil
+}
+
+func (s *Store) SaveFact(ctx context.Context, f memory.Fact) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO facts (id, percept_id, subject, text, at, areas) VALUES ($1, $2, $3, $4, $5, $6)`,
+		f.ID.String(), f.PerceptID.String(), f.Subject, f.Text, f.At, nonNil(f.Areas))
+	if err != nil {
+		return fmt.Errorf("save fact: %w", err)
+	}
+	return nil
+}
+
+const factColumns = `id, percept_id, subject, text, at, areas`
+
+// RecentFacts returns up to limit facts, newest first.
+func (s *Store) RecentFacts(ctx context.Context, limit int) ([]memory.Fact, error) {
+	return s.queryFacts(ctx, `SELECT `+factColumns+` FROM facts
+		ORDER BY at DESC, id DESC LIMIT $1`, limit)
+}
+
+// RecallCandidates returns up to limit facts about the given subjects: those
+// sharing an area with areas first, then the rest, newest first within each group.
+func (s *Store) RecallCandidates(ctx context.Context, subjects, areas []string, limit int) ([]memory.Fact, error) {
+	return s.queryFacts(ctx, `SELECT `+factColumns+` FROM facts
+		WHERE subject = ANY($1)
+		ORDER BY (areas && $2) DESC, at DESC, id DESC LIMIT $3`, nonNil(subjects), nonNil(areas), limit)
+}
+
+// UnlabelledFacts returns up to limit facts that have no areas yet, oldest first.
+func (s *Store) UnlabelledFacts(ctx context.Context, limit int) ([]memory.Fact, error) {
+	return s.queryFacts(ctx, `SELECT `+factColumns+` FROM facts
+		WHERE areas = '{}' ORDER BY at, id LIMIT $1`, limit)
+}
+
+func (s *Store) SetFactAreas(ctx context.Context, id ulid.ULID, areas []string) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE facts SET areas = $2 WHERE id = $1`, id.String(), nonNil(areas)); err != nil {
+		return fmt.Errorf("set fact areas: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) queryFacts(ctx context.Context, sql string, args ...any) ([]memory.Fact, error) {
+	rows, err := s.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query facts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []memory.Fact
+	for rows.Next() {
+		var (
+			f             memory.Fact
+			id, perceptID string
+		)
+		if err := rows.Scan(&id, &perceptID, &f.Subject, &f.Text, &f.At, &f.Areas); err != nil {
+			return nil, err
+		}
+		if f.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if f.PerceptID, err = ulid.Parse(perceptID); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+const personColumns = `key, name, relation, circle, source, first_seen, updated_at`
+
+// Person returns the person with key, and whether the agent knows them.
+func (s *Store) Person(ctx context.Context, key string) (memory.Person, bool, error) {
+	people, err := s.queryPeople(ctx, `SELECT `+personColumns+` FROM people WHERE key = $1`, key)
+	if err != nil || len(people) == 0 {
+		return memory.Person{}, false, err
+	}
+	return people[0], true, nil
+}
+
+// KnownPeople returns everyone whose relation to the agent is known, oldest acquaintance first.
+func (s *Store) KnownPeople(ctx context.Context, limit int) ([]memory.Person, error) {
+	return s.queryPeople(ctx, `SELECT `+personColumns+` FROM people WHERE relation <> ''
+		ORDER BY first_seen, key LIMIT $1`, limit)
+}
+
+// SavePerson stores p, replacing what was known about them.
+func (s *Store) SavePerson(ctx context.Context, p memory.Person) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO people (key, name, relation, circle, source, first_seen, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, relation = EXCLUDED.relation,
+			circle = EXCLUDED.circle, source = EXCLUDED.source, updated_at = EXCLUDED.updated_at`,
+		p.Key, p.Name, p.Relation, p.Circle, p.Source, p.FirstSeen, p.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("save person: %w", err)
+	}
+	return nil
+}
+
+// AddPersonIfNew stores p only if the agent does not know them yet, and
+// reports whether it did. Used for what the agent was born knowing: memory,
+// once formed, wins over the file it came from.
+func (s *Store) AddPersonIfNew(ctx context.Context, p memory.Person) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+		INSERT INTO people (key, name, relation, circle, source, first_seen, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (key) DO NOTHING`,
+		p.Key, p.Name, p.Relation, p.Circle, p.Source, p.FirstSeen, p.UpdatedAt)
+	if err != nil {
+		return false, fmt.Errorf("add person: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (s *Store) queryPeople(ctx context.Context, sql string, args ...any) ([]memory.Person, error) {
+	rows, err := s.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query people: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Person
+	for rows.Next() {
+		var p memory.Person
+		if err := rows.Scan(&p.Key, &p.Name, &p.Relation, &p.Circle, &p.Source, &p.FirstSeen, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// nonNil keeps a nil slice from becoming SQL NULL in a NOT NULL array column.
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+func nullString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// nullJSON maps empty JSON to SQL NULL.
+func nullJSON(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return string(b)
+}
