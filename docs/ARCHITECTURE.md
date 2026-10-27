@@ -557,6 +557,57 @@ when we get there.
 - **Spine hooks to keep in v1:** the `Decision` record and the System 1 `state` both
   allow an optional `affect` field. Then emotions plug in later without a schema rewrite.
 
+### 4.10 Money (planned, not v1)
+The agent will have money of its own, in a stablecoin (USDC), and use it the way a person
+uses money: people who hire it pay it, and it pays for what it needs, from a wallet with an
+address it can share. Researched in October
+2026: wallets built for agents (e.g. Coinbase's and Circle's) hold the keys in isolated
+hardware and enforce spending limits themselves. USDC on Base is a common, cheap network.
+
+The one rule that shapes everything: **a stablecoin payment is final.** There is no chargeback.
+So every control has to stop a bad payment before it goes out, and none of them may live in a
+model's judgment alone.
+
+- **A wallet provider, switchable like the models.** A `Wallet` interface (address, balance,
+  send USDC to an address, list incoming payments) with providers under `providers/wallet/`.
+  The keys stay with the provider; mini-me holds only an API credential in the environment,
+  never in memory or prompts. Test on a testnet (e.g. Base Sepolia) first.
+- **Two locks on spending, both outside the models.**
+  1. *In the wallet:* the provider's own policy, as a hard ceiling: a per-payment cap, a daily
+     cap, and (where it can) allowed recipients. Even a fully confused mind cannot pass it.
+  2. *In the mind:* `spend` is an action class under the autonomy gate (§4.4), with budgets in
+     config: e.g. up to $5 on its own within $20 a day, more only with the owner's approve/deny
+     in Telegram, some kinds of payment never. Every widening is logged.
+- **Paying is a decision chain like any other.** System 1 judges the payment (is it worth it,
+  within budget, to someone who looks legitimate?); System 2 plans it; the gate allows, asks or
+  refuses; the wallet sends it; the outcome is recorded with the transaction hash.
+- **A ledger.** Every payment in and out, with amount and currency (USDC, NGN, USD, ...),
+  counterparty, purpose, the decision that made it, and the provider's reference (the on-chain
+  transaction, or the gateway's payment ID), checked against the provider daily. The agent knows its
+  balance the way a person does, and the owner can always see where the money went.
+- **Getting paid.** When it takes on a job (its own commitments, roadmap step 6), it agrees a
+  price and tells the person how to pay, the way a freelancer does. Two ways, behind one
+  `Payments` interface with switchable providers:
+  - *USDC to its wallet:* it gives its address and asks for a unique amount or uses a per-job
+    address, so it knows who paid for what.
+  - *A payment gateway* (e.g. [Bachs](https://bachs.io), Paystack, Stripe): it creates a
+    checkout link or invoice for the job, and the person pays the way they're used to: card,
+    bank transfer, mobile money, or (with Bachs) USDC/USDT. The money settles to the account
+    the gateway pays out to (the owner's), in its currency; Bachs settles to Nigerian and other
+    African bank accounts, issues the invoice, and has a Go SDK and webhooks.
+  Either way, a payment sensor (the provider's webhook, or polling) turns the payment into a
+  percept; the mind matches it to the job, thanks the payer, and starts or delivers the work.
+- **Paying people and services that take USDC** works the same way in reverse: it sends USDC
+  to the address they give it.
+- **Buying from ordinary online shops: TBD.** Most shops take cards, not USDC, and checkout
+  forms are built for people. Options to weigh later: shops with a crypto checkout, a card
+  funded from the wallet, or asking the owner to buy it. Not planned until one is easy and safe.
+- **Owner controls.** A Telegram message on every payment out, a daily summary, and a freeze
+  command that stops all spending at once (also enforced at the wallet).
+- **Responsibility.** The agent can't own an account or answer for a payment; the wallet is
+  under the owner's name and the owner is accountable for what it does. Its profile and
+  invoices keep saying plainly that it is an AI.
+
 ---
 
 ## 5. Technology
@@ -663,6 +714,13 @@ mini-me/
    - "Ask the owner" flow with inline approve/deny.
 8. **Corrections & replay:** label decisions from chat, replay on change, tune thresholds.
 9. **Deploy:** Docker Compose on the VPS, metrics.
+10. **Money** (§4.10): a USDC wallet of its own, in four small steps, each on a testnet first:
+    1. Receive and see: wallet provider, address, balance, ledger, payment sensor. No spending.
+    2. Pay with approval: every payment to an address asks the owner first, under wallet caps.
+    3. Pay on its own within budget: small payments under the gate's limits.
+    4. Get hired: agree a price, share its address or a gateway checkout link (Bachs,
+       Paystack, Stripe), match payments to jobs, deliver.
+    - TBD: buying from ordinary online shops (cards, checkout forms).
 
 After that, grow outward: more sensors → goals → drives → sleep → tools → **voice + emotions**.
 
