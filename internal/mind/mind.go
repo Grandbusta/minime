@@ -9,7 +9,11 @@
 // Memory has two sides: facts about the agent itself (decided when they
 // first come up) and facts about each person. Pronouns are resolved to names
 // before System 1 reads anything, so "your church" and "my church" are
-// never confused. Reminders come later.
+// never confused.
+//
+// A clock ticks into the same loop (initiative.go), so the agent can speak
+// first: reminders people asked for, and checking in on what is going on in
+// their lives.
 package mind
 
 import (
@@ -48,6 +52,13 @@ type Store interface {
 	KnownPeople(ctx context.Context, limit int) ([]memory.Person, error)
 	SavePerson(ctx context.Context, p memory.Person) error
 	AddPersonIfNew(ctx context.Context, p memory.Person) (bool, error)
+	SaveReminder(ctx context.Context, r memory.Reminder) error
+	DueReminders(ctx context.Context, now time.Time, limit int) ([]memory.Reminder, error)
+	SetReminderStatus(ctx context.Context, id ulid.ULID, status string) error
+	Conversations(ctx context.Context) ([]memory.Conversation, error)
+	LastSpokeFirst(ctx context.Context, person, kind string) (time.Time, bool, error)
+	UnaskedFacts(ctx context.Context, person string, since time.Time, limit int) ([]memory.Fact, error)
+	MarkFactsAsked(ctx context.Context, ids []ulid.ULID, at time.Time) error
 }
 
 // WorkingMemory bounds how much of the current conversation the mind keeps
@@ -94,12 +105,25 @@ type Config struct {
 	RecallCandidates int    // facts considered per reply: same life area first, then newest
 	ReplyPrompt      Prompt // how System 2 writes a reply
 	Working          WorkingMemory
-	Log              *slog.Logger
+	// Ticks is the clock, about once a minute; nil: the agent never speaks first.
+	Ticks <-chan time.Time
+	// Zone is the agent's time zone: reminders and check-in times are in it. nil: UTC.
+	Zone     *time.Location
+	CheckIns CheckIns
+	Log      *slog.Logger
 }
 
-type Mind struct{ Config }
+type Mind struct {
+	Config
+	lastTick time.Time // when the clock last ticked; zero before the first tick
+}
 
-func New(c Config) *Mind { return &Mind{c} }
+func New(c Config) *Mind {
+	if c.Zone == nil {
+		c.Zone = time.UTC
+	}
+	return &Mind{Config: c}
+}
 
 func (m *Mind) Run(ctx context.Context) error {
 	m.bornKnowing(ctx)
@@ -113,6 +137,8 @@ func (m *Mind) Run(ctx context.Context) error {
 				return nil
 			}
 			m.handle(ctx, p)
+		case now := <-m.Ticks:
+			m.tick(ctx, now)
 		}
 	}
 }
@@ -467,7 +493,7 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.instructions(ctx, person, n),
 		History:      turns(recent),
-		Note:         m.system2Note(parent, why, facts, n),
+		Note:         m.now(p.At) + "\n\n" + m.system2Note(parent, why, facts, n),
 		Message:      p.Text,
 		CollectFacts: true,
 	})
@@ -499,7 +525,32 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	}
 	// It may also have learned who the speaker is to it ("I'm your cousin").
 	d.CostUSD += m.learnRelation(ctx, p, person, resp.WhoTheyAre)
+	m.saveReminders(ctx, p, resp.Reminders)
 	return resp.Text
+}
+
+// saveReminders keeps the reminders System 2 agreed to set, in the agent's
+// time zone. One in the past or with a bad time is dropped.
+func (m *Mind) saveReminders(ctx context.Context, p perception.Percept, rs []system2.Reminder) {
+	for _, r := range rs {
+		due, err := time.ParseInLocation("2006-01-02T15:04", r.When, m.Zone)
+		if err != nil || !due.After(p.At) || p.Speaker == "" {
+			m.Log.Warn("dropped a reminder", "percept", p.ID.String(), "when", r.When, "what", r.What, "err", err)
+			continue
+		}
+		err = m.Store.SaveReminder(ctx, memory.Reminder{ID: ulid.Make(), Person: p.Speaker, PerceptID: p.ID,
+			Text: r.What, DueAt: due.UTC(), Status: memory.ReminderPending, CreatedAt: time.Now().UTC()})
+		if err != nil {
+			m.Log.Error("save reminder", "percept", p.ID.String(), "err", err)
+			continue
+		}
+		m.Log.Info("reminder set", "person", p.Speaker, "due", due.Format(time.RFC3339), "what", r.What)
+	}
+}
+
+// now tells System 2 the time, in the agent's time zone.
+func (m *Mind) now(t time.Time) string {
+	return fmt.Sprintf("It is now %s (%s time).", t.In(m.Zone).Format("Monday 2 January 2006, 15:04"), m.Zone)
 }
 
 // instructions renders the reply prompt for this conversation: who the agent
@@ -519,7 +570,9 @@ func (m *Mind) instructions(ctx context.Context, person memory.Person, n names) 
 func turns(recent []memory.Exchange) []system2.Turn {
 	var ts []system2.Turn
 	for _, e := range recent {
-		ts = append(ts, system2.Turn{Role: system2.RolePerson, Text: e.Message})
+		if e.Message != "" { // "" when the agent spoke first
+			ts = append(ts, system2.Turn{Role: system2.RolePerson, Text: e.Message})
+		}
 		if e.Reply != "" {
 			ts = append(ts, system2.Turn{Role: system2.RoleAgent, Text: e.Reply})
 		}

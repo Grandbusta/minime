@@ -13,10 +13,11 @@ type Request struct {
 	Instructions    string // who the agent is and how to answer
 	History         []Turn // the conversation so far, oldest first
 	Note            string // context about this turn from the rest of the mind
-	Message         string // the person's message to reply to
+	Message         string // the person's message to reply to; "" when the agent speaks first
 	MaxOutputTokens int    // 0: the provider's default
 	// CollectFacts asks for the lasting facts to remember, each about the
-	// agent itself or the person speaking, alongside the reply (Response.Remember).
+	// agent itself or the person speaking, alongside the reply
+	// (Response.Remember), plus any reminders it agreed to set (Response.Reminders).
 	CollectFacts bool
 	// Format, when set, asks for JSON that matches it instead of plain text;
 	// Response.Text is then that JSON. Not used together with CollectFacts.
@@ -42,6 +43,12 @@ type Memory struct {
 	Text  string // standalone, e.g. "Sam goes to Grace Chapel"
 }
 
+// Reminder is a reminder System 2 agreed to set.
+type Reminder struct {
+	When string // local time, "2006-01-02T15:04"
+	What string // e.g. "call mum"
+}
+
 type Role string
 
 const (
@@ -61,8 +68,10 @@ type Response struct {
 	// WhoTheyAre, with CollectFacts: who the speaker said they are to the
 	// agent, as one sentence with names ("Ada is Daniel's cousin."); "" if not told.
 	WhoTheyAre string
-	Usage      Usage
-	CostUSD    float64 // 0 when no price is configured
+	// Reminders, with CollectFacts: what the speaker asked to be reminded of.
+	Reminders []Reminder
+	Usage     Usage
+	CostUSD   float64 // 0 when no price is configured
 }
 
 type Usage struct {

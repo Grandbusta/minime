@@ -58,10 +58,17 @@ type wireFormat struct {
 var replyWithFacts = &wireText{Format: wireFormat{
 	Type: "json_schema", Name: "reply_with_facts", Strict: true,
 	Schema: map[string]any{
-		"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are"},
+		"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders"},
 		"properties": map[string]any{
 			"reply":        map[string]any{"type": "string"},
 			"who_they_are": map[string]any{"type": "string"},
+			"reminders": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object", "additionalProperties": false, "required": []string{"when", "what"},
+				"properties": map[string]any{
+					"when": map[string]any{"type": "string", "description": "local time, YYYY-MM-DDTHH:MM"},
+					"what": map[string]any{"type": "string"},
+				},
+			}},
 			"remember": map[string]any{"type": "array", "items": map[string]any{
 				"type": "object", "additionalProperties": false, "required": []string{"about", "fact"},
 				"properties": map[string]any{
@@ -79,7 +86,7 @@ type wireMessage struct {
 }
 
 // wireInput lays the conversation out as chat turns, then the note (as
-// developer context), then the message to answer.
+// developer context), then the message to answer, if any.
 func wireInput(req system2.Request) []wireMessage {
 	var in []wireMessage
 	for _, t := range req.History {
@@ -91,6 +98,9 @@ func wireInput(req system2.Request) []wireMessage {
 	}
 	if req.Note != "" {
 		in = append(in, wireMessage{Role: "developer", Content: req.Note})
+	}
+	if req.Message == "" { // the agent speaks first: the note says why
+		return in
 	}
 	return append(in, wireMessage{Role: "user", Content: req.Message})
 }
@@ -170,6 +180,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 	var (
 		remember   []system2.Memory
 		whoTheyAre string
+		reminders  []system2.Reminder
 	)
 	switch {
 	case refusal.Len() > 0:
@@ -182,6 +193,10 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 				About string `json:"about"`
 				Fact  string `json:"fact"`
 			} `json:"remember"`
+			Reminders []struct {
+				When string `json:"when"`
+				What string `json:"what"`
+			} `json:"reminders"`
 		}
 		if err := json.Unmarshal([]byte(reply), &out); err != nil {
 			return system2.Response{}, fmt.Errorf("openai responses: reply is not the requested JSON: %w", err)
@@ -192,6 +207,11 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 			about := system2.About(f.About)
 			if text := strings.TrimSpace(f.Fact); text != "" && (about == system2.AboutSelf || about == system2.AboutSpeaker) {
 				remember = append(remember, system2.Memory{About: about, Text: text})
+			}
+		}
+		for _, r := range out.Reminders {
+			if when, what := strings.TrimSpace(r.When), strings.TrimSpace(r.What); when != "" && what != "" {
+				reminders = append(reminders, system2.Reminder{When: when, What: what})
 			}
 		}
 	}
@@ -209,6 +229,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		Text:       reply,
 		Remember:   remember,
 		WhoTheyAre: whoTheyAre,
+		Reminders:  reminders,
 		Usage:      system2.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, ReasoningTokens: u.OutputTokensDetails.ReasoningTokens},
 		CostUSD: c.price.Cost(pricing.Usage{
 			InputTokens: u.InputTokens, CachedTokens: u.InputTokensDetails.CachedTokens,

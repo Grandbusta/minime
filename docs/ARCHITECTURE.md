@@ -233,13 +233,22 @@ This already exercises the whole spine: a sensor, both decision systems, the rou
 and long-term memory, people, an actuator, the decision log, and staying up 24/7. Every later
 feature plugs into the same spine.
 
+It also **speaks first** (`internal/mind/initiative.go`). A clock ticks into the same loop
+as messages, once a minute. It sends the reminders people asked for when they're due; System 2
+sets them alongside its reply, in the agent's time zone. At set times of day it considers
+checking in on each person it talks with: System 1 picks, from what they said in the last 30
+days and it hasn't asked about yet, what is still going on (`open_threads`), and System 2 writes
+the message. That happens at most once a day per person, only in a quiet conversation, never
+with strangers. What it says first is stored as a percept in the conversation, so a reply to
+it reads as an answer.
+
 It also keeps **a public profile page**, like a person's own website (`internal/portfolio`).
 It serves the page itself, read-only. System 1 decides which of its own facts are fine to share
 (`public_profile`); facts about people are never considered. System 2 writes the page in its
 own voice from the life story and those facts. It updates once a day (00:00 UTC by default),
 rewriting the page only when those facts have changed.
 
-**Out of scope for v1:** acting on its own (messaging first, reminders), drives,
+**Out of scope for v1:** acting on its own beyond reminders and check-ins, drives,
 sleep/consolidation, tools, dashboards, more channels, other people talking to it (so the
 profile page has no contact link yet), and work to show on the page.
 
@@ -496,7 +505,7 @@ autonomy:
 | Working     | ✅ The recent conversation: the last `working_memory.turns` exchanges (the person's message + the agent's reply) in the same thread, within `working_memory.window` (30 min; 2 h pulled finished topics into new ones). Given to System 2 as chat turns | Recalled facts |
 | Episodic    | Percepts & decisions (Postgres)      | Summaries |
 | Semantic    | ✅ Facts (`facts` table), each with a **subject**: `self` (the agent) or a person's key (e.g. `telegram:123`). Saved two ways: verbatim, as a fact about the speaker, when System 1 confidently reads *remember*; and by System 2, which returns facts tagged *self* or *speaker* alongside its reply (Structured Outputs). These are lasting facts it heard about the speaker ("It is 2027" after a passport question → "Sam's passport expires in 2027") and facts it **decided about itself** ("Tobi's favourite colour is forest green"). Recall only considers the agent's own facts and the current speaker's. Every fact is **filed by life area** when saved (see below). Before each System 2 reply, System 1 checks the newest `memory.recall_candidates` facts with one yes/no question each ([fact_relevance](../decisions/fact_relevance.yaml)) and passes the relevant ones on. The check is recorded as its own decision between the read and the reply | A cheap pre-filter (pgvector embeddings or full-text) once there are too many facts to check them all; updating and forgetting facts |
-| Prospective | Reminders (Postgres + scheduler)     | Event-triggered intentions |
+| Prospective | ✅ Reminders (`reminders` table): set by System 2 when asked, sent by the clock when due, in the agent's own words. Check-ins on what people told it, each fact asked about once (`facts.asked_at`) | Listing and cancelling reminders; repeating ones; event-triggered intentions |
 
 ### 4.6 Safety & control
 - Kill switch and pause (API + SIGTERM-safe shutdown).
@@ -598,7 +607,7 @@ mini-me/
 │   │   │   └── openai/       # OpenAI Decisions API (later: typesafe/, clef/)
 │   │   └── system2/          # Reasoner interface
 │   │       └── openai/       # OpenAI Responses API
-│   ├── action/               # (step 6) Actuator/Tool interface, autonomy gate
+│   ├── action/               # (step 7) Actuator/Tool interface, autonomy gate
 │   ├── memory/               # (steps 3, 5) episodic, semantic, prospective
 │   ├── portfolio/            # its public profile page: writer + web server
 │   ├── store/                # Postgres + embedded migrations/
@@ -636,12 +645,24 @@ mini-me/
 4. **Public profile** ✅ A page it writes about itself from what it chose to share.
    - Later: work to show (beats, books, notes), once it does things on its own; a contact
      link, once strangers can talk to it.
-5. **Reminders:** clock sensor, prospective memory; it messages you first.
-6. **Autonomy gate:**
+5. **Initiative** ✅ A clock in the mind's loop; it messages you first.
+   - ✅ Reminders: asked for in chat, sent when due, in its own words.
+   - ✅ Check-ins: at set times, about something still going on in your life, at most daily.
+   - Later: listing and cancelling reminders, repeating ones.
+6. **A daily life:** it does things of its own each day (reads, works on a beat, learns
+   something), remembers them, and has work to show on its profile.
+   - **Its own commitments**, built here because this is where it first has things to do:
+     `reminders` becomes `intentions`, for `self` or a person, kind `remind` or `task`, with
+     status pending, doing, done, missed or cancelled. System 2 returns commitments it makes
+     ("I'll have it ready by Friday"), split into steps when useful ("start Thursday"). A due
+     intention of its own enters the mind as a percept; System 1 decides whether to do it now,
+     postpone, ask or drop it; finished work becomes a fact about itself (the profile's Work).
+   - The same machinery later takes jobs and tasks from other sources (chat, email, a job board).
+7. **Autonomy gate:**
    - Action classes and config policy.
    - "Ask the owner" flow with inline approve/deny.
-7. **Corrections & replay:** label decisions from chat, replay on change, tune thresholds.
-8. **Deploy:** Docker Compose on the VPS, metrics.
+8. **Corrections & replay:** label decisions from chat, replay on change, tune thresholds.
+9. **Deploy:** Docker Compose on the VPS, metrics.
 
 After that, grow outward: more sensors → goals → drives → sleep → tools → **voice + emotions**.
 

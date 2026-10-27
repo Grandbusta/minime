@@ -169,8 +169,8 @@ func (s *Store) RecentDecisions(ctx context.Context, n int) ([]decision.Decision
 }
 
 // RecentExchanges returns up to limit messages in a conversation since
-// the given time, oldest first, each with the reply it got. The percept
-// being handled is left out.
+// the given time, oldest first, each with the reply it got, plus what the
+// agent said first (reminders, check-ins). The percept being handled is left out.
 func (s *Store) RecentExchanges(ctx context.Context, source, thread string, since time.Time,
 	exclude ulid.ULID, limit int) ([]memory.Exchange, error) {
 	rows, err := s.pool.Query(ctx, `
@@ -181,9 +181,10 @@ func (s *Store) RecentExchanges(ctx context.Context, source, thread string, sinc
 			WHERE d.percept_id = p.id AND d.reply IS NOT NULL
 			ORDER BY d.at DESC LIMIT 1
 		) r ON true
-		WHERE p.source = $1 AND p.thread = $2 AND p.at >= $3 AND p.id <> $4 AND p.text <> ''
+		WHERE p.source = $1 AND p.thread = $2 AND p.at >= $3 AND p.id <> $4
+		  AND (p.text <> '' OR p.kind IN ($6, $7))
 		ORDER BY p.at DESC, p.id DESC
-		LIMIT $5`, source, thread, since, exclude.String(), limit)
+		LIMIT $5`, source, thread, since, exclude.String(), limit, perception.KindReminder, perception.KindCheckIn)
 	if err != nil {
 		return nil, fmt.Errorf("query recent exchanges: %w", err)
 	}
@@ -317,6 +318,111 @@ func (s *Store) queryFacts(ctx context.Context, sql string, args ...any) ([]memo
 		out = append(out, f)
 	}
 	return out, rows.Err()
+}
+
+// SaveReminder stores a reminder someone asked for.
+func (s *Store) SaveReminder(ctx context.Context, r memory.Reminder) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO reminders (id, person, percept_id, text, due_at, status, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		r.ID.String(), r.Person, r.PerceptID.String(), r.Text, r.DueAt, r.Status, r.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("save reminder: %w", err)
+	}
+	return nil
+}
+
+// DueReminders returns up to limit pending reminders due by now, earliest first.
+func (s *Store) DueReminders(ctx context.Context, now time.Time, limit int) ([]memory.Reminder, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, person, percept_id, text, due_at, status, created_at FROM reminders
+		WHERE status = $1 AND due_at <= $2 ORDER BY due_at, id LIMIT $3`, memory.ReminderPending, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query reminders: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Reminder
+	for rows.Next() {
+		var (
+			r             memory.Reminder
+			id, perceptID string
+		)
+		if err := rows.Scan(&id, &r.Person, &perceptID, &r.Text, &r.DueAt, &r.Status, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		if r.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if r.PerceptID, err = ulid.Parse(perceptID); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) SetReminderStatus(ctx context.Context, id ulid.ULID, status string) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE reminders SET status = $2 WHERE id = $1`, id.String(), status); err != nil {
+		return fmt.Errorf("set reminder status: %w", err)
+	}
+	return nil
+}
+
+// Conversations returns, for each person who has messaged the agent, the
+// thread of their latest message and when anything was last said in it.
+func (s *Store) Conversations(ctx context.Context) ([]memory.Conversation, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT ON (p.speaker) p.speaker, p.source, p.thread, p.payload,
+		       (SELECT max(q.at) FROM percepts q WHERE q.source = p.source AND q.thread = p.thread)
+		FROM percepts p
+		WHERE p.kind = 'message' AND p.speaker <> '' AND p.thread <> ''
+		ORDER BY p.speaker, p.at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("query conversations: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Conversation
+	for rows.Next() {
+		var c memory.Conversation
+		if err := rows.Scan(&c.Person, &c.Source, &c.Thread, &c.Payload, &c.LastActivity); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// LastSpokeFirst returns when the agent last spoke first to person with a
+// percept of kind (a reminder or a check-in), and whether it ever did.
+func (s *Store) LastSpokeFirst(ctx context.Context, person, kind string) (time.Time, bool, error) {
+	var at *time.Time
+	err := s.pool.QueryRow(ctx, `SELECT max(at) FROM percepts WHERE speaker = $1 AND kind = $2`, person, kind).Scan(&at)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("query last %s: %w", kind, err)
+	}
+	if at == nil {
+		return time.Time{}, false, nil
+	}
+	return *at, true, nil
+}
+
+// UnaskedFacts returns up to limit facts about person since the given time
+// that the agent has not checked in about yet, newest first.
+func (s *Store) UnaskedFacts(ctx context.Context, person string, since time.Time, limit int) ([]memory.Fact, error) {
+	return s.queryFacts(ctx, `SELECT `+factColumns+` FROM facts
+		WHERE subject = $1 AND at >= $2 AND asked_at IS NULL ORDER BY at DESC, id DESC LIMIT $3`, person, since, limit)
+}
+
+// MarkFactsAsked records that the agent checked in about these facts.
+func (s *Store) MarkFactsAsked(ctx context.Context, ids []ulid.ULID, at time.Time) error {
+	keys := make([]string, len(ids))
+	for i, id := range ids {
+		keys[i] = id.String()
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE facts SET asked_at = $2 WHERE id = ANY($1)`, keys, at); err != nil {
+		return fmt.Errorf("mark facts asked: %w", err)
+	}
+	return nil
 }
 
 const personColumns = `key, name, relation, circle, source, first_seen, updated_at`

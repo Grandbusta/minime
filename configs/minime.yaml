@@ -45,6 +45,15 @@ working_memory:
 memory:
   recall_candidates: 30
 
+# Initiative: the agent speaks first. A clock ticks once a minute; it sends
+# the reminders people asked for when they're due, and at the check-in times
+# it considers checking in on the people it talks with, about something going
+# on in their lives that it hasn't asked about yet (open_threads question set).
+initiative:
+  timezone: Africa/Lagos # the agent's own: reminders and check-in times are in it
+  check_ins: ["11:00", "18:00"] # at most one check-in a day per person; [] turns them off
+  quiet: 4h # only after the conversation has been quiet this long
+
 # The agent's public profile page, like a person's own website: it writes it
 # itself from its life story and the facts about itself it decides are fine to
 # share (public_profile question set). Read-only: no way to contact it yet.

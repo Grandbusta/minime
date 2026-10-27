@@ -20,6 +20,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	_ "time/tzdata" // time zones work without the system's database, e.g. in a slim container
+
 	"golang.org/x/sync/errgroup"
 
 	"minime/internal/bus"
@@ -173,6 +175,16 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		}
 	}
 
+	zone, err := cfg.Initiative.Zone()
+	if err != nil {
+		return err
+	}
+	checkIns, err := cfg.Initiative.CheckInTimes()
+	if err != nil {
+		return err
+	}
+	ticks := make(chan time.Time)
+
 	tg := telegram.NewClient(cfg.Telegram.Token)
 	percepts := bus.New[perception.Percept](64)
 
@@ -183,7 +195,8 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		PersonCircle:  personCircle,
 		FactRelevance: factRelevance, OpenThreads: openThreads, RecallCandidates: cfg.Memory.RecallCandidates,
 		Working: mind.WorkingMemory{Turns: cfg.WorkingMemory.Turns, Window: cfg.WorkingMemory.Window},
-		Log:     log.With("component", "mind"),
+		Ticks:   ticks, Zone: zone, CheckIns: mind.CheckIns{Times: checkIns, Quiet: cfg.Initiative.Quiet},
+		Log: log.With("component", "mind"),
 	})
 	sensor := telegram.NewSensor(tg, cfg.Telegram.OwnerIDs, cfg.Telegram.PollTimeoutSeconds, percepts,
 		log.With("component", "telegram"))
@@ -191,11 +204,12 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	log.Info("mini-me awake", "name", life.Name, "life_story_lines", len(life.Story), "owners", len(cfg.Telegram.OwnerIDs),
 		"system1", cfg.Decision.Provider.Provider, "question_set", incoming.Ref(), "follow_up", followUp.Ref(),
 		"life_area", lifeArea.Ref(), "person_circle", personCircle.Ref(), "fact_relevance", factRelevance.Ref(),
-		"open_threads", openThreads.Ref(),
+		"open_threads", openThreads.Ref(), "timezone", zone.String(), "check_ins", cfg.Initiative.CheckIns,
 		"system2", cfg.Reasoning.Provider.Provider+"/"+cfg.Reasoning.Model, "effort", cfg.Reasoning.Effort, "prompt", replyPrompt.Ref)
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return sensor.Run(ctx) })
 	g.Go(func() error { return m.Run(ctx) })
+	g.Go(func() error { return runClock(ctx, ticks) })
 	if profile != nil {
 		g.Go(func() error { return profile.Run(ctx) })
 		g.Go(func() error {
@@ -205,6 +219,24 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	err = g.Wait()
 	log.Info("mini-me asleep")
 	return err
+}
+
+// runClock ticks once a minute, on the minute, so the mind can speak first.
+func runClock(ctx context.Context, ticks chan<- time.Time) error {
+	for {
+		now := time.Now()
+		next := now.Truncate(time.Minute).Add(time.Minute)
+		select {
+		case <-ctx.Done():
+			return nil
+		case t := <-time.After(next.Sub(now)):
+			select {
+			case ticks <- t:
+			case <-ctx.Done():
+				return nil
+			}
+		}
+	}
 }
 
 // updateProfile updates the profile page once, now, the way the daily update

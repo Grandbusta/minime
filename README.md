@@ -121,6 +121,20 @@ Edit [decisions/incoming_message.yaml](decisions/incoming_message.yaml): its que
 choices and thresholds. Bump `version`, then restart. Every decision records which version
 decided, so you can compare versions in the decision log.
 
+### Reminders and check-ins
+
+The agent can message you first. Ask it to remind you of something ("remind me tomorrow
+at 9 to call the bank") and it will message you at that time, in its own words. Times are
+in its time zone, `initiative.timezone` in [configs/minime.yaml](configs/minime.yaml)
+(Africa/Lagos). If you don't say when, it asks.
+
+At the `check_ins` times (11:00 and 18:00), it may also check in on you about something
+you told it in the last 30 days that is still going on, like an interview or a trip.
+System 1 picks what's worth asking about. It checks in at most once a day, only after the
+conversation has been quiet for `quiet` (4h), and never asks about the same thing twice.
+Set `check_ins: []` to turn this off. Reminders and check-ins show up in the decision log
+as `remind` and `check_in`.
+
 ### Its profile page
 
 While it runs, the agent serves its own public profile page at

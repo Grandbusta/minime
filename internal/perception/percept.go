@@ -27,3 +27,11 @@ type Percept struct {
 type Sensor interface {
 	Run(ctx context.Context) error
 }
+
+// Kinds of percept the agent makes itself when it speaks first: what it said
+// is on the decision, and the percept places it in the conversation, so a
+// reply to it reads as an answer.
+const (
+	KindReminder = "reminder" // reminding someone of what they asked
+	KindCheckIn  = "check_in" // asking how something in their life is going
+)

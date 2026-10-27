@@ -331,3 +331,94 @@ func TestPublicFactsAndProfile(t *testing.T) {
 		t.Errorf("profile = %s, %q, %v, %v, %v", page, inputs, at, ok, err)
 	}
 }
+
+func TestRemindersConversationsAndCheckIns(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Add(3 * time.Hour).Truncate(time.Microsecond)
+	person := "test:" + ulid.Make().String()
+
+	msg := perception.Percept{ID: ulid.Make(), Source: "test", ExternalID: ulid.Make().String(), Thread: "chat-" + person,
+		Speaker: person, Kind: "message", Text: "remind me", Payload: []byte(`{"chat_id":7}`), At: base}
+	if _, err := s.SavePercept(ctx, msg); err != nil {
+		t.Fatal(err)
+	}
+	due := memory.Reminder{ID: ulid.Make(), Person: person, PerceptID: msg.ID, Text: "call mum",
+		DueAt: base.Add(time.Hour), Status: memory.ReminderPending, CreatedAt: base}
+	if err := s.SaveReminder(ctx, due); err != nil {
+		t.Fatal(err)
+	}
+	ours := func(rs []memory.Reminder) (out []memory.Reminder) {
+		for _, r := range rs {
+			if r.Person == person {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+	if rs, err := s.DueReminders(ctx, base, 100); err != nil || len(ours(rs)) != 0 {
+		t.Fatalf("due before its time: %+v, %v", rs, err)
+	}
+	rs, err := s.DueReminders(ctx, base.Add(time.Hour), 100)
+	if got := ours(rs); err != nil || len(got) != 1 || got[0].Text != "call mum" || !got[0].DueAt.Equal(due.DueAt) {
+		t.Fatalf("due = %+v, %v", got, err)
+	}
+	if err := s.SetReminderStatus(ctx, due.ID, memory.ReminderSent); err != nil {
+		t.Fatal(err)
+	}
+	if rs, _ := s.DueReminders(ctx, base.Add(time.Hour), 100); len(ours(rs)) != 0 {
+		t.Error("a sent reminder is still due")
+	}
+
+	// The agent speaks first in the same thread.
+	checkIn := perception.Percept{ID: ulid.Make(), Source: "test", ExternalID: "check_in:" + ulid.Make().String(),
+		Thread: msg.Thread, Speaker: person, Kind: perception.KindCheckIn, At: base.Add(2 * time.Hour)}
+	if _, err := s.SavePercept(ctx, checkIn); err != nil {
+		t.Fatal(err)
+	}
+	d := decision.Decision{ID: ulid.Make(), At: checkIn.At, PerceptID: checkIn.ID, SetID: "reply@x", Tier: decision.TierSystem2,
+		Action: "check_in", Reply: "How did the interview go?", Gate: decision.GateAuto}
+	if err := s.SaveDecision(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+
+	convs, err := s.Conversations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var conv *memory.Conversation
+	for i := range convs {
+		if convs[i].Person == person {
+			conv = &convs[i]
+		}
+	}
+	if conv == nil || conv.Thread != msg.Thread || !conv.LastActivity.Equal(checkIn.At) || !strings.Contains(string(conv.Payload), `"chat_id"`) {
+		t.Fatalf("conversation = %+v", conv)
+	}
+	last, ok, err := s.LastSpokeFirst(ctx, person, perception.KindCheckIn)
+	if err != nil || !ok || !last.Equal(checkIn.At) {
+		t.Errorf("last check-in = %v, %v, %v", last, ok, err)
+	}
+	if _, ok, _ := s.LastSpokeFirst(ctx, person, perception.KindReminder); ok {
+		t.Error("found a reminder that was never sent")
+	}
+
+	exchanges, err := s.RecentExchanges(ctx, "test", msg.Thread, base.Add(-time.Minute), ulid.Make(), 10)
+	if err != nil || len(exchanges) != 2 || exchanges[1].Message != "" || exchanges[1].Reply != "How did the interview go?" {
+		t.Errorf("exchanges = %+v, %v; want the message and then the check-in", exchanges, err)
+	}
+
+	fact := memory.Fact{ID: ulid.Make(), PerceptID: msg.ID, Subject: person, Text: "I have an interview", At: base}
+	if err := s.SaveFact(ctx, fact); err != nil {
+		t.Fatal(err)
+	}
+	if fs, err := s.UnaskedFacts(ctx, person, base.Add(-time.Hour), 10); err != nil || len(fs) != 1 {
+		t.Fatalf("unasked = %+v, %v", fs, err)
+	}
+	if err := s.MarkFactsAsked(ctx, []ulid.ULID{fact.ID}, base); err != nil {
+		t.Fatal(err)
+	}
+	if fs, _ := s.UnaskedFacts(ctx, person, base.Add(-time.Hour), 10); len(fs) != 0 {
+		t.Errorf("still unasked: %+v", fs)
+	}
+}

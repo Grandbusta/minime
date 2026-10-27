@@ -33,6 +33,65 @@ type fakeStore struct {
 	recallAreas    [][]string // areas each RecallCandidates call was given
 	recallSubjects [][]string // and subjects
 	people         map[string]memory.Person
+	reminders      []memory.Reminder
+	convs          []memory.Conversation
+	percepts       []perception.Percept // saved, in order
+	asked          map[ulid.ULID]time.Time
+}
+
+func (s *fakeStore) SaveReminder(_ context.Context, r memory.Reminder) error {
+	s.reminders = append(s.reminders, r)
+	return nil
+}
+
+func (s *fakeStore) DueReminders(_ context.Context, now time.Time, limit int) ([]memory.Reminder, error) {
+	var out []memory.Reminder
+	for _, r := range s.reminders {
+		if r.Status == memory.ReminderPending && !r.DueAt.After(now) && len(out) < limit {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) SetReminderStatus(_ context.Context, id ulid.ULID, status string) error {
+	for i := range s.reminders {
+		if s.reminders[i].ID == id {
+			s.reminders[i].Status = status
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) Conversations(context.Context) ([]memory.Conversation, error) {
+	return s.convs, nil
+}
+
+func (s *fakeStore) LastSpokeFirst(_ context.Context, person, kind string) (time.Time, bool, error) {
+	var last time.Time
+	for _, p := range s.percepts {
+		if p.Speaker == person && p.Kind == kind && p.At.After(last) {
+			last = p.At
+		}
+	}
+	return last, !last.IsZero(), nil
+}
+
+func (s *fakeStore) UnaskedFacts(_ context.Context, person string, since time.Time, limit int) ([]memory.Fact, error) {
+	var out []memory.Fact
+	for _, f := range s.facts {
+		if _, asked := s.asked[f.ID]; !asked && f.Subject == person && !f.At.Before(since) && len(out) < limit {
+			out = append(out, f)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) MarkFactsAsked(_ context.Context, ids []ulid.ULID, at time.Time) error {
+	for _, id := range ids {
+		s.asked[id] = at
+	}
+	return nil
 }
 
 func (s *fakeStore) SaveFact(_ context.Context, f memory.Fact) error {
@@ -130,6 +189,7 @@ func (s *fakeStore) SavePercept(_ context.Context, p perception.Percept) (bool, 
 		return false, nil
 	}
 	s.seen[p.ExternalID] = true
+	s.percepts = append(s.percepts, p)
 	return true, nil
 }
 
@@ -247,6 +307,7 @@ type fakeSystem2 struct {
 	err        error
 	remember   []system2.Memory
 	whoTheyAre string
+	reminders  []system2.Reminder
 	requests   []system2.Request
 }
 
@@ -255,7 +316,7 @@ func (f *fakeSystem2) Reason(_ context.Context, req system2.Request) (system2.Re
 	if f.err != nil {
 		return system2.Response{}, f.err
 	}
-	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, CostUSD: 0.001}, nil
+	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, CostUSD: 0.001}, nil
 }
 
 var testSet = questions.Set{
@@ -305,7 +366,7 @@ var testFollowUp = questions.Set{
 var testLife = self.Life{Name: "Tobi", Story: []string{"Tobi is 29 years old.", "Tobi is a Catholic."}}
 
 func newMind(r Replier, s1 system1.DecisionModel, s2 system2.Reasoner) (*Mind, *fakeStore) {
-	s := &fakeStore{seen: map[string]bool{}, people: map[string]memory.Person{}}
+	s := &fakeStore{seen: map[string]bool{}, people: map[string]memory.Person{}, asked: map[ulid.ULID]time.Time{}}
 	return New(Config{
 		Life:  testLife,
 		Store: s, Replier: r, System1: s1, System2: s2, Incoming: testSet, FollowUp: testFollowUp, LifeArea: testLifeArea,

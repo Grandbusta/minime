@@ -85,7 +85,7 @@ func TestCollectFactsUsesStructuredOutput(t *testing.T) {
 			t.Errorf("text format = %+v", body.Text)
 		}
 		io.WriteString(w, `{"model":"m","status":"completed","output":[{"type":"message","content":[{"type":"output_text",
-			"text":"{\"reply\":\"Forest green, I think.\",\"who_they_are\":\" Sam is Tobi's cousin. \",\"remember\":[{\"about\":\"self\",\"fact\":\"Tobi's favourite colour is forest green\"},{\"about\":\"speaker\",\"fact\":\"Sam goes to Grace Chapel\"},{\"about\":\"speaker\",\"fact\":\"  \"},{\"about\":\"nobody\",\"fact\":\"x\"}]}"}]}]}`)
+			"text":"{\"reply\":\"Forest green, I think.\",\"who_they_are\":\" Sam is Tobi's cousin. \",\"remember\":[{\"about\":\"self\",\"fact\":\"Tobi's favourite colour is forest green\"},{\"about\":\"speaker\",\"fact\":\"Sam goes to Grace Chapel\"},{\"about\":\"speaker\",\"fact\":\"  \"},{\"about\":\"nobody\",\"fact\":\"x\"}],\"reminders\":[{\"when\":\"2026-10-30T09:00\",\"what\":\"call mum\"},{\"when\":\" \",\"what\":\"x\"}]}"}]}]}`)
 	})
 	resp, err := c.Reason(context.Background(), system2.Request{Message: "What's your favourite colour?", CollectFacts: true})
 	if err != nil {
@@ -95,7 +95,8 @@ func TestCollectFactsUsesStructuredOutput(t *testing.T) {
 		{About: system2.AboutSelf, Text: "Tobi's favourite colour is forest green"},
 		{About: system2.AboutSpeaker, Text: "Sam goes to Grace Chapel"},
 	}
-	if resp.Text != "Forest green, I think." || !slices.Equal(resp.Remember, want) || resp.WhoTheyAre != "Sam is Tobi's cousin." {
+	if resp.Text != "Forest green, I think." || !slices.Equal(resp.Remember, want) || resp.WhoTheyAre != "Sam is Tobi's cousin." ||
+		!slices.Equal(resp.Reminders, []system2.Reminder{{When: "2026-10-30T09:00", What: "call mum"}}) {
 		t.Errorf("resp = %+v", resp)
 	}
 }
@@ -115,6 +116,22 @@ func TestFormatAsksForThatSchema(t *testing.T) {
 		Format: &system2.Format{Name: "page", Schema: map[string]any{"type": "object"}}})
 	if err != nil || resp.Text != `{"about":"hi"}` {
 		t.Fatalf("resp = %+v, err = %v", resp, err)
+	}
+}
+
+func TestSpeakingFirstSendsNoUserMessage(t *testing.T) {
+	c := newTestClient(t, pricing.Price{}, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Input []wireMessage `json:"input"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if want := []wireMessage{{"developer", "remind Sam to call mum"}}; !slices.Equal(body.Input, want) {
+			t.Errorf("input = %+v, want %+v", body.Input, want)
+		}
+		io.WriteString(w, `{"model":"m","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Hey Sam!"}]}]}`)
+	})
+	if _, err := c.Reason(context.Background(), system2.Request{Note: "remind Sam to call mum"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

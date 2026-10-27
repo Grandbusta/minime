@@ -21,6 +21,7 @@ type Config struct {
 	WorkingMemory WorkingMemory `yaml:"working_memory"`
 	Memory        Memory        `yaml:"memory"`
 	Portfolio     Portfolio     `yaml:"portfolio"`
+	Initiative    Initiative    `yaml:"initiative"`
 	// Pricing per model, used to record what each decision cost.
 	Pricing map[string]pricing.Price `yaml:"pricing"`
 	Log     Log                      `yaml:"log"`
@@ -43,9 +44,51 @@ type Portfolio struct {
 
 // UpdateTime is UpdateAt as a time of day: the time since midnight UTC.
 func (p Portfolio) UpdateTime() (time.Duration, error) {
-	t, err := time.Parse("15:04", p.UpdateAt)
+	at, err := timeOfDay(p.UpdateAt)
 	if err != nil {
 		return 0, fmt.Errorf("config: portfolio.update_at must be HH:MM in UTC, e.g. \"00:00\", have %q", p.UpdateAt)
+	}
+	return at, nil
+}
+
+// Initiative is the agent speaking first: reminders, and checking in on people.
+type Initiative struct {
+	// Timezone is the agent's own, an IANA name like Africa/Lagos: reminders
+	// and check-in times are in it.
+	Timezone string `yaml:"timezone"`
+	// CheckIns are the times of day ("HH:MM") it considers checking in on
+	// people, at most once a day each. Empty: never unprompted.
+	CheckIns []string `yaml:"check_ins"`
+	// Quiet is how long a conversation must have been quiet before a check-in.
+	Quiet time.Duration `yaml:"quiet"`
+}
+
+func (i Initiative) Zone() (*time.Location, error) {
+	loc, err := time.LoadLocation(i.Timezone)
+	if err != nil || i.Timezone == "" {
+		return nil, fmt.Errorf("config: initiative.timezone must be a time zone like Africa/Lagos, have %q", i.Timezone)
+	}
+	return loc, nil
+}
+
+// CheckInTimes are CheckIns as times of day: the time since midnight.
+func (i Initiative) CheckInTimes() ([]time.Duration, error) {
+	out := make([]time.Duration, len(i.CheckIns))
+	for n, s := range i.CheckIns {
+		at, err := timeOfDay(s)
+		if err != nil {
+			return nil, fmt.Errorf("config: initiative.check_ins must be HH:MM times, have %q", s)
+		}
+		out[n] = at
+	}
+	return out, nil
+}
+
+// timeOfDay parses "HH:MM" into the time since midnight.
+func timeOfDay(s string) (time.Duration, error) {
+	t, err := time.Parse("15:04", s)
+	if err != nil {
+		return 0, err
 	}
 	return time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute, nil
 }
@@ -109,6 +152,7 @@ func Load(path string) (*Config, error) {
 		WorkingMemory: WorkingMemory{Turns: 8, Window: 30 * time.Minute},
 		Memory:        Memory{RecallCandidates: 30},
 		Portfolio:     Portfolio{Prompt: "prompts/profile.md", UpdateAt: "00:00"},
+		Initiative:    Initiative{Timezone: "UTC", Quiet: 4 * time.Hour},
 		Log:           Log{Level: "info"},
 	}
 	if err := yaml.Unmarshal([]byte(os.ExpandEnv(string(raw))), cfg); err != nil {
@@ -142,6 +186,12 @@ func (c *Config) ValidateAgent() error {
 		if _, err := c.Portfolio.UpdateTime(); err != nil {
 			return err
 		}
+	}
+	if _, err := c.Initiative.Zone(); err != nil {
+		return err
+	}
+	if _, err := c.Initiative.CheckInTimes(); err != nil {
+		return err
 	}
 	return nil
 }
