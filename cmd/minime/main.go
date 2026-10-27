@@ -2,6 +2,7 @@
 //
 //	minime [run] [-config path]          run the agent
 //	minime decisions [-n 20] [-config path]  show the latest decisions
+//	minime profile [-force] [-config path]   update the profile page now
 package main
 
 import (
@@ -28,6 +29,7 @@ import (
 	"minime/internal/decision/questions"
 	"minime/internal/mind"
 	"minime/internal/perception"
+	"minime/internal/portfolio"
 	"minime/internal/pricing"
 	"minime/internal/providers/system1"
 	s1openai "minime/internal/providers/system1/openai"
@@ -52,6 +54,7 @@ func run(args []string) error {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	cfgPath := fs.String("config", "configs/minime.yaml", "path to the config file")
 	limit := fs.Int("n", 20, "number of decisions to show")
+	force := fs.Bool("force", false, "profile: rewrite the page even if nothing changed")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -92,8 +95,22 @@ func run(args []string) error {
 		}
 		defer st.Close()
 		return printDecisions(ctx, st, *limit)
+	case "profile":
+		if err := cfg.ValidateAgent(); err != nil {
+			return err
+		}
+		life, err := self.Load(cfg.Self.Life)
+		if err != nil {
+			return err
+		}
+		st, err := store.Open(ctx, cfg.Database.URL)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		return updateProfile(ctx, cfg, life, st, *force, log)
 	default:
-		return fmt.Errorf("unknown command %q (want run or decisions)", cmd)
+		return fmt.Errorf("unknown command %q (want run, decisions or profile)", cmd)
 	}
 }
 
@@ -149,6 +166,12 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	if err != nil {
 		return err
 	}
+	var profile *portfolio.Writer
+	if cfg.Portfolio.Addr != "" {
+		if profile, err = newProfileWriter(cfg, life, st, s1, s2, sets, log.With("component", "portfolio")); err != nil {
+			return err
+		}
+	}
 
 	tg := telegram.NewClient(cfg.Telegram.Token)
 	percepts := bus.New[perception.Percept](64)
@@ -173,9 +196,68 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return sensor.Run(ctx) })
 	g.Go(func() error { return m.Run(ctx) })
+	if profile != nil {
+		g.Go(func() error { return profile.Run(ctx) })
+		g.Go(func() error {
+			return portfolio.Serve(ctx, cfg.Portfolio.Addr, portfolio.Handler(life.Name, st, profile.Log), profile.Log)
+		})
+	}
 	err = g.Wait()
 	log.Info("mini-me asleep")
 	return err
+}
+
+// updateProfile updates the profile page once, now, the way the daily update
+// does; with force it rewrites the page even if nothing changed. It works
+// whether or not the agent is running: the page is served from the database.
+func updateProfile(ctx context.Context, cfg *config.Config, life self.Life, st *store.Store, force bool, log *slog.Logger) error {
+	s1, err := newDecisionModel(cfg.Decision.Provider, cfg.Pricing, log)
+	if err != nil {
+		return err
+	}
+	s2, err := newReasoner(cfg.Reasoning, cfg.Pricing, log)
+	if err != nil {
+		return err
+	}
+	sets, err := questions.LoadDir(cfg.Decision.QuestionSets)
+	if err != nil {
+		return err
+	}
+	w, err := newProfileWriter(cfg, life, st, s1, s2, sets, log.With("component", "portfolio"))
+	if err != nil {
+		return err
+	}
+	written, err := w.Update(ctx, force)
+	if err != nil {
+		return err
+	}
+	if written {
+		fmt.Println("Profile page rewritten.")
+	} else {
+		fmt.Println("Nothing new to share; the profile page is unchanged. Use -force to rewrite it anyway.")
+	}
+	return nil
+}
+
+// newProfileWriter builds what keeps the agent's profile page up to date.
+func newProfileWriter(cfg *config.Config, life self.Life, st *store.Store, s1 system1.DecisionModel,
+	s2 system2.Reasoner, sets map[string]questions.Set, log *slog.Logger) (*portfolio.Writer, error) {
+	public, ok := sets["public_profile"]
+	if !ok {
+		log.Warn("question set public_profile not found; no fact goes on the profile page", "dir", cfg.Decision.QuestionSets)
+	} else if err := checkFactTemplate(public); err != nil {
+		return nil, err
+	}
+	prompt, err := loadPrompt(cfg.Portfolio.Prompt)
+	if err != nil {
+		return nil, err
+	}
+	at, err := cfg.Portfolio.UpdateTime()
+	if err != nil {
+		return nil, err
+	}
+	return &portfolio.Writer{Life: life, Store: st, System1: s1, System2: s2, Public: public,
+		Prompt: prompt, UpdateAt: at, Log: log}, nil
 }
 
 // newDecisionModel picks the System 1 provider named in config. Adding a
@@ -215,8 +297,8 @@ func priceFor(model string, prices map[string]pricing.Price, log *slog.Logger) p
 	return p
 }
 
-// checkFactTemplate makes sure fact_relevance is the one-question template
-// the mind expands per fact.
+// checkFactTemplate makes sure a set (fact_relevance, open_threads,
+// public_profile) is a one-question template expanded per fact.
 func checkFactTemplate(s questions.Set) error {
 	if len(s.Questions) != 1 || s.Questions[0].Type != decision.QuestionPredicate ||
 		!strings.Contains(s.Questions[0].Instructions, "{fact}") {

@@ -18,6 +18,15 @@ type Request struct {
 	// CollectFacts asks for the lasting facts to remember, each about the
 	// agent itself or the person speaking, alongside the reply (Response.Remember).
 	CollectFacts bool
+	// Format, when set, asks for JSON that matches it instead of plain text;
+	// Response.Text is then that JSON. Not used together with CollectFacts.
+	Format *Format
+}
+
+// Format is a JSON Schema for a structured answer, e.g. the profile page.
+type Format struct {
+	Name   string
+	Schema map[string]any
 }
 
 // Whose life a remembered fact is about.

@@ -233,8 +233,15 @@ This already exercises the whole spine: a sensor, both decision systems, the rou
 and long-term memory, people, an actuator, the decision log, and staying up 24/7. Every later
 feature plugs into the same spine.
 
+It also keeps **a public profile page**, like a person's own website (`internal/portfolio`).
+It serves the page itself, read-only. System 1 decides which of its own facts are fine to share
+(`public_profile`); facts about people are never considered. System 2 writes the page in its
+own voice from the life story and those facts. It updates once a day (00:00 UTC by default),
+rewriting the page only when those facts have changed.
+
 **Out of scope for v1:** acting on its own (messaging first, reminders), drives,
-sleep/consolidation, tools, dashboards, more channels, other people talking to it.
+sleep/consolidation, tools, dashboards, more channels, other people talking to it (so the
+profile page has no contact link yet), and work to show on the page.
 
 ---
 
@@ -591,8 +598,9 @@ mini-me/
 │   │   │   └── openai/       # OpenAI Decisions API (later: typesafe/, clef/)
 │   │   └── system2/          # Reasoner interface
 │   │       └── openai/       # OpenAI Responses API
-│   ├── action/               # (step 5) Actuator/Tool interface, autonomy gate
-│   ├── memory/               # (steps 3–4) episodic, semantic, prospective
+│   ├── action/               # (step 6) Actuator/Tool interface, autonomy gate
+│   ├── memory/               # (steps 3, 5) episodic, semantic, prospective
+│   ├── portfolio/            # its public profile page: writer + web server
 │   ├── store/                # Postgres + embedded migrations/
 │   └── config/
 ├── decisions/                # question sets + thresholds (versioned)
@@ -625,12 +633,15 @@ mini-me/
      own words.
    - Later: forgetting and correcting facts. For now a changed fact is saved as a new one, and
      both reach System 2 with their dates. Learning a person's real name when they say it.
-4. **Reminders:** clock sensor, prospective memory; it messages you first.
-5. **Autonomy gate:**
+4. **Public profile** ✅ A page it writes about itself from what it chose to share.
+   - Later: work to show (beats, books, notes), once it does things on its own; a contact
+     link, once strangers can talk to it.
+5. **Reminders:** clock sensor, prospective memory; it messages you first.
+6. **Autonomy gate:**
    - Action classes and config policy.
    - "Ask the owner" flow with inline approve/deny.
-6. **Corrections & replay:** label decisions from chat, replay on change, tune thresholds.
-7. **Deploy:** Docker Compose on the VPS, metrics.
+7. **Corrections & replay:** label decisions from chat, replay on change, tune thresholds.
+8. **Deploy:** Docker Compose on the VPS, metrics.
 
 After that, grow outward: more sensors → goals → drives → sleep → tools → **voice + emotions**.
 

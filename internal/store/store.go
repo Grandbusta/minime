@@ -1,15 +1,17 @@
-// Package store persists percepts and decisions in PostgreSQL.
+// Package store persists percepts, decisions and memory in PostgreSQL.
 package store
 
 import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"slices"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/oklog/ulid/v2"
@@ -100,7 +102,7 @@ func (s *Store) SaveDecision(ctx context.Context, d decision.Decision) error {
 		INSERT INTO decisions (id, parent_id, at, percept_id, set_id, tier, provider, answers,
 		                       action, reply, gate, latency_ms, cost_usd, outcome, affect)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-		d.ID.String(), parent, d.At, d.PerceptID.String(), d.SetID, string(d.Tier), d.Provider,
+		d.ID.String(), parent, d.At, nullULID(d.PerceptID), d.SetID, string(d.Tier), d.Provider,
 		answers, d.Action, nullString(d.Reply), string(d.Gate), float64(d.Latency)/float64(time.Millisecond),
 		d.CostUSD, nullJSON(outcome), nullJSON(d.Affect))
 	if err != nil {
@@ -124,8 +126,8 @@ func (s *Store) RecentDecisions(ctx context.Context, n int) ([]decision.Decision
 	for rows.Next() {
 		var (
 			d                        decision.Decision
-			id, perceptID            string
-			parentID                 *string
+			id                       string
+			parentID, perceptID      *string
 			tier, gate               string
 			answers, outcome, affect []byte
 			latencyMS                float64
@@ -137,8 +139,10 @@ func (s *Store) RecentDecisions(ctx context.Context, n int) ([]decision.Decision
 		if d.ID, err = ulid.Parse(id); err != nil {
 			return nil, err
 		}
-		if d.PerceptID, err = ulid.Parse(perceptID); err != nil {
-			return nil, err
+		if perceptID != nil { // nil: a decision of the agent's own, not about a message
+			if d.PerceptID, err = ulid.Parse(*perceptID); err != nil {
+				return nil, err
+			}
 		}
 		if parentID != nil {
 			pid, err := ulid.Parse(*parentID)
@@ -238,6 +242,56 @@ func (s *Store) SetFactAreas(ctx context.Context, id ulid.ULID, areas []string) 
 	return nil
 }
 
+// UndecidedPublicFacts returns up to limit facts about the agent itself whose
+// place on its public page is not decided yet, oldest first.
+func (s *Store) UndecidedPublicFacts(ctx context.Context, limit int) ([]memory.Fact, error) {
+	return s.queryFacts(ctx, `SELECT `+factColumns+` FROM facts
+		WHERE subject = $1 AND public IS NULL ORDER BY at, id LIMIT $2`, memory.SubjectSelf, limit)
+}
+
+// SetFactPublic records whether the agent would put a fact on its public page.
+func (s *Store) SetFactPublic(ctx context.Context, id ulid.ULID, public bool) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE facts SET public = $2 WHERE id = $1`, id.String(), public); err != nil {
+		return fmt.Errorf("set fact public: %w", err)
+	}
+	return nil
+}
+
+// PublicFacts returns up to limit of the newest facts about the agent itself
+// that it would put on its public page, oldest first. Facts about people are
+// never among them.
+func (s *Store) PublicFacts(ctx context.Context, limit int) ([]memory.Fact, error) {
+	facts, err := s.queryFacts(ctx, `SELECT `+factColumns+` FROM facts
+		WHERE subject = $1 AND public ORDER BY at DESC, id DESC LIMIT $2`, memory.SubjectSelf, limit)
+	slices.Reverse(facts)
+	return facts, err
+}
+
+// Profile returns the public profile page as the agent last wrote it (JSON),
+// what it was written from (a hash), and when; ok is false if it never has.
+func (s *Store) Profile(ctx context.Context) (page []byte, inputs string, at time.Time, ok bool, err error) {
+	err = s.pool.QueryRow(ctx, `SELECT page, inputs, written_at FROM profile WHERE id = 1`).Scan(&page, &inputs, &at)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, "", time.Time{}, false, nil
+	}
+	if err != nil {
+		return nil, "", time.Time{}, false, fmt.Errorf("load profile: %w", err)
+	}
+	return page, inputs, at, true, nil
+}
+
+// SaveProfile replaces the public profile page.
+func (s *Store) SaveProfile(ctx context.Context, page []byte, inputs string, at time.Time) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO profile (id, page, inputs, written_at) VALUES (1, $1, $2, $3)
+		ON CONFLICT (id) DO UPDATE SET page = EXCLUDED.page, inputs = EXCLUDED.inputs, written_at = EXCLUDED.written_at`,
+		string(page), inputs, at)
+	if err != nil {
+		return fmt.Errorf("save profile: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) queryFacts(ctx context.Context, sql string, args ...any) ([]memory.Fact, error) {
 	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {
@@ -333,6 +387,14 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// nullULID maps the zero ULID to SQL NULL.
+func nullULID(id ulid.ULID) any {
+	if id == (ulid.ULID{}) {
+		return nil
+	}
+	return id.String()
 }
 
 func nullString(s string) any {

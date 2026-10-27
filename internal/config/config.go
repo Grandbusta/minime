@@ -20,6 +20,7 @@ type Config struct {
 	Reasoning     Reasoning     `yaml:"reasoning"` // System 2
 	WorkingMemory WorkingMemory `yaml:"working_memory"`
 	Memory        Memory        `yaml:"memory"`
+	Portfolio     Portfolio     `yaml:"portfolio"`
 	// Pricing per model, used to record what each decision cost.
 	Pricing map[string]pricing.Price `yaml:"pricing"`
 	Log     Log                      `yaml:"log"`
@@ -30,6 +31,23 @@ type Memory struct {
 	// RecallCandidates is how many of the newest facts System 1 checks for
 	// relevance before each System 2 reply; about 170 input tokens each.
 	RecallCandidates int `yaml:"recall_candidates"`
+}
+
+// Portfolio is the agent's public profile page, served by the agent itself.
+type Portfolio struct {
+	Addr   string `yaml:"addr"`   // where to serve it, e.g. 127.0.0.1:8080; empty: no page
+	Prompt string `yaml:"prompt"` // file with how System 2 writes the page
+	// UpdateAt is when it updates the page each day, "HH:MM" in UTC.
+	UpdateAt string `yaml:"update_at"`
+}
+
+// UpdateTime is UpdateAt as a time of day: the time since midnight UTC.
+func (p Portfolio) UpdateTime() (time.Duration, error) {
+	t, err := time.Parse("15:04", p.UpdateAt)
+	if err != nil {
+		return 0, fmt.Errorf("config: portfolio.update_at must be HH:MM in UTC, e.g. \"00:00\", have %q", p.UpdateAt)
+	}
+	return time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute, nil
 }
 
 // WorkingMemory is how much of the current conversation System 2 sees.
@@ -90,6 +108,7 @@ func Load(path string) (*Config, error) {
 		Reasoning:     Reasoning{Prompt: "prompts/reply.md", Effort: "low"},
 		WorkingMemory: WorkingMemory{Turns: 8, Window: 30 * time.Minute},
 		Memory:        Memory{RecallCandidates: 30},
+		Portfolio:     Portfolio{Prompt: "prompts/profile.md", UpdateAt: "00:00"},
 		Log:           Log{Level: "info"},
 	}
 	if err := yaml.Unmarshal([]byte(os.ExpandEnv(string(raw))), cfg); err != nil {
@@ -118,6 +137,11 @@ func (c *Config) ValidateAgent() error {
 	r := c.Reasoning
 	if r.Provider.Provider == "" || r.APIKey == "" || r.Model == "" {
 		return errors.New("config: reasoning.provider, reasoning.api_key and reasoning.model are required")
+	}
+	if c.Portfolio.Addr != "" {
+		if _, err := c.Portfolio.UpdateTime(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

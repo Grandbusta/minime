@@ -45,6 +45,14 @@ working_memory:
 memory:
   recall_candidates: 30
 
+# The agent's public profile page, like a person's own website: it writes it
+# itself from its life story and the facts about itself it decides are fine to
+# share (public_profile question set). Read-only: no way to contact it yet.
+portfolio:
+  addr: 127.0.0.1:8080 # where to serve it; on a server, e.g. :8080 behind a proxy. Empty: no page
+  prompt: prompts/profile.md
+  update_at: "00:00" # daily, UTC: it looks for new facts to share, rewriting the page only if they changed
+
 # USD per 1M tokens, from OpenAI's pricing page (standard tier), used to record
 # what each decision cost. cache_write is the 30-minute rate, the default TTL.
 # A model missing here is recorded at $0. The Decisions API bills gpt-6-luna's

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -243,5 +244,90 @@ func TestRecentExchanges(t *testing.T) {
 	}
 	if len(limited) != 1 || limited[0].Message != "no reply recorded" {
 		t.Errorf("limit keeps the newest: %+v", limited)
+	}
+}
+
+func TestPublicFactsAndProfile(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Microsecond)
+
+	p := perception.Percept{ID: ulid.Make(), Source: "test", ExternalID: ulid.Make().String(), Kind: "message", At: base}
+	if _, err := s.SavePercept(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	mine := map[ulid.ULID]string{}
+	var colour, pin memory.Fact
+	for i, f := range []memory.Fact{
+		{Subject: memory.SubjectSelf, Text: "Tobi's favourite colour is green"},
+		{Subject: memory.SubjectSelf, Text: "Tobi's PIN is 4821"},
+		{Subject: "test:someone", Text: "Sam likes jollof"},
+	} {
+		f.ID, f.PerceptID, f.At = ulid.Make(), p.ID, base.Add(time.Duration(i)*time.Minute)
+		if err := s.SaveFact(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+		mine[f.ID] = f.Text
+		switch i {
+		case 0:
+			colour = f
+		case 1:
+			pin = f
+		}
+	}
+	ours := func(fs []memory.Fact) []string {
+		var out []string
+		for _, f := range fs {
+			if _, ok := mine[f.ID]; ok {
+				out = append(out, f.Text)
+			}
+		}
+		return out
+	}
+
+	undecided, err := s.UndecidedPublicFacts(ctx, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ours(undecided); !slices.Equal(got, []string{colour.Text, pin.Text}) {
+		t.Errorf("undecided = %v, want the agent's two facts, oldest first", got)
+	}
+	if err := s.SetFactPublic(ctx, colour.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetFactPublic(ctx, pin.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	undecided, _ = s.UndecidedPublicFacts(ctx, 1000)
+	public, err := s.PublicFacts(ctx, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ours(undecided); len(got) != 0 {
+		t.Errorf("still undecided: %v", got)
+	}
+	if got := ours(public); !slices.Equal(got, []string{colour.Text}) {
+		t.Errorf("public = %v, want only the colour", got)
+	}
+
+	// A decision the agent makes on its own has no percept.
+	d := decision.Decision{ID: ulid.Make(), At: base, SetID: "public_profile@1", Tier: decision.TierSystem1,
+		Action: "decide_public", Gate: decision.GateAuto}
+	if err := s.SaveDecision(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	ds, err := s.RecentDecisions(ctx, 1)
+	if err != nil || len(ds) != 1 || ds[0].ID != d.ID || !ds[0].PerceptID.IsZero() {
+		t.Fatalf("decisions = %+v, err = %v", ds, err)
+	}
+
+	for _, inputs := range []string{"a", "b"} {
+		if err := s.SaveProfile(ctx, []byte(`{"about":["`+inputs+`"]}`), inputs, base); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, inputs, at, ok, err := s.Profile(ctx)
+	if err != nil || !ok || inputs != "b" || !at.Equal(base) || !strings.Contains(string(page), `"b"`) {
+		t.Errorf("profile = %s, %q, %v, %v, %v", page, inputs, at, ok, err)
 	}
 }

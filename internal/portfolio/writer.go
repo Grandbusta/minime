@@ -1,0 +1,274 @@
+// Package portfolio is the agent's public profile page: what it writes about
+// itself for strangers, the way a person keeps a personal website.
+//
+// The agent curates it like a person would. Only facts about itself can reach
+// the page, and System 1 first decides, fact by fact, whether each is the kind
+// of thing people happily share in public (public_profile question set).
+// System 2 then writes the page in the agent's own voice from its life story
+// and those facts, and writes it again only when they change.
+package portfolio
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/oklog/ulid/v2"
+
+	"minime/internal/decision"
+	"minime/internal/decision/questions"
+	"minime/internal/memory"
+	"minime/internal/mind"
+	"minime/internal/providers/system1"
+	"minime/internal/providers/system2"
+	"minime/internal/self"
+)
+
+// Page is the profile as the agent wrote it, first person.
+type Page struct {
+	Tagline   string   `json:"tagline"`   // one line under its name
+	About     []string `json:"about"`     // paragraphs
+	Interests []string `json:"interests"` // a few words each
+	Now       []string `json:"now"`       // what it is up to lately; may be empty
+}
+
+var pageFormat = &system2.Format{Name: "profile_page", Schema: map[string]any{
+	"type": "object", "additionalProperties": false, "required": []string{"tagline", "about", "interests", "now"},
+	"properties": map[string]any{
+		"tagline":   map[string]any{"type": "string"},
+		"about":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"interests": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"now":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+	},
+}}
+
+type Store interface {
+	UndecidedPublicFacts(ctx context.Context, limit int) ([]memory.Fact, error)
+	SetFactPublic(ctx context.Context, id ulid.ULID, public bool) error
+	PublicFacts(ctx context.Context, limit int) ([]memory.Fact, error)
+	Profile(ctx context.Context) (page []byte, inputs string, at time.Time, ok bool, err error)
+	SaveProfile(ctx context.Context, page []byte, inputs string, at time.Time) error
+	SaveDecision(ctx context.Context, d decision.Decision) error
+}
+
+const (
+	factsPerCheck = 100 // undecided facts System 1 checks in one call
+	pageFacts     = 30  // public facts the page is written from, newest
+)
+
+// Writer keeps the page up to date: once a day at UpdateAt (UTC), and on
+// start only if the page has never been written.
+type Writer struct {
+	Life    self.Life
+	Store   Store
+	System1 system1.DecisionModel
+	System2 system2.Reasoner
+	// Public is the public_profile set: a one-question template ({fact} marks
+	// where each fact goes). Zero value: no fact is ever public.
+	Public   questions.Set
+	Prompt   mind.Prompt   // how System 2 writes the page
+	UpdateAt time.Duration // time of day, from midnight UTC, e.g. 0 for 00:00
+	Log      *slog.Logger
+}
+
+func (w *Writer) Run(ctx context.Context) error {
+	if _, _, _, ok, err := w.Store.Profile(ctx); err != nil {
+		w.Log.Warn("checking for the profile page failed", "err", err)
+	} else if !ok {
+		w.refresh(ctx) // so there is a page before the first daily update
+	}
+	for {
+		next := nextUpdate(time.Now(), w.UpdateAt)
+		w.Log.Info("next profile page update", "at", next.Format(time.RFC3339))
+		t := time.NewTimer(time.Until(next))
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil
+		case <-t.C:
+			w.refresh(ctx)
+		}
+	}
+}
+
+// nextUpdate is the first time after now that is at the time of day at, in UTC.
+func nextUpdate(now time.Time, at time.Duration) time.Time {
+	now = now.UTC()
+	next := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Add(at)
+	if !next.After(now) {
+		next = next.AddDate(0, 0, 1)
+	}
+	return next
+}
+
+func (w *Writer) refresh(ctx context.Context) {
+	if _, err := w.Update(ctx, false); err != nil {
+		w.Log.Warn("updating the profile page failed; it keeps its last version", "err", err)
+	}
+}
+
+// Update does what the daily update does, now: it decides which new facts
+// may be public, then rewrites the page if they changed, or always with
+// force. It reports whether the page was rewritten.
+func (w *Writer) Update(ctx context.Context, force bool) (bool, error) {
+	if err := w.decidePublic(ctx); err != nil {
+		w.Log.Warn("deciding which facts are public failed; the page uses what was decided before", "err", err)
+	}
+	return w.write(ctx, force)
+}
+
+// decidePublic has System 1 decide, for each of the agent's own facts not
+// decided yet, whether it may go on the page. A refusal counts as no.
+func (w *Writer) decidePublic(ctx context.Context) error {
+	if w.Public.ID == "" {
+		return nil
+	}
+	facts, err := w.Store.UndecidedPublicFacts(ctx, factsPerCheck)
+	if err != nil || len(facts) == 0 {
+		return err
+	}
+	start := time.Now()
+	d := w.newDecision(start, decision.TierSystem1, w.Public.Ref(), "decide_public")
+	template := w.Public.Questions[0]
+	texts := make([]string, len(facts))
+	qs := make([]system1.Question, len(facts))
+	for i, f := range facts {
+		texts[i] = f.Text
+		q := template
+		q.Name = f.ID.String() // answers come back keyed by fact ID
+		q.Instructions = strings.NewReplacer("{fact}", fmt.Sprintf("`facts[%d]`", i), "{agent}", w.Life.Name).
+			Replace(template.Instructions)
+		qs[i] = q
+	}
+	resp, err := w.System1.Decide(ctx, system1.Request{State: map[string]any{"facts": texts}, Questions: qs})
+	if err != nil {
+		return err
+	}
+	d.Provider, d.Answers, d.CostUSD = resp.Provider, resp.Answers, resp.CostUSD
+
+	public := 0
+	for _, f := range facts {
+		a, ok := resp.Answers[f.ID.String()]
+		if !ok {
+			continue // asked again next time
+		}
+		yes := !a.Refused && a.Probability >= w.Public.Thresholds.Act
+		if err := w.Store.SetFactPublic(ctx, f.ID, yes); err != nil {
+			return err
+		}
+		if yes {
+			public++
+		}
+	}
+	w.finish(ctx, d, start, fmt.Sprintf("%d of %d facts may be public", public, len(facts)))
+	return nil
+}
+
+// write has System 2 write the page from the life story and the public facts,
+// unless the page was already written from exactly these and force is false.
+// It reports whether it wrote the page.
+func (w *Writer) write(ctx context.Context, force bool) (bool, error) {
+	facts, err := w.Store.PublicFacts(ctx, pageFacts)
+	if err != nil {
+		return false, err
+	}
+	instructions := w.instructions(facts)
+	sum := sha256.Sum256([]byte(instructions))
+	inputs := fmt.Sprintf("%s:%x", w.Prompt.Ref, sum[:8])
+	_, last, _, ok, err := w.Store.Profile(ctx)
+	if err != nil {
+		return false, err
+	}
+	if ok && last == inputs && !force {
+		return false, nil
+	}
+
+	start := time.Now()
+	d := w.newDecision(start, decision.TierSystem2, w.Prompt.Ref, "write_profile")
+	resp, err := w.System2.Reason(ctx, system2.Request{
+		Instructions: instructions,
+		Message:      "Write your profile page.",
+		Format:       pageFormat,
+	})
+	if err != nil {
+		return false, err
+	}
+	d.Provider, d.CostUSD = resp.Provider, resp.CostUSD
+	var page Page
+	if err := json.Unmarshal([]byte(resp.Text), &page); err != nil {
+		return false, fmt.Errorf("profile page is not the requested JSON: %w", err)
+	}
+	page = page.tidy()
+	if len(facts) == 0 {
+		// "Lately" is only ever what the agent actually said it is up to; without
+		// facts, System 2 filled it from the life story in testing.
+		page.Now = nil
+	}
+	if len(page.About) == 0 {
+		return false, fmt.Errorf("profile page has no about text")
+	}
+	raw, err := json.Marshal(page)
+	if err != nil {
+		return false, err
+	}
+	if err := w.Store.SaveProfile(ctx, raw, inputs, time.Now().UTC()); err != nil {
+		return false, err
+	}
+	d.Reply = page.Tagline + "\n\n" + strings.Join(page.About, "\n\n")
+	w.finish(ctx, d, start, fmt.Sprintf("written from the life story and %d public facts", len(facts)))
+	w.Log.Info("profile page written", "public_facts", len(facts), "cost_usd", resp.CostUSD)
+	return true, nil
+}
+
+// instructions renders the profile prompt: who the agent is, and what it is
+// happy to share.
+func (w *Writer) instructions(facts []memory.Fact) string {
+	list := func(lines []string, none string) string {
+		if len(lines) == 0 {
+			return none
+		}
+		return "- " + strings.Join(lines, "\n- ")
+	}
+	shared := make([]string, len(facts))
+	for i, f := range facts {
+		shared[i] = f.At.Format("2 Jan 2006") + ": " + f.Text
+	}
+	return strings.NewReplacer("{name}", w.Life.Name,
+		"{life_story}", list(w.Life.Story, "- (none)"),
+		"{personality}", list(w.Life.Personality, "- Be yourself."),
+		"{facts}", list(shared, "- (nothing yet beyond your life story)")).Replace(w.Prompt.Text)
+}
+
+// tidy trims every field, drops empty lines and keeps the lists short.
+func (p Page) tidy() Page {
+	clean := func(lines []string, max int) []string {
+		var out []string
+		for _, s := range lines {
+			if s = strings.TrimSpace(s); s != "" && len(out) < max {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return Page{Tagline: strings.TrimSpace(p.Tagline), About: clean(p.About, 3),
+		Interests: clean(p.Interests, 6), Now: clean(p.Now, 6)}
+}
+
+// newDecision starts a decision the agent makes on its own: it is about no
+// message, so it has no percept.
+func (w *Writer) newDecision(at time.Time, tier decision.Tier, setID, action string) *decision.Decision {
+	return &decision.Decision{ID: ulid.Make(), At: at.UTC(), Tier: tier, SetID: setID, Action: action, Gate: decision.GateAuto}
+}
+
+func (w *Writer) finish(ctx context.Context, d *decision.Decision, start time.Time, detail string) {
+	now := time.Now()
+	d.Latency = now.Sub(start)
+	d.Outcome = &decision.Outcome{Status: decision.OutcomeOK, Detail: detail, At: now.UTC()}
+	if err := w.Store.SaveDecision(ctx, *d); err != nil {
+		w.Log.Error("save decision", "err", err)
+	}
+}

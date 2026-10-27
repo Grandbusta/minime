@@ -1,0 +1,21 @@
+# Which of the agent's own facts may go on its public profile page? One yes/no
+# question per fact, all in one System 1 call, like fact_relevance: `{fact}`
+# is replaced by a path to each fact in the state, e.g. `facts[3]`. Only facts
+# about the agent itself are ever asked about; facts about people never are.
+#
+# Naming the safe kinds (tastes, hobbies, projects) and the unsafe ones in one
+# question matters: "Would Daniel be happy for strangers to read this?" said
+# no to everything (7/16 in a replay), this wording 16/16. A wrong no only
+# hides a harmless fact; a wrong yes publishes it, hence the high threshold.
+id: public_profile
+version: 1
+primary: public
+
+questions:
+  - name: public
+    type: predicate
+    instructions: Is {fact} the kind of harmless personal detail (tastes, interests, hobbies, projects, plans) that people happily share on a public profile, rather than something private, sensitive, or about someone else?
+
+thresholds:
+  act: 0.75 # at or above: the fact may appear on the page (replay: "father is worried about money" 0.66, "thinks Burna Boy is the best" 0.81)
+  ask: 0.75 # unused

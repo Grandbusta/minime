@@ -121,6 +121,29 @@ Edit [decisions/incoming_message.yaml](decisions/incoming_message.yaml): its que
 choices and thresholds. Bump `version`, then restart. Every decision records which version
 decided, so you can compare versions in the decision log.
 
+### Its profile page
+
+While it runs, the agent serves its own public profile page at
+[http://127.0.0.1:8080/](http://127.0.0.1:8080/), the way a person keeps a personal website.
+It writes the page itself, in its own voice, from its life story and the facts about itself
+that System 1 decides are fine to share
+([decisions/public_profile.yaml](decisions/public_profile.yaml)). Facts about people never
+go on it. Every day at 00:00 UTC it checks for new facts, and it rewrites the page only when
+they change. It also writes the page on start if there isn't one yet.
+The page is read-only, with no way to contact it yet, and it says plainly that the agent is an AI.
+
+To update it now instead of waiting for 00:00 UTC (it works whether or not the agent is running):
+
+```bash
+set -a; . ./.env; set +a; go run ./cmd/minime profile
+```
+
+It rewrites the page only if there's something new to share; add `-force` to rewrite it anyway.
+
+Change where it's served and when it updates (`update_at`), or turn it off (`addr: ""`), under `portfolio:` in
+[configs/minime.yaml](configs/minime.yaml). Change how it writes the page in
+[prompts/profile.md](prompts/profile.md).
+
 ### See what it decided
 
 ```bash

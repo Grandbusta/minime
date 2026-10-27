@@ -132,8 +132,11 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		max = defaultMaxOutputTokens
 	}
 	body := wireRequest{Model: c.model, Instructions: req.Instructions, Input: wireInput(req), MaxOutputTokens: max}
-	if req.CollectFacts {
+	switch {
+	case req.CollectFacts:
 		body.Text = replyWithFacts
+	case req.Format != nil:
+		body.Text = &wireText{Format: wireFormat{Type: "json_schema", Name: req.Format.Name, Strict: true, Schema: req.Format.Schema}}
 	}
 	if c.effort != "" {
 		body.Reasoning = &struct {

@@ -100,6 +100,24 @@ func TestCollectFactsUsesStructuredOutput(t *testing.T) {
 	}
 }
 
+func TestFormatAsksForThatSchema(t *testing.T) {
+	c := newTestClient(t, pricing.Price{}, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Text *wireText `json:"text"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if f := body.Text; f == nil || f.Format.Name != "page" || !f.Format.Strict || f.Format.Schema["type"] != "object" {
+			t.Errorf("text format = %+v", body.Text)
+		}
+		io.WriteString(w, `{"model":"m","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":" {\"about\":\"hi\"} "}]}]}`)
+	})
+	resp, err := c.Reason(context.Background(), system2.Request{Message: "x",
+		Format: &system2.Format{Name: "page", Schema: map[string]any{"type": "object"}}})
+	if err != nil || resp.Text != `{"about":"hi"}` {
+		t.Fatalf("resp = %+v, err = %v", resp, err)
+	}
+}
+
 func TestPlainRequestHasNoFormat(t *testing.T) {
 	c := newTestClient(t, pricing.Price{}, func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
