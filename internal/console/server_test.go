@@ -91,6 +91,27 @@ func (f *fakeStore) SaveLabel(_ context.Context, l memory.Label) error {
 	return nil
 }
 
+func (f *fakeStore) Dreams(context.Context, bool) ([]memory.Dream, error) {
+	return []memory.Dream{{ID: testDream, Text: "Tobi wants to be a producer", Status: memory.DreamActive, Source: memory.DreamFromLife}}, nil
+}
+func (f *fakeStore) Goals(context.Context, bool) ([]memory.Goal, error) {
+	return []memory.Goal{{ID: ulid.Make(), DreamID: testDream, Text: "Five beat ideas", Status: memory.GoalActive}}, nil
+}
+func (f *fakeStore) Skills(context.Context) ([]memory.Skill, error) {
+	return []memory.Skill{{Name: "music production", Level: 4.6, ShownBy: []string{"beat_idea"}}}, nil
+}
+func (f *fakeStore) RecentEvidence(context.Context, string, int) ([]memory.Evidence, error) {
+	return []memory.Evidence{{Skill: "music production", Score: 5.9, Source: memory.EvidenceSystem1, WorkID: ulid.Make()}}, nil
+}
+func (f *fakeStore) Lessons(context.Context, string, int) ([]memory.Lesson, error) {
+	return []memory.Lesson{{Skill: "music production", Text: "Leave space after the drop", Source: memory.LessonFromOwner}}, nil
+}
+func (f *fakeStore) LatestWork(context.Context, string) (memory.Work, bool, error) {
+	return memory.Work{Kind: "review", Title: "A busy week", Text: "..."}, true, nil
+}
+
+var testDream = ulid.Make()
+
 func (f *fakeStore) add(e store.LogEntry) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -202,6 +223,23 @@ func TestPageAndAPI(t *testing.T) {
 	getJSON(t, srv.URL+"/api/works/"+ulid.Make().String(), &work)
 	if work["text"] != "Rain on the roof" || work["words"] != float64(4) {
 		t.Errorf("work = %+v", work)
+	}
+	var growth struct {
+		Dreams []struct {
+			Text  string           `json:"text"`
+			Goals []map[string]any `json:"goals"`
+		} `json:"dreams"`
+		Skills []struct {
+			Level    float64          `json:"level"`
+			Evidence []map[string]any `json:"evidence"`
+			Lessons  []map[string]any `json:"lessons"`
+		} `json:"skills"`
+		Review map[string]any `json:"review"`
+	}
+	getJSON(t, srv.URL+"/api/growth", &growth)
+	if len(growth.Dreams) != 1 || len(growth.Dreams[0].Goals) != 1 || growth.Skills[0].Level != 4.6 ||
+		growth.Skills[0].Evidence[0]["score"] != 5.9 || growth.Skills[0].Lessons[0]["source"] != "owner" || growth.Review["title"] != "A busy week" {
+		t.Errorf("growth = %+v", growth)
 	}
 	var approvals []map[string]any
 	getJSON(t, srv.URL+"/api/approvals", &approvals)

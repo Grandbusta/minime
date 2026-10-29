@@ -22,6 +22,7 @@ const (
 	ReachOut        Class = "reach_out"        // message someone first: reminders, check-ins, deliveries
 	Commit          Class = "commit"           // promise to make something for someone
 	Publish         Class = "publish"          // put a work on its public profile page
+	Dream           Class = "dream"            // add, reword or drop one of its dreams
 	Spend           Class = "spend"            // spend money (later)
 	ExternalMessage Class = "external_message" // email or post outside the chat (later)
 )
@@ -48,7 +49,7 @@ type Policy struct {
 func Defaults() map[Class]Verdict {
 	return map[Class]Verdict{
 		Remember: Auto, Reply: Auto, ReadWeb: Auto,
-		ReachOut: Ask, Commit: Ask, Publish: Ask,
+		ReachOut: Ask, Commit: Ask, Publish: Ask, Dream: Ask,
 		Spend: Forbid, ExternalMessage: Forbid,
 	}
 }
@@ -76,7 +77,7 @@ func (p Policy) Check(class Class, person string) Verdict {
 // not money, and not the world outside the chat, which stay in the config.
 func ByChat(c Class) bool {
 	switch c {
-	case ReachOut, Commit, Publish, ReadWeb:
+	case ReachOut, Commit, Publish, ReadWeb, Dream:
 		return true
 	}
 	return false

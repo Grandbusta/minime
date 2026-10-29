@@ -28,7 +28,7 @@ const ago = (ms) => {
 
 // family groups a decision for colour: fast, slow, reflex, or its own life.
 function family(e) {
-  if (["plan_day", "activity", "task"].includes(e.action) || e.source === "life") return "life";
+  if (["plan_day", "activity", "task", "weekly_review", "score_skill"].includes(e.action) || e.source === "life") return "life";
   return e.tier || "reflex";
 }
 const setName = (set) => (set || "").split(",")[0].split("@")[0];
@@ -40,7 +40,9 @@ const ACTIONS = {
   escalate: "unsure → System 2", reply: "replied", recall: "recalled facts", recall_all: "recalled everything",
   recall_open: "looked for open threads", check_in: "check-in", no_check_in: "nothing to check in on",
   plan_day: "planned the day", activity: "did something", task: "made what it promised", deliver: "sent what it promised", decide_public: "chose what's public", decide_public_works: "chose public works", approved: "you said yes", denied: "you said no", expired: "no answer: not done",
-  send: "sent what you approved", follow_up: "followed up",
+  send: "sent what you approved", follow_up: "followed up", score_skill: "scored its work", lesson: "learned a lesson", ask_review: "asked for your review", weekly_review: "reviewed its week",
+  skill_feedback: "took your feedback", permission: "permission changed", correct_fact: "corrected a fact", forget_fact: "forgot a fact",
+  label: "labelled a misread",
   write_profile: "wrote the profile page", error: "error",
 };
 const actionText = (a) => ACTIONS[a] || a;
@@ -65,6 +67,11 @@ function pathFor(e) {
   if (a === "check_in" || a === "no_check_in") return e.tier === "system2" ? ["clock", "system2", "senses"] : ["clock", "system1", "facts"];
   if (a === "decide_public") return ["facts", "system1", "profile"];
   if (a === "decide_public_works") return ["life", "system1", "profile"];
+  if (a === "score_skill") return ["life", "system1", "facts"];
+  if (a === "ask_review") return ["life", "system2", "senses"];
+  if (a === "lesson") return ["senses", "router", "life"];
+  if (a === "weekly_review") return ["clock", "life", "system2", "intentions"];
+  if (a === "skill_feedback") return ["senses", "router", "life"];
   if (["approved", "denied", "expired"].includes(a)) return ["senses", "router", "intentions"];
   if (a === "send") return ["intentions", "router", "senses"];
   if (a === "follow_up") return ["intentions", "system2", "senses"];
@@ -705,7 +712,7 @@ function renderLog() {
     if (logFilter !== "all" && !g.some((e) => family(e) === logFilter)) continue;
     const head = g[0], last = g[g.length - 1], cost = g.reduce((s, e) => s + e.cost_usd, 0);
     const reply = [...g].reverse().find((e) => e.reply);
-    const what = head.text ? esc(head.text) : ["reminder", "check_in", "delivery"].includes(head.kind) ? `<span class="muted">spoke first</span>` : `<span class="muted">${esc(actionText(head.action))}</span>`;
+    const what = head.text ? esc(head.text) : ["reminder", "check_in", "delivery", "review_request"].includes(head.kind) ? `<span class="muted">spoke first</span>` : `<span class="muted">${esc(actionText(head.action))}</span>`;
     const b = document.createElement("button");
     b.className = "chain";
     b.innerHTML = `<div class="when">${fmtTime(head.at)}<small>${fmtTime(head.at, true).split(",")[0] || ""}</small></div>
@@ -889,6 +896,34 @@ async function openWork(id) {
     <div class="reader">${esc(w.text)}</div>`);
 }
 
+/* ---------- growth ---------- */
+
+async function loadGrowth() {
+  const g = await api("/api/growth");
+  const dreams = [...g.dreams].sort((a, b) => (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1));
+  $("#dreams").innerHTML = dreams.length ? dreams.map((d) => `<div class="dream ${d.status === "active" ? "" : "dropped"}">
+      <h3>${esc(d.text)}</h3>
+      <div class="src">${d.source === "self" ? "its own" : "from its life story"} · since ${fmtTime(d.since, true)}${d.status !== "active" ? " · " + esc(d.status) : ""}</div>
+      ${d.goals.length ? d.goals.map((x) => `<div class="goal ${esc(x.status)}"><div class="goal-top"><b>${x.status === "active" ? "goal" : esc(x.status)}</b>
+          <span class="when">due ${fmtTime(x.due, true)}</span></div>
+        <p>${esc(x.text)}</p><p class="when">done when: ${esc(x.done_when || "–")}</p>
+        ${x.progress ? `<p>${esc(x.progress)}</p>` : ""}
+        ${x.projects.length ? `<div class="pj-chips">${x.projects.map((p) => `<span>${esc(p.title)}</span>`).join("")}</div>` : ""}</div>`).join("")
+        : `<div class="goal"><p class="when">no goals yet: it sets them in its Sunday review</p></div>`}
+    </div>`).join("") : `<div class="empty">no dreams yet: add some to self/life.yaml</div>`;
+  $("#skills").innerHTML = g.skills.length ? g.skills.map((s) => {
+    const ev = [...s.evidence].reverse(); // oldest first, left to right
+    return `<div class="skill"><div class="skill-top"><span>${esc(s.name)}</span><b>${s.level.toFixed(1)}</b></div>
+      <div class="skill-bar"><i style="width:${s.level * 10}%"></i></div>
+      ${ev.length ? `<div class="skill-ev">${ev.map((e) => `<i class="${e.source === "owner" ? "owner" : ""}" style="height:${e.score * 10}%"
+        title="${e.score.toFixed(1)} · ${esc(e.source === "owner" ? "your feedback" : e.source === "life" ? "where its life story starts it" : "scored work")}${e.note ? ": " + esc(e.note) : ""}"></i>`).join("")}</div>` : ""}
+      <div class="skill-meta">${ev.length ? ev.length + " recent score" + (ev.length > 1 ? "s" : "") + " · gold is your feedback" : "no scores yet"} · shown by ${esc(s.shown_by.join(", ").replace(/_/g, " ") || "nothing yet")}</div>
+      ${s.lessons.length ? `<ul class="lessons">${s.lessons.map((l) => `<li class="src-${esc(l.source)}"><span>${esc({ owner: "you", self: "himself", others: "others" }[l.source] || l.source)}</span>${esc(l.text)}</li>`).join("")}</ul>` : ""}</div>`;
+  }).join("") : `<div class="empty">no skills yet: add some to self/life.yaml</div>`;
+  $("#review").innerHTML = g.review ? `<h4>${esc(g.review.title)}</h4><div class="skill-meta">${fmtTime(g.review.at, true)}</div><p>${esc(g.review.text)}</p>`
+    : `<div class="empty">no review yet: it reviews its week on Sundays</div>`;
+}
+
 /* ---------- conversations ---------- */
 
 async function loadTalk() {
@@ -1037,13 +1072,13 @@ document.addEventListener("keydown", (e) => e.key === "Escape" && closeDrawer())
 /* ---------- navigation, clock, live stream ---------- */
 
 const LOADERS = { mind: () => Promise.all([loadOverview(), loadFeed(), loadPlan(), loadApprovals()]), activity: loadLog, memory: loadMemory,
-  day: loadDay, works: loadWorks, talk: loadTalk };
+  day: loadDay, works: loadWorks, growth: loadGrowth, talk: loadTalk };
 let view = "mind";
 function show(v) {
   view = v;
   document.querySelectorAll(".nav button").forEach((b) => b.classList.toggle("on", b.dataset.view === v));
   document.querySelectorAll(".view").forEach((s) => s.classList.toggle("on", s.id === "view-" + v));
-  $("#viewTitle").textContent = { mind: "MIND", activity: "ACTIVITY", memory: "MEMORY", day: "DAY", works: "WORKS", talk: "CONVERSATIONS" }[v];
+  $("#viewTitle").textContent = { mind: "MIND", activity: "ACTIVITY", memory: "MEMORY", day: "DAY", works: "WORKS", growth: "GROWTH", talk: "CONVERSATIONS" }[v];
   history.replaceState(null, "", "#" + v);
   LOADERS[v]().catch(console.error);
 }

@@ -97,6 +97,7 @@ type Project struct {
 	SourceID  ulid.ULID // the book a reading project follows; zero if none
 	Position  int       // how far into it, in bytes of its text
 	Source    *Reading  // about that book, when loaded with the project; nil if none
+	GoalID    ulid.ULID // the goal it serves; zero if none
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -188,6 +189,84 @@ type Label struct {
 const (
 	LabelFromChat    = "chat"
 	LabelFromConsole = "console"
+)
+
+// Dream is who the agent wants to become.
+type Dream struct {
+	ID      ulid.ULID
+	Text    string // third person with its name
+	Status  string // DreamActive or DreamDropped
+	Source  string // DreamFromLife (its creator) or DreamFromSelf (it chose it)
+	Since   time.Time
+	EndedAt time.Time // zero while active
+}
+
+const (
+	DreamActive   = "active"
+	DreamDropped  = "dropped"
+	DreamFromLife = "life"
+	DreamFromSelf = "self"
+)
+
+// Goal is a step toward a dream, checkable in weeks.
+type Goal struct {
+	ID        ulid.ULID
+	DreamID   ulid.ULID
+	Text      string    // e.g. "Finish five beat ideas for an EP"
+	DoneWhen  string    // how it'll know it's done
+	Due       time.Time //
+	Status    string    // GoalActive, GoalDone or GoalDropped
+	Progress  string    // where it stands, from the last review
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+const (
+	GoalActive  = "active"
+	GoalDone    = "done"
+	GoalDropped = "dropped"
+)
+
+// Skill is something the agent is getting better at.
+type Skill struct {
+	Name      string
+	Level     float64  // 1 to 10, from recent evidence
+	ShownBy   []string // kinds of work that show it
+	UpdatedAt time.Time
+}
+
+// Evidence is one score of a skill: of a work, or the owner's feedback.
+type Evidence struct {
+	ID     ulid.ULID
+	Skill  string
+	WorkID ulid.ULID // the work scored; zero for feedback on no one work
+	Score  float64   // 1 to 10
+	Source string    // EvidenceSystem1 or EvidenceOwner
+	Note   string
+	At     time.Time
+}
+
+const (
+	EvidenceSystem1 = "system1"
+	EvidenceOwner   = "owner"
+	EvidenceLife    = "life" // the level its life story starts it at: a first score, outweighed as real evidence comes
+)
+
+// Lesson is something the agent learned about doing a skill well.
+type Lesson struct {
+	ID        ulid.ULID
+	Skill     string
+	Text      string    // a rule for next time, in its own words
+	Source    string    // LessonFromOwner, LessonFromSelf or LessonFromOthers
+	WorkID    ulid.ULID // the work that taught it; zero if none
+	At        time.Time
+	RetiredAt time.Time // zero while active
+}
+
+const (
+	LessonFromOwner  = "owner"  // its owner's correction
+	LessonFromSelf   = "self"   // what it noticed went wrong
+	LessonFromOthers = "others" // studying how others do it
 )
 
 // Who decided whether a work is public.

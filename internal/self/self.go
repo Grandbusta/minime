@@ -27,6 +27,14 @@ type Life struct {
 	// e.g. lyrics or poems. Optional; it can always write notes and short
 	// pieces, and it keeps a journal.
 	Makes []Craft `yaml:"makes"`
+	// Dreams are who the agent wants to become, third person with its name,
+	// e.g. "Daniel wants to become a producer people in Lagos know". Optional;
+	// copied into memory the first time, then it may change them (asking its owner).
+	Dreams []string `yaml:"dreams"`
+	// Skills are where it starts: what it is good at, how good (1-10), and
+	// which kinds of work show it. Optional; copied into memory the first
+	// time, after which they grow from what it makes and its owner's feedback.
+	Skills []Skill `yaml:"skills"`
 	// Family the agent is born knowing, like anyone knows their parents and
 	// cousins whether or not they ever talk to them. Copied into memory the
 	// first time; after that memory wins.
@@ -46,12 +54,19 @@ var BuiltIn = []Craft{
 }
 
 // Reserved are kinds an ability sets itself (the journal, reading notes).
-var Reserved = []string{"journal", "reading_notes"}
+var Reserved = []string{"journal", "reading_notes", "review"}
 
 var kindName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // Crafts is everything it makes: the built-in kinds, then Makes.
 func (l Life) Crafts() []Craft { return append(append([]Craft{}, BuiltIn...), l.Makes...) }
+
+// Skill is something the agent can get better at.
+type Skill struct {
+	Name    string   `yaml:"name"`     // e.g. "music production"
+	Level   int      `yaml:"level"`    // 1 (beginner) to 10 (master)
+	ShownBy []string `yaml:"shown_by"` // kinds of work that show it, e.g. [beat_idea]
+}
 
 // Relative is a member of the agent's family.
 type Relative struct {
@@ -97,6 +112,26 @@ func Load(path string) (Life, error) {
 		}
 		kinds[c.Kind] = true
 		l.Makes[i] = c
+	}
+	l.Dreams = nonEmpty(l.Dreams)
+	skills := map[string]bool{}
+	for i, sk := range l.Skills {
+		sk.Name = strings.TrimSpace(sk.Name)
+		switch {
+		case sk.Name == "" || sk.Level < 1 || sk.Level > 10:
+			return Life{}, fmt.Errorf("%s: skill %d needs a name and a level from 1 to 10", path, i+1)
+		case skills[strings.ToLower(sk.Name)]:
+			return Life{}, fmt.Errorf("%s: skill %q is listed twice", path, sk.Name)
+		}
+		skills[strings.ToLower(sk.Name)] = true
+		for j, k := range sk.ShownBy {
+			k = strings.TrimSpace(k)
+			if !kinds[k] || k == "journal" || k == "review" {
+				return Life{}, fmt.Errorf("%s: skill %q is shown by %q, which isn't a kind of work it makes", path, sk.Name, k)
+			}
+			sk.ShownBy[j] = k
+		}
+		l.Skills[i] = sk
 	}
 	accounts := map[string]bool{}
 	for i, r := range l.Family {

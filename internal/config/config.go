@@ -118,10 +118,25 @@ type DailyLife struct {
 	Reading        *bool   `yaml:"reading"`
 	PlanAt         string  `yaml:"plan_at"`    // "HH:MM" in its time zone
 	JournalAt      string  `yaml:"journal_at"` // "HH:MM" in its time zone
+	ReviewAt       string  `yaml:"review_at"`  // its weekly review, "Sun 20:00" in its time zone
 	Activities     int     `yaml:"activities"` // things it plans a day, besides the journal
 	BudgetUSD      float64 `yaml:"budget_usd"` // most its own day may cost
 	PlanPrompt     string  `yaml:"plan_prompt"`
 	ActivityPrompt string  `yaml:"activity_prompt"`
+	ReviewPrompt   string  `yaml:"review_prompt"`
+}
+
+// ReviewTime is ReviewAt as a weekday and a time of day.
+func (d DailyLife) ReviewTime() (time.Weekday, time.Duration, error) {
+	day, at, ok := strings.Cut(strings.TrimSpace(d.ReviewAt), " ")
+	days := map[string]time.Weekday{"sun": time.Sunday, "mon": time.Monday, "tue": time.Tuesday, "wed": time.Wednesday,
+		"thu": time.Thursday, "fri": time.Friday, "sat": time.Saturday}
+	wd, known := days[strings.ToLower(day)]
+	t, err := timeOfDay(strings.TrimSpace(at))
+	if !ok || !known || err != nil {
+		return 0, 0, fmt.Errorf("config: daily_life.review_at must be a day and HH:MM, like \"Sun 20:00\", have %q", d.ReviewAt)
+	}
+	return wd, t, nil
 }
 
 // DefaultAbilities are on unless the config lists its own.
@@ -254,7 +269,8 @@ func Load(path string) (*Config, error) {
 		Portfolio:     Portfolio{Prompt: "prompts/profile.md", UpdateAt: "00:00"},
 		Initiative:    Initiative{Timezone: "UTC", Quiet: 4 * time.Hour},
 		DailyLife: DailyLife{PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
-			PlanPrompt: "prompts/plan.md", ActivityPrompt: "prompts/activity.md"},
+			PlanPrompt: "prompts/plan.md", ActivityPrompt: "prompts/activity.md",
+			ReviewAt: "Sun 20:00", ReviewPrompt: "prompts/review.md"},
 		Autonomy: Autonomy{AskExpires: 24 * time.Hour},
 		Log:      Log{Level: "info"},
 	}

@@ -104,3 +104,25 @@ func TestMakes(t *testing.T) {
 		}
 	}
 }
+
+func TestDreamsAndSkills(t *testing.T) {
+	l, err := Load(write(t, "name: Amara\nstory: [Amara paints.]\nmakes:\n  - {kind: poem, about: a poem}\ndreams: [' Amara wants a show ', '']\n"+
+		"skills:\n  - {name: ' poetry ', level: 4, shown_by: [poem, notes]}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Dreams) != 1 || l.Dreams[0] != "Amara wants a show" || l.Skills[0].Name != "poetry" || l.Skills[0].ShownBy[0] != "poem" {
+		t.Errorf("life = %+v", l)
+	}
+	for name, skills := range map[string]string{
+		"no level":       "  - {name: poetry}\n",
+		"level too high": "  - {name: poetry, level: 11}\n",
+		"twice":          "  - {name: poetry, level: 2}\n  - {name: Poetry, level: 3}\n",
+		"unknown kind":   "  - {name: poetry, level: 2, shown_by: [sculpture]}\n",
+		"journal":        "  - {name: poetry, level: 2, shown_by: [journal]}\n",
+	} {
+		if _, err := Load(write(t, "name: Amara\nstory: [x]\nmakes:\n  - {kind: poem, about: a poem}\nskills:\n"+skills)); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+}

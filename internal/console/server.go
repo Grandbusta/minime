@@ -50,6 +50,12 @@ type Store interface {
 	RecentApprovals(ctx context.Context, limit int) ([]memory.Approval, error)
 	Labels(ctx context.Context, decisions []ulid.ULID) ([]memory.Label, error)
 	SaveLabel(ctx context.Context, l memory.Label) error
+	Dreams(ctx context.Context, activeOnly bool) ([]memory.Dream, error)
+	Goals(ctx context.Context, activeOnly bool) ([]memory.Goal, error)
+	Skills(ctx context.Context) ([]memory.Skill, error)
+	RecentEvidence(ctx context.Context, skill string, limit int) ([]memory.Evidence, error)
+	LatestWork(ctx context.Context, kind string) (memory.Work, bool, error)
+	Lessons(ctx context.Context, skill string, limit int) ([]memory.Lesson, error)
 }
 
 // Info is what the console says about the running agent.
@@ -86,6 +92,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/approvals", s.approvals)
 	mux.HandleFunc("POST /api/labels", s.label)
+	mux.HandleFunc("GET /api/growth", s.growth)
 	return s.auth(headers(mux))
 }
 
@@ -462,6 +469,88 @@ func (s *Server) approvals(w http.ResponseWriter, r *http.Request) {
 		out[i] = v
 	}
 	s.json(w, out)
+}
+
+// growth is who it wants to become: its dreams with their goals and the
+// projects serving them, its skills with their recent scores, and its last
+// weekly review.
+func (s *Server) growth(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	dreams, err := s.Store.Dreams(ctx, false)
+	if s.failed(w, err) {
+		return
+	}
+	goals, err := s.Store.Goals(ctx, false)
+	if s.failed(w, err) {
+		return
+	}
+	projects, err := s.Store.AllProjects(ctx, 500)
+	if s.failed(w, err) {
+		return
+	}
+	skills, err := s.Store.Skills(ctx)
+	if s.failed(w, err) {
+		return
+	}
+	dv := make([]map[string]any, 0, len(dreams))
+	for _, d := range dreams {
+		var gv []map[string]any
+		for _, g := range goals {
+			if g.DreamID != d.ID {
+				continue
+			}
+			var pv []map[string]any
+			for _, p := range projects {
+				if p.GoalID == g.ID {
+					pv = append(pv, map[string]any{"id": p.ID.String(), "title": p.Title, "status": p.Status})
+				}
+			}
+			gv = append(gv, map[string]any{"id": g.ID.String(), "text": g.Text, "done_when": g.DoneWhen, "due": g.Due,
+				"status": g.Status, "progress": g.Progress, "created_at": g.CreatedAt, "projects": nonNilMaps(pv)})
+		}
+		v := map[string]any{"id": d.ID.String(), "text": d.Text, "status": d.Status, "source": d.Source, "since": d.Since,
+			"goals": nonNilMaps(gv)}
+		if !d.EndedAt.IsZero() {
+			v["ended_at"] = d.EndedAt
+		}
+		dv = append(dv, v)
+	}
+	sv := make([]map[string]any, 0, len(skills))
+	for _, sk := range skills {
+		ev, err := s.Store.RecentEvidence(ctx, sk.Name, 12)
+		if s.failed(w, err) {
+			return
+		}
+		evv := make([]map[string]any, len(ev))
+		for i, e := range ev {
+			evv[i] = map[string]any{"score": e.Score, "source": e.Source, "note": e.Note, "at": e.At}
+			if !e.WorkID.IsZero() {
+				evv[i]["work_id"] = e.WorkID.String()
+			}
+		}
+		ls, err := s.Store.Lessons(ctx, sk.Name, 20)
+		if s.failed(w, err) {
+			return
+		}
+		lv := make([]map[string]any, len(ls))
+		for i, l := range ls {
+			lv[i] = map[string]any{"text": l.Text, "source": l.Source, "at": l.At}
+		}
+		sv = append(sv, map[string]any{"name": sk.Name, "level": sk.Level, "shown_by": nonNil(sk.ShownBy),
+			"updated_at": sk.UpdatedAt, "evidence": evv, "lessons": lv})
+	}
+	out := map[string]any{"dreams": dv, "skills": sv}
+	if rv, ok, err := s.Store.LatestWork(ctx, "review"); err == nil && ok {
+		out["review"] = map[string]any{"id": rv.ID.String(), "title": rv.Title, "text": rv.Text, "at": rv.CreatedAt}
+	}
+	s.json(w, out)
+}
+
+func nonNilMaps(m []map[string]any) []map[string]any {
+	if m == nil {
+		return []map[string]any{}
+	}
+	return m
 }
 
 type entryView struct {

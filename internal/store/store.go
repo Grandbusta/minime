@@ -190,10 +190,10 @@ func (s *Store) RecentExchanges(ctx context.Context, source, thread string, sinc
 			ORDER BY d.at DESC LIMIT 1
 		) r ON true
 		WHERE p.source = $1 AND p.thread = $2 AND p.at >= $3 AND p.id <> $4
-		  AND (p.text <> '' OR p.kind IN ($6, $7, $8))
+		  AND (p.text <> '' OR p.kind IN ($6, $7, $8, $9))
 		ORDER BY p.at DESC, p.id DESC
 		LIMIT $5`, source, thread, since, exclude.String(), limit, perception.KindReminder, perception.KindCheckIn,
-		perception.KindDelivery)
+		perception.KindDelivery, perception.KindReviewRequest)
 	if err != nil {
 		return nil, fmt.Errorf("query recent exchanges: %w", err)
 	}
@@ -455,17 +455,18 @@ func (s *Store) queryIntentions(ctx context.Context, sql string, args ...any) ([
 }
 
 // projectSelect reads projects with the book each one follows, if any.
-const projectSelect = `SELECT p.id, p.title, p.kind, p.status, p.notes, p.source_id, p.position, p.created_at, p.updated_at,
+const projectSelect = `SELECT p.id, p.title, p.kind, p.status, p.notes, p.source_id, p.position, p.created_at, p.updated_at, p.goal_id,
 	s.kind, s.title, s.author, s.chars FROM projects p LEFT JOIN sources s ON s.id = p.source_id`
 
 // SaveProject stores a project, replacing what was known about it.
 func (s *Store) SaveProject(ctx context.Context, p memory.Project) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO projects (id, title, kind, status, notes, source_id, position, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO projects (id, title, kind, status, notes, source_id, position, created_at, updated_at, goal_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, kind = EXCLUDED.kind, status = EXCLUDED.status,
-			notes = EXCLUDED.notes, source_id = EXCLUDED.source_id, position = EXCLUDED.position, updated_at = EXCLUDED.updated_at`,
-		p.ID.String(), p.Title, p.Kind, p.Status, p.Notes, nullULID(p.SourceID), p.Position, p.CreatedAt, p.UpdatedAt)
+			notes = EXCLUDED.notes, source_id = EXCLUDED.source_id, position = EXCLUDED.position, updated_at = EXCLUDED.updated_at,
+			goal_id = EXCLUDED.goal_id`,
+		p.ID.String(), p.Title, p.Kind, p.Status, p.Notes, nullULID(p.SourceID), p.Position, p.CreatedAt, p.UpdatedAt, nullULID(p.GoalID))
 	if err != nil {
 		return fmt.Errorf("save project: %w", err)
 	}
@@ -498,11 +499,11 @@ func (s *Store) queryProjects(ctx context.Context, sql string, args ...any) ([]m
 		var (
 			p                      memory.Project
 			id                     string
-			sourceID               *string
+			sourceID, goalID       *string
 			sKind, sTitle, sAuthor *string
 			sChars                 *int
 		)
-		if err := rows.Scan(&id, &p.Title, &p.Kind, &p.Status, &p.Notes, &sourceID, &p.Position, &p.CreatedAt, &p.UpdatedAt,
+		if err := rows.Scan(&id, &p.Title, &p.Kind, &p.Status, &p.Notes, &sourceID, &p.Position, &p.CreatedAt, &p.UpdatedAt, &goalID,
 			&sKind, &sTitle, &sAuthor, &sChars); err != nil {
 			return nil, err
 		}
@@ -510,6 +511,9 @@ func (s *Store) queryProjects(ctx context.Context, sql string, args ...any) ([]m
 			return nil, err
 		}
 		if p.SourceID, err = parseNullULID(sourceID); err != nil {
+			return nil, err
+		}
+		if p.GoalID, err = parseNullULID(goalID); err != nil {
 			return nil, err
 		}
 		if sTitle != nil {
@@ -547,7 +551,7 @@ const workColumns = `id, intention_id, project_id, kind, title, text, created_at
 
 // shareableWork is the condition for a work (aliased w) that may ever be
 // public: not its journal, and made for itself, not for someone (a promise).
-const shareableWork = `w.kind <> 'journal' AND (w.intention_id IS NULL OR EXISTS (
+const shareableWork = `w.kind NOT IN ('journal', 'review') AND (w.intention_id IS NULL OR EXISTS (
 	SELECT 1 FROM intentions i WHERE i.id = w.intention_id AND i.subject = '` + memory.SubjectSelf + `'))`
 
 // SaveWork stores something the agent made.
@@ -1091,4 +1095,224 @@ func (s *Store) LabelledExamples(ctx context.Context, setID, question string, li
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// SaveDream stores a dream, replacing what was known about it.
+func (s *Store) SaveDream(ctx context.Context, d memory.Dream) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO dreams (id, text, status, source, since, ended_at) VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO UPDATE SET text = EXCLUDED.text, status = EXCLUDED.status, ended_at = EXCLUDED.ended_at`,
+		d.ID.String(), d.Text, d.Status, d.Source, d.Since, nullTime(d.EndedAt))
+	if err != nil {
+		return fmt.Errorf("save dream: %w", err)
+	}
+	return nil
+}
+
+// Dreams returns its dreams, oldest first: all of them, or only the active.
+func (s *Store) Dreams(ctx context.Context, activeOnly bool) ([]memory.Dream, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, text, status, source, since, ended_at FROM dreams
+		WHERE NOT $1 OR status = $2 ORDER BY since, id`, activeOnly, memory.DreamActive)
+	if err != nil {
+		return nil, fmt.Errorf("query dreams: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Dream
+	for rows.Next() {
+		var (
+			d     memory.Dream
+			id    string
+			ended *time.Time
+		)
+		if err := rows.Scan(&id, &d.Text, &d.Status, &d.Source, &d.Since, &ended); err != nil {
+			return nil, err
+		}
+		if d.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if ended != nil {
+			d.EndedAt = *ended
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// SaveGoal stores a goal, replacing what was known about it.
+func (s *Store) SaveGoal(ctx context.Context, g memory.Goal) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO goals (id, dream_id, text, done_when, due, status, progress, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (id) DO UPDATE SET text = EXCLUDED.text, done_when = EXCLUDED.done_when, due = EXCLUDED.due,
+			status = EXCLUDED.status, progress = EXCLUDED.progress, updated_at = EXCLUDED.updated_at`,
+		g.ID.String(), g.DreamID.String(), g.Text, g.DoneWhen, g.Due, g.Status, g.Progress, g.CreatedAt, g.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("save goal: %w", err)
+	}
+	return nil
+}
+
+// Goals returns its goals, oldest first: all of them, or only the active.
+func (s *Store) Goals(ctx context.Context, activeOnly bool) ([]memory.Goal, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, dream_id, text, done_when, due, status, progress, created_at, updated_at FROM goals
+		WHERE NOT $1 OR status = $2 ORDER BY created_at, id`, activeOnly, memory.GoalActive)
+	if err != nil {
+		return nil, fmt.Errorf("query goals: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Goal
+	for rows.Next() {
+		var (
+			g           memory.Goal
+			id, dreamID string
+		)
+		if err := rows.Scan(&id, &dreamID, &g.Text, &g.DoneWhen, &g.Due, &g.Status, &g.Progress, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if g.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if g.DreamID, err = ulid.Parse(dreamID); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+// AddSkill stores a skill it starts with, unless it already has it.
+func (s *Store) AddSkill(ctx context.Context, sk memory.Skill) error {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO skills (name, level, shown_by, updated_at) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (name) DO NOTHING`, sk.Name, sk.Level, nonNil(sk.ShownBy), sk.UpdatedAt); err != nil {
+		return fmt.Errorf("add skill: %w", err)
+	}
+	return nil
+}
+
+// Skills returns its skills, by name.
+func (s *Store) Skills(ctx context.Context) ([]memory.Skill, error) {
+	rows, err := s.pool.Query(ctx, `SELECT name, level, shown_by, updated_at FROM skills ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("query skills: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Skill
+	for rows.Next() {
+		var sk memory.Skill
+		if err := rows.Scan(&sk.Name, &sk.Level, &sk.ShownBy, &sk.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, sk)
+	}
+	return out, rows.Err()
+}
+
+// SetSkillLevel records a skill's level, worked out from its evidence.
+func (s *Store) SetSkillLevel(ctx context.Context, name string, level float64, at time.Time) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE skills SET level = $2, updated_at = $3 WHERE name = $1`, name, level, at); err != nil {
+		return fmt.Errorf("set skill level: %w", err)
+	}
+	return nil
+}
+
+// SaveEvidence stores one score of a skill.
+func (s *Store) SaveEvidence(ctx context.Context, e memory.Evidence) error {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO skill_evidence (id, skill, work_id, score, source, note, at) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		e.ID.String(), e.Skill, nullULID(e.WorkID), e.Score, e.Source, e.Note, e.At); err != nil {
+		return fmt.Errorf("save evidence: %w", err)
+	}
+	return nil
+}
+
+// RecentEvidence returns up to limit of a skill's newest scores, newest first.
+func (s *Store) RecentEvidence(ctx context.Context, skill string, limit int) ([]memory.Evidence, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, skill, work_id, score, source, note, at FROM skill_evidence
+		WHERE skill = $1 ORDER BY at DESC, id DESC LIMIT $2`, skill, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query evidence: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Evidence
+	for rows.Next() {
+		var (
+			e      memory.Evidence
+			id     string
+			workID *string
+		)
+		if err := rows.Scan(&id, &e.Skill, &workID, &e.Score, &e.Source, &e.Note, &e.At); err != nil {
+			return nil, err
+		}
+		if e.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if e.WorkID, err = parseNullULID(workID); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// SaveLesson stores something it learned about a skill.
+func (s *Store) SaveLesson(ctx context.Context, l memory.Lesson) error {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO lessons (id, skill, text, source, work_id, at) VALUES ($1, $2, $3, $4, $5, $6)`,
+		l.ID.String(), l.Skill, l.Text, l.Source, nullULID(l.WorkID), l.At); err != nil {
+		return fmt.Errorf("save lesson: %w", err)
+	}
+	return nil
+}
+
+// Lessons returns up to limit of a skill's active lessons, newest first; all
+// skills' if skill is "".
+func (s *Store) Lessons(ctx context.Context, skill string, limit int) ([]memory.Lesson, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, skill, text, source, work_id, at FROM lessons
+		WHERE retired_at IS NULL AND ($1 = '' OR skill = $1) ORDER BY at DESC, id DESC LIMIT $2`, skill, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query lessons: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Lesson
+	for rows.Next() {
+		var (
+			l      memory.Lesson
+			id     string
+			workID *string
+		)
+		if err := rows.Scan(&id, &l.Skill, &l.Text, &l.Source, &workID, &l.At); err != nil {
+			return nil, err
+		}
+		if l.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if l.WorkID, err = parseNullULID(workID); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// RetireLesson takes a lesson out of its practice: it has absorbed it.
+func (s *Store) RetireLesson(ctx context.Context, id ulid.ULID, at time.Time) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE lessons SET retired_at = $2 WHERE id = $1 AND retired_at IS NULL`, id.String(), at); err != nil {
+		return fmt.Errorf("retire lesson: %w", err)
+	}
+	return nil
+}
+
+// MarkReviewAsked records that it asked its owner to review a work.
+func (s *Store) MarkReviewAsked(ctx context.Context, work ulid.ULID, at time.Time) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE works SET review_asked_at = $2 WHERE id = $1`, work.String(), at); err != nil {
+		return fmt.Errorf("mark review asked: %w", err)
+	}
+	return nil
+}
+
+// AskedForReview returns the newest work it asked its owner to review since
+// since, and whether there is one.
+func (s *Store) AskedForReview(ctx context.Context, since time.Time) (memory.Work, bool, error) {
+	ws, err := s.queryWorks(ctx, `SELECT `+workColumns+` FROM works WHERE review_asked_at >= $1
+		ORDER BY review_asked_at DESC, id DESC LIMIT 1`, since)
+	if err != nil || len(ws) == 0 {
+		return memory.Work{}, false, err
+	}
+	return ws[0], true, nil
 }

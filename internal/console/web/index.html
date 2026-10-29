@@ -26,6 +26,7 @@
       <button data-view="memory"><i></i><span>Memory</span><em>facts &amp; people</em></button>
       <button data-view="day"><i></i><span>Day</span><em>plan &amp; outcomes</em></button>
       <button data-view="works"><i></i><span>Works</span><em>what it made</em></button>
+      <button data-view="growth"><i></i><span>Growth</span><em>dreams &amp; skills</em></button>
       <button data-view="talk"><i></i><span>Conversations</span><em>what was said</em></button>
     </nav>
     <div class="side-foot">
@@ -177,6 +178,31 @@
         <div class="chips" id="workChips"></div>
       </div>
       <div class="works-grid" id="works"></div>
+    </section>
+
+    <!-- GROWTH -->
+    <section class="view" id="view-growth">
+      <div class="view-head">
+        <div><h1>Growth</h1><p>Who it wants to become: its dreams, the goals that serve them, and how its skills are moving.</p></div>
+      </div>
+      <div class="growth-grid">
+        <div class="col">
+          <div class="card">
+            <div class="card-h">DREAMS &amp; GOALS <span class="muted">· goals are set in its Sunday review</span></div>
+            <div id="dreams" class="dreams"></div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card">
+            <div class="card-h">SKILLS <span class="muted">· 1–10, from scored works and your feedback</span></div>
+            <div id="skills" class="skills"></div>
+          </div>
+          <div class="card">
+            <div class="card-h">LAST WEEKLY REVIEW</div>
+            <div id="review" class="review"></div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- CONVERSATIONS -->

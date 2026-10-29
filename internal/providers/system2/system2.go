@@ -72,6 +72,20 @@ type Correction struct {
 	Text   string // the right fact, in the third person with names
 }
 
+// Feedback is what the speaker thought of something the agent made, as a
+// level of one of its skills.
+type Feedback struct {
+	Skill string // one of its skills, e.g. "lyric writing"
+	Level int    // 1 to 10
+	About string // what they judged, in a few words
+}
+
+// LessonLearned is specific advice the speaker gave about doing a skill well.
+type LessonLearned struct {
+	Skill string // one of its skills
+	Text  string // the lesson, as a rule for next time
+}
+
 type Role string
 
 const (
@@ -103,6 +117,10 @@ type Response struct {
 	// Misread, with CollectFacts: what the speaker's previous message was
 	// really doing (one of the intent choices), when they said it was misread; "" if not.
 	Misread string
+	// Feedback, with CollectFacts: what the speaker thought of its work (only the owner's count).
+	Feedback []Feedback
+	// Lessons, with CollectFacts: specific advice the speaker gave about its work (only the owner's count).
+	Lessons []LessonLearned
 	Usage   Usage
 	CostUSD float64 // 0 when no price is configured
 }

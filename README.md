@@ -49,7 +49,7 @@ own person, clone it and change these files; then follow [Run locally](#run-loca
 
 | File | What you change |
 |---|---|
-| [self/life.yaml](self/life.yaml) | **Who they are:** `name`, `story` (their life, one fact per line, third person), `personality` (how they are with people), `routine` (how their days go), `makes` (what they make in their own day), `family` (who they're born knowing, including you). |
+| [self/life.yaml](self/life.yaml) | **Who they are:** `name`, `story` (their life, one fact per line, third person), `personality` (how they are with people), `routine` (how their days go), `makes` (what they make in their own day), `dreams` (who they want to become), `skills` (what they're good at, and where they start), `family` (who they're born knowing, including you). |
 | [configs/minime.yaml](configs/minime.yaml) | **Where they live and what they can do:** `initiative.timezone` and `check_ins`, `daily_life` (when they plan and journal, a daily `budget_usd`, and `abilities`), `autonomy` (what they may do without asking you), the profile page and console addresses. |
 | `.env` (from [.env.example](.env.example)) | **Secrets and accounts:** the Telegram bot token and your Telegram user ID, the Postgres URL, the OpenAI key and model. |
 
@@ -261,6 +261,7 @@ Everything the agent does belongs to a kind of action, and `autonomy:` in
 | `reach_out` | messaging someone first: reminders, check-ins, what it promised | ask |
 | `commit` | promising to make something for someone | ask |
 | `publish` | putting a work on its public page | ask |
+| `dream` | adding, rewording or dropping one of its dreams | ask |
 | `spend`, `external_message` | money, and email or posts outside the chat (later) | forbid |
 
 Anything only for you (a reminder you asked for, a promise to you) never needs your OK.
@@ -279,6 +280,43 @@ applies at once and lasts across restarts (each change is kept, and shows in the
 log as `permission`). `reach_out`, `commit`, `publish` and `read_web` change this way;
 spending and posting outside the chat only in the config. Ask it what it may do on its own
 and it tells you.
+
+### Who it wants to become
+
+The agent has **dreams** (who it wants to become), **goals** that serve them (checkable in
+weeks), and **skills** that grow. You seed dreams and starting skills in
+[self/life.yaml](self/life.yaml) (Daniel's: becoming a producer people in Lagos know, and
+learning as much as a university would teach him; music production 3, lyric writing 4,
+reading and learning 5). After the first start they're its own:
+
+- **Skills grow from evidence, not claims.** Each work it makes that shows a skill (by its
+  kind: `shown_by`) is scored 1 to 10 by System 1
+  ([decisions/skill_level.yaml](decisions/skill_level.yaml)), and its level is the average
+  of its last 10 scores. Your feedback in chat ("that verse was weak", "this beat is
+  fire") counts too, double. Levels go down as well as up.
+- **A weekly review**, Sunday 20:00 (`daily_life.review_at`): it looks back at its week,
+  marks goals done or dropped, sets new ones (at most 3 at a time, each serving a dream,
+  with a "done when" and a due date), links projects to goals, and writes a private review.
+  It may want to add, reword or drop a dream, with its reason: that's the `dream` class of
+  the autonomy gate, so by default it asks you on Telegram first.
+- **Its days work toward its goals**: the morning plan sees its dreams, goals and skill
+  levels, and most of the day moves a goal forward.
+- **It learns from correction.** A lesson is specific advice about doing a skill well
+  ("cut the hook to six words", "start on the downbeat"). Lessons come from your
+  corrections in chat, from what it notices went wrong in its own work, and (soon) from
+  studying how others do it. Each skill's newest lessons go into every practice note, so its
+  next attempt is made with them in front of it, and its weekly review retires the ones it
+  has absorbed. When it would like your eyes on something it just made, it sends it to you
+  with a question ("Is the hook too wordy?"), at most once a day; your answer counts as
+  feedback on that work, and its advice becomes lessons.
+
+The console's Growth view shows its dreams, goals with their projects, skills with their
+recent scores, and the last review. From the terminal:
+
+```bash
+set -a; . ./.env; set +a; go run ./cmd/minime growth   # dreams, goals, skills
+set -a; . ./.env; set +a; go run ./cmd/minime review   # run the weekly review now
+```
 
 ### Corrections and replay
 

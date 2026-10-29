@@ -793,3 +793,108 @@ func TestLearning(t *testing.T) {
 		t.Errorf("examples = %+v", mine)
 	}
 }
+
+func TestGrowth(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	dream := memory.Dream{ID: ulid.Make(), Text: "be a producer", Status: memory.DreamActive, Source: memory.DreamFromLife, Since: now}
+	old := memory.Dream{ID: ulid.Make(), Text: "be a DJ", Status: memory.DreamActive, Source: memory.DreamFromSelf, Since: now}
+	for _, d := range []memory.Dream{dream, old} {
+		if err := s.SaveDream(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old.Status, old.EndedAt = memory.DreamDropped, now
+	if err := s.SaveDream(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	active, err := s.Dreams(ctx, true)
+	if err != nil || !slices.ContainsFunc(active, func(d memory.Dream) bool { return d.ID == dream.ID }) ||
+		slices.ContainsFunc(active, func(d memory.Dream) bool { return d.ID == old.ID }) {
+		t.Errorf("active dreams = %+v, %v", active, err)
+	}
+
+	g := memory.Goal{ID: ulid.Make(), DreamID: dream.ID, Text: "five beat ideas", DoneWhen: "five in the EP", Due: now.AddDate(0, 1, 0),
+		Status: memory.GoalActive, CreatedAt: now, UpdatedAt: now}
+	if err := s.SaveGoal(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	g.Progress = "two done"
+	if err := s.SaveGoal(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	goals, err := s.Goals(ctx, true)
+	if err != nil || !slices.ContainsFunc(goals, func(x memory.Goal) bool { return x.ID == g.ID && x.Progress == "two done" && x.DreamID == dream.ID }) {
+		t.Errorf("goals = %+v, %v", goals, err)
+	}
+	p := memory.Project{ID: ulid.Make(), Title: "The EP", Kind: "music", Status: memory.ProjectActive, GoalID: g.ID, CreatedAt: now, UpdatedAt: now}
+	if err := s.SaveProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, err := s.Project(ctx, p.ID); err != nil || !ok || got.GoalID != g.ID {
+		t.Errorf("project = %+v, %v", got, err)
+	}
+
+	name := "skill-" + ulid.Make().String()
+	if err := s.AddSkill(ctx, memory.Skill{Name: name, Level: 3, ShownBy: []string{"beat_idea"}, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddSkill(ctx, memory.Skill{Name: name, Level: 9, UpdatedAt: now}); err != nil { // already has it: kept
+		t.Fatal(err)
+	}
+	if err := s.SetSkillLevel(ctx, name, 4.6, now); err != nil {
+		t.Fatal(err)
+	}
+	skills, err := s.Skills(ctx)
+	if err != nil || !slices.ContainsFunc(skills, func(sk memory.Skill) bool { return sk.Name == name && sk.Level == 4.6 && sk.ShownBy[0] == "beat_idea" }) {
+		t.Errorf("skills = %+v, %v", skills, err)
+	}
+	for i, score := range []float64{5, 6.5} {
+		if err := s.SaveEvidence(ctx, memory.Evidence{ID: ulid.Make(), Skill: name, Score: score, Source: memory.EvidenceSystem1,
+			At: now.Add(time.Duration(i) * time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ev, err := s.RecentEvidence(ctx, name, 1); err != nil || len(ev) != 1 || ev[0].Score != 6.5 {
+		t.Errorf("evidence = %+v, %v", ev, err)
+	}
+}
+
+func TestLessons(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	skill := "skill-" + ulid.Make().String()
+	if err := s.AddSkill(ctx, memory.Skill{Name: skill, Level: 3, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	w := memory.Work{ID: ulid.Make(), Kind: "lyrics", Title: "Hook", Text: "...", CreatedAt: now}
+	if err := s.SaveWork(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	a := memory.Lesson{ID: ulid.Make(), Skill: skill, Text: "Leave space after the drop", Source: memory.LessonFromOwner, WorkID: w.ID, At: now}
+	b := memory.Lesson{ID: ulid.Make(), Skill: skill, Text: "Start on the downbeat", Source: memory.LessonFromSelf, At: now.Add(time.Minute)}
+	for _, l := range []memory.Lesson{a, b} {
+		if err := s.SaveLesson(ctx, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ls, err := s.Lessons(ctx, skill, 10); err != nil || len(ls) != 2 || ls[0].ID != b.ID || ls[1].WorkID != w.ID {
+		t.Errorf("lessons = %+v, %v", ls, err)
+	}
+	if err := s.RetireLesson(ctx, a.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if ls, _ := s.Lessons(ctx, skill, 10); len(ls) != 1 || ls[0].ID != b.ID {
+		t.Errorf("after retiring = %+v", ls)
+	}
+
+	if err := s.MarkReviewAsked(ctx, w.ID, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, err := s.AskedForReview(ctx, now.Add(30*time.Minute)); err != nil || !ok || got.ID != w.ID {
+		t.Errorf("asked for review = %+v, %v, %v", got, ok, err)
+	}
+}

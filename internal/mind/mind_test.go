@@ -44,7 +44,13 @@ type fakeStore struct {
 	approvals      []memory.Approval
 	rules          map[string]string // autonomy rules: class → verdict
 	labels         []memory.Label
-	lastRead       ulid.ULID            // what LastRead returns
+	lastRead       ulid.ULID // what LastRead returns
+	dreams         []memory.Dream
+	goals          []memory.Goal
+	skills         []memory.Skill
+	evidence       []memory.Evidence // oldest first
+	lessons        []memory.Lesson
+	reviewAsked    map[ulid.ULID]time.Time
 	public         map[ulid.ULID]string // works set public: "true by owner", ...
 }
 
@@ -75,6 +81,127 @@ func (s *fakeStore) SaveLabel(_ context.Context, l memory.Label) error {
 
 func (s *fakeStore) LastRead(context.Context, string, string, string, time.Time) (ulid.ULID, bool, error) {
 	return s.lastRead, !s.lastRead.IsZero(), nil
+}
+
+func (s *fakeStore) SaveDream(_ context.Context, d memory.Dream) error {
+	for n := range s.dreams {
+		if s.dreams[n].ID == d.ID {
+			s.dreams[n] = d
+			return nil
+		}
+	}
+	s.dreams = append(s.dreams, d)
+	return nil
+}
+
+func (s *fakeStore) Dreams(_ context.Context, activeOnly bool) ([]memory.Dream, error) {
+	var out []memory.Dream
+	for _, d := range s.dreams {
+		if !activeOnly || d.Status == memory.DreamActive {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) SaveGoal(_ context.Context, g memory.Goal) error {
+	for n := range s.goals {
+		if s.goals[n].ID == g.ID {
+			s.goals[n] = g
+			return nil
+		}
+	}
+	s.goals = append(s.goals, g)
+	return nil
+}
+
+func (s *fakeStore) Goals(_ context.Context, activeOnly bool) ([]memory.Goal, error) {
+	var out []memory.Goal
+	for _, g := range s.goals {
+		if !activeOnly || g.Status == memory.GoalActive {
+			out = append(out, g)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) AddSkill(_ context.Context, sk memory.Skill) error {
+	for _, have := range s.skills {
+		if have.Name == sk.Name {
+			return nil
+		}
+	}
+	s.skills = append(s.skills, sk)
+	return nil
+}
+
+func (s *fakeStore) Skills(context.Context) ([]memory.Skill, error) { return s.skills, nil }
+
+func (s *fakeStore) SetSkillLevel(_ context.Context, name string, level float64, at time.Time) error {
+	for n := range s.skills {
+		if s.skills[n].Name == name {
+			s.skills[n].Level, s.skills[n].UpdatedAt = level, at
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) SaveEvidence(_ context.Context, e memory.Evidence) error {
+	s.evidence = append(s.evidence, e)
+	return nil
+}
+
+func (s *fakeStore) RecentEvidence(_ context.Context, skill string, limit int) ([]memory.Evidence, error) {
+	var out []memory.Evidence
+	for n := len(s.evidence) - 1; n >= 0 && len(out) < limit; n-- {
+		if s.evidence[n].Skill == skill {
+			out = append(out, s.evidence[n])
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) SaveLesson(_ context.Context, l memory.Lesson) error {
+	s.lessons = append(s.lessons, l)
+	return nil
+}
+
+func (s *fakeStore) Lessons(_ context.Context, skill string, limit int) ([]memory.Lesson, error) {
+	var out []memory.Lesson
+	for n := len(s.lessons) - 1; n >= 0 && len(out) < limit; n-- {
+		if l := s.lessons[n]; l.RetiredAt.IsZero() && (skill == "" || l.Skill == skill) {
+			out = append(out, l)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) RetireLesson(_ context.Context, id ulid.ULID, at time.Time) error {
+	for n := range s.lessons {
+		if s.lessons[n].ID == id {
+			s.lessons[n].RetiredAt = at
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) MarkReviewAsked(_ context.Context, work ulid.ULID, at time.Time) error {
+	if s.reviewAsked == nil {
+		s.reviewAsked = map[ulid.ULID]time.Time{}
+	}
+	s.reviewAsked[work] = at
+	return nil
+}
+
+func (s *fakeStore) AskedForReview(_ context.Context, since time.Time) (memory.Work, bool, error) {
+	var best memory.Work
+	var at time.Time
+	for _, w := range s.works {
+		if t, ok := s.reviewAsked[w.ID]; ok && !t.Before(since) && t.After(at) {
+			best, at = w, t
+		}
+	}
+	return best, !at.IsZero(), nil
 }
 
 func (s *fakeStore) AwaitIntention(_ context.Context, id ulid.ULID) error {
@@ -455,6 +582,8 @@ type fakeSystem1 struct {
 	recallCalls []system1.Request
 	lifeCalls   []string // texts labelled
 	circleCalls []system1.Request
+	scores      map[string]float64 // work title → level index (0-9), for skill scoring
+	scoreCalls  []system1.Request
 }
 
 type lifeAnswer struct {
@@ -465,6 +594,13 @@ type lifeAnswer struct {
 func (f *fakeSystem1) Decide(_ context.Context, req system1.Request) (system1.Response, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if state, ok := req.State.(map[string]any); ok && state["skill"] != nil {
+		f.scoreCalls = append(f.scoreCalls, req)
+		title := state["work"].(map[string]string)["title"]
+		return system1.Response{Provider: "fake1/1", CostUSD: 0.00002, Answers: map[string]decision.Answer{
+			"level": {Type: decision.QuestionScore, Score: f.scores[title]},
+		}}, nil
+	}
 	if state, ok := req.State.(map[string]any); ok && state["relation"] != nil {
 		relation := state["relation"].(string)
 		f.circleCalls = append(f.circleCalls, req)
@@ -537,6 +673,8 @@ type fakeSystem2 struct {
 	reminders  []system2.Reminder
 	promises   []system2.Promise
 	perms      []system2.Permission
+	lessons    []system2.LessonLearned
+	feedback   []system2.Feedback
 	formats    map[string]string // reply text by Format.Name, for structured requests
 	requests   []system2.Request
 }
@@ -549,7 +687,7 @@ func (f *fakeSystem2) Reason(_ context.Context, req system2.Request) (system2.Re
 	if req.Format != nil {
 		return system2.Response{Provider: "fake2/1", Text: f.formats[req.Format.Name], CostUSD: 0.002}, nil
 	}
-	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, Promises: f.promises, Permissions: f.perms, CostUSD: 0.001}, nil
+	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, Promises: f.promises, Permissions: f.perms, Lessons: f.lessons, Feedback: f.feedback, CostUSD: 0.001}, nil
 }
 
 var testSet = questions.Set{

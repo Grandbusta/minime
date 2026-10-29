@@ -135,6 +135,31 @@ func run(args []string) error {
 		}
 		defer st.Close()
 		return printDay(ctx, st, zone, *date)
+	case "review":
+		if err := cfg.ValidateAgent(); err != nil {
+			return err
+		}
+		life, err := self.Load(cfg.Self.Life)
+		if err != nil {
+			return err
+		}
+		st, err := store.Open(ctx, cfg.Database.URL)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		return runReview(ctx, cfg, life, st, log)
+	case "growth":
+		zone, err := cfg.Initiative.Zone()
+		if err != nil {
+			return err
+		}
+		st, err := store.Open(ctx, cfg.Database.URL)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		return printGrowth(ctx, st, zone, os.Stdout)
 	case "replay":
 		st, err := store.Open(ctx, cfg.Database.URL)
 		if err != nil {
@@ -150,7 +175,7 @@ func run(args []string) error {
 		defer st.Close()
 		return works(ctx, st, fs.Args(), *limit, os.Stdout)
 	default:
-		return fmt.Errorf("unknown command %q (want run, decisions, profile, day, work or replay)", cmd)
+		return fmt.Errorf("unknown command %q (want run, decisions, profile, day, work, growth, review or replay)", cmd)
 	}
 }
 
@@ -168,6 +193,12 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		return fmt.Errorf("question set incoming_message not found in %s", cfg.Decision.QuestionSets)
 	}
 	replayHint(ctx, st, incoming, log)
+	skillLevel, ok := sets["skill_level"]
+	if !ok {
+		log.Warn("question set skill_level not found; works aren't scored, and skills only move with the owner's feedback")
+	} else if len(skillLevel.Questions) != 1 || skillLevel.Questions[0].Type != decision.QuestionScore {
+		return fmt.Errorf("question set %s must be exactly one score question", skillLevel.Ref())
+	}
 	followUp, ok := sets["follow_up"]
 	if !ok {
 		log.Warn("question set follow_up not found; replies to the agent's questions are routed on intent alone",
@@ -236,18 +267,9 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	if err != nil {
 		return err
 	}
-	var day mind.Day
-	if dl := cfg.DailyLife; dl.Enabled {
-		if day.PlanAt, day.JournalAt, err = dl.Times(); err != nil {
-			return err
-		}
-		if day.PlanPrompt, err = loadPrompt(dl.PlanPrompt); err != nil {
-			return err
-		}
-		if day.ActivityPrompt, err = loadPrompt(dl.ActivityPrompt); err != nil {
-			return err
-		}
-		day.MaxActivities, day.BudgetUSD = dl.Activities, dl.BudgetUSD
+	day, err := newDay(cfg)
+	if err != nil {
+		return err
 	}
 
 	tg := telegram.NewClient(cfg.Telegram.Token)
@@ -261,10 +283,11 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		FactRelevance: factRelevance, OpenThreads: openThreads, RecallCandidates: cfg.Memory.RecallCandidates,
 		Working: mind.WorkingMemory{Turns: cfg.WorkingMemory.Turns, Window: cfg.WorkingMemory.Window},
 		Ticks:   ticks, Zone: zone, CheckIns: mind.CheckIns{Times: checkIns, Quiet: cfg.Initiative.Quiet}, Day: day,
-		Abilities: abilitySet,
-		Autonomy:  policy,
-		Asker:     tg,
-		Log:       log.With("component", "mind"),
+		Abilities:  abilitySet,
+		SkillLevel: skillLevel,
+		Autonomy:   policy,
+		Asker:      tg,
+		Log:        log.With("component", "mind"),
 	})
 	sensor := telegram.NewSensor(tg, cfg.Telegram.OwnerIDs, cfg.Telegram.PollTimeoutSeconds, percepts,
 		log.With("component", "telegram"))
@@ -351,6 +374,108 @@ func updateProfile(ctx context.Context, cfg *config.Config, life self.Life, st *
 		fmt.Println("Profile page rewritten.")
 	} else {
 		fmt.Println("Nothing new to share; the profile page is unchanged. Use -force to rewrite it anyway.")
+	}
+	return nil
+}
+
+// newDay is its own day, from config: when it plans, journals and reviews,
+// and how. The zero Day (daily life off) has no day of its own.
+func newDay(cfg *config.Config) (mind.Day, error) {
+	var day mind.Day
+	dl := cfg.DailyLife
+	if !dl.Enabled {
+		return day, nil
+	}
+	var err error
+	if day.PlanAt, day.JournalAt, err = dl.Times(); err != nil {
+		return day, err
+	}
+	if day.ReviewDay, day.ReviewAt, err = dl.ReviewTime(); err != nil {
+		return day, err
+	}
+	for _, p := range []struct {
+		to   *mind.Prompt
+		path string
+	}{{&day.PlanPrompt, dl.PlanPrompt}, {&day.ActivityPrompt, dl.ActivityPrompt}, {&day.ReviewPrompt, dl.ReviewPrompt}} {
+		if *p.to, err = loadPrompt(p.path); err != nil {
+			return day, err
+		}
+	}
+	day.MaxActivities, day.BudgetUSD = dl.Activities, dl.BudgetUSD
+	return day, nil
+}
+
+// runReview runs the weekly review now. What it wants to change about its
+// dreams is saved for the owner's approval; the running agent asks them.
+func runReview(ctx context.Context, cfg *config.Config, life self.Life, st *store.Store, log *slog.Logger) error {
+	s2, err := newReasoner(cfg.Reasoning, cfg.Pricing, log)
+	if err != nil {
+		return err
+	}
+	zone, err := cfg.Initiative.Zone()
+	if err != nil {
+		return err
+	}
+	day, err := newDay(cfg)
+	if err != nil {
+		return err
+	}
+	if day.ReviewPrompt.Text == "" {
+		return errors.New("daily_life is off: no weekly review")
+	}
+	policy, err := cfg.Policy()
+	if err != nil {
+		return err
+	}
+	m := mind.New(mind.Config{Life: life, Store: st, System2: s2, Zone: zone, Day: day, Autonomy: policy,
+		Log: log.With("component", "mind")})
+	if err := m.Review(ctx, time.Now()); err != nil {
+		return err
+	}
+	fmt.Println("Reviewed the week. Run `minime growth`, or open the console's Growth view, to see where it stands.")
+	return nil
+}
+
+// growthStore is what printGrowth reads.
+type growthStore interface {
+	Dreams(ctx context.Context, activeOnly bool) ([]memory.Dream, error)
+	Goals(ctx context.Context, activeOnly bool) ([]memory.Goal, error)
+	Skills(ctx context.Context) ([]memory.Skill, error)
+}
+
+// printGrowth shows who it wants to become: its dreams, its goals and its skills.
+func printGrowth(ctx context.Context, st growthStore, zone *time.Location, out io.Writer) error {
+	dreams, err := st.Dreams(ctx, true)
+	if err != nil {
+		return err
+	}
+	goals, err := st.Goals(ctx, true)
+	if err != nil {
+		return err
+	}
+	skills, err := st.Skills(ctx)
+	if err != nil {
+		return err
+	}
+	if len(dreams) == 0 {
+		fmt.Fprintln(out, "No dreams yet: they're seeded from self/life.yaml when the agent starts.")
+	}
+	for _, d := range dreams {
+		fmt.Fprintf(out, "Dream: %s\n", d.Text)
+		for _, g := range goals {
+			if g.DreamID == d.ID {
+				fmt.Fprintf(out, "  Goal, due %s: %s\n    done when: %s\n    now: %s\n", g.Due.In(zone).Format("Mon 2 Jan"), g.Text, g.DoneWhen,
+					map[bool]string{true: g.Progress, false: "just started"}[g.Progress != ""])
+			}
+		}
+	}
+	if len(skills) > 0 {
+		fmt.Fprintln(out, "\nSkills (1-10):")
+		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		for _, sk := range skills {
+			fmt.Fprintf(w, "  %s\t%.1f\t%s\n", sk.Name, sk.Level, strings.Repeat("▮", int(sk.Level+0.5)))
+		}
+		w.Flush()
 	}
 	return nil
 }

@@ -87,6 +87,8 @@ func (m *Mind) request(ctx context.Context, a memory.Approval) string {
 		ask = fmt.Sprintf("%s asked me to make something: %s. Can I say yes?", who, a.What)
 	case action.Publish:
 		ask = "Can I put this on my public page?\n\n" + a.What
+	case action.Dream:
+		ask = "Can I " + a.What + "?"
 	default:
 		ask = "Can I " + a.What + "?"
 	}
@@ -182,6 +184,12 @@ func (m *Mind) carryOut(ctx context.Context, a memory.Approval, now time.Time) s
 	yes := a.Status == memory.ApprovalApproved
 	why := map[string]string{memory.ApprovalDenied: "the owner said no", memory.ApprovalExpired: "no answer from the owner"}[a.Status]
 	switch action.Class(a.Class) {
+	case action.Dream:
+		if !yes {
+			return "kept its dreams as they are"
+		}
+		return m.changeDream(ctx, a, now)
+
 	case action.Publish:
 		public, by := yes, memory.PublicByOwner
 		if a.Status == memory.ApprovalExpired {

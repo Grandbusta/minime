@@ -1,0 +1,37 @@
+# How good is a work the agent made, as evidence of one of its skills? One
+# score question per work and skill: the state is `skill` (its name) and
+# `work` (title, kind, text). Levels 1 to 10; the agent's level in a skill is
+# the average of its recent scores (its owner's feedback counts double).
+#
+# Replayed twice on the live model, identical both times: Daniel's works 4.2
+# (lyrics) to 5.9 (a beat idea); a one-line beat idea 1.5 and "I love you baby
+# yeah" lyrics 1.2; Shakespeare's Sonnet 18 as lyric writing 6.7. Harsh at the
+# top, so a level above 7 is earned; the order is right.
+id: skill_level
+version: 1
+
+questions:
+  - name: level
+    type: score
+    instructions: "How skilled is the person who made `work`, judged only as a piece of `skill`? Judge the work itself, honestly, the way a demanding teacher would: not its effort, length or enthusiasm."
+    levels:
+      - label: "1"
+        description: "A first attempt: basic mistakes, little sense of how it's done."
+      - label: "2"
+        description: "A beginner: knows the basics, but it's clumsy and generic."
+      - label: "3"
+        description: "An early learner: some good moments, mostly ordinary."
+      - label: "4"
+        description: "Developing: competent in places, uneven overall."
+      - label: "5"
+        description: "Competent: solid and clear, but not distinctive."
+      - label: "6"
+        description: "Good: confident craft and a few original choices."
+      - label: "7"
+        description: "Very good: skilled, distinctive, would impress people who know the field."
+      - label: "8"
+        description: "Excellent: professional quality."
+      - label: "9"
+        description: "Outstanding: among the best work of its kind."
+      - label: "10"
+        description: "A master's work."

@@ -34,6 +34,9 @@ type Day struct {
 	BudgetUSD      float64       // most its own day may cost; past it, the rest waits for tomorrow
 	PlanPrompt     Prompt        // how System 2 plans the day; zero: no day of its own
 	ActivityPrompt Prompt        // how System 2 does an activity
+	ReviewDay      time.Weekday  // its weekly review: the day
+	ReviewAt       time.Duration // and the time, from midnight in its time zone
+	ReviewPrompt   Prompt        // how System 2 reviews the week; zero: no review
 }
 
 const (
@@ -54,7 +57,7 @@ const (
 
 // lifeActions are the decisions its own day is made of, for the budget:
 // promises count, though they are kept even past it.
-var lifeActions = []string{"plan_day", "activity", "task"}
+var lifeActions = []string{"plan_day", "activity", "task", "weekly_review"}
 
 func (m *Mind) dayOn() bool { return m.Day.PlanPrompt.Text != "" && m.Day.ActivityPrompt.Text != "" }
 
@@ -110,10 +113,11 @@ func planFormat(abilities []ability.Ability) *system2.Format {
 		"properties": map[string]any{
 			"activities": map[string]any{"type": "array", "items": map[string]any{
 				"type": "object", "additionalProperties": false,
-				"required": []string{"at", "what", "project_id", "new_project_title", "project_kind", "ability", "query"},
+				"required": []string{"at", "what", "project_id", "new_project_title", "project_kind", "ability", "query", "goal_id"},
 				"properties": map[string]any{
 					"ability":           map[string]any{"type": "string", "enum": names},
 					"query":             map[string]any{"type": "string", "description": "what the ability is to look for; empty if none"},
+					"goal_id":           map[string]any{"type": "string", "description": "the goal this moves forward, or empty"},
 					"at":                map[string]any{"type": "string", "description": "HH:MM, local time"},
 					"what":              map[string]any{"type": "string"},
 					"project_id":        map[string]any{"type": "string", "description": "an existing project's id, or empty"},
@@ -147,6 +151,9 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 		note.WriteString("\n\nWhat you're in the middle of:")
 		for _, p := range projects {
 			fmt.Fprintf(&note, "\n- id %s: %s (%s), last worked on %s.", p.ID, p.Title, p.Kind, p.UpdatedAt.In(m.Zone).Format("2 Jan"))
+			if !p.GoalID.IsZero() {
+				fmt.Fprintf(&note, " Serves goal %s.", p.GoalID)
+			}
 			if p.Source != nil {
 				fmt.Fprintf(&note, " Reading %q by %s, %d%% through.", p.Source.Title, orDefault(p.Source.Author, "an unknown author"),
 					p.PercentRead())
@@ -169,6 +176,7 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 			fmt.Fprintf(&note, "\n- %s: %s", a.Name(), a.Describe())
 		}
 	}
+	note.WriteString(m.growthNote(ctx, now))
 	if j, ok, err := m.Store.LatestWork(ctx, "journal"); err == nil && ok {
 		fmt.Fprintf(&note, "\n\nYour last journal entry (%s):\n%s", j.CreatedAt.In(m.Zone).Format("Monday 2 Jan"), j.Text)
 	}
@@ -193,6 +201,7 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 			ProjectKind     string `json:"project_kind"`
 			Ability         string `json:"ability"`
 			Query           string `json:"query"`
+			GoalID          string `json:"goal_id"`
 		} `json:"activities"`
 	}
 	if err := json.Unmarshal([]byte(resp.Text), &plan); err != nil {
@@ -203,6 +212,12 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 	known := map[string]bool{}
 	for _, p := range projects {
 		known[p.ID.String()] = true
+	}
+	goals := map[string]bool{}
+	if gs, err := m.Store.Goals(ctx, true); err == nil {
+		for _, g := range gs {
+			goals[g.ID.String()] = true
+		}
 	}
 	journalAt := midnight.Add(m.Day.JournalAt)
 	var lines []string
@@ -219,13 +234,17 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 		if due.Before(now) || !due.Before(journalAt) {
 			continue // in the past, or after the journal: not today
 		}
-		var project ulid.ULID
+		var project, goal ulid.ULID
+		if id := strings.TrimSpace(a.GoalID); goals[id] {
+			goal = ulid.MustParse(id)
+		}
 		switch id := strings.TrimSpace(a.ProjectID); {
 		case known[id]:
 			project = ulid.MustParse(id)
+			m.linkGoal(ctx, project, goal)
 		case strings.TrimSpace(a.NewProjectTitle) != "":
 			p := memory.Project{ID: ulid.Make(), Title: strings.TrimSpace(a.NewProjectTitle), Kind: orDefault(a.ProjectKind, "writing"),
-				Status: memory.ProjectActive, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
+				Status: memory.ProjectActive, GoalID: goal, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
 			if err := m.Store.SaveProject(ctx, p); err != nil {
 				m.Log.Error("save project", "err", err)
 				continue
@@ -255,6 +274,21 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 	m.Log.Info("planned the day", "things", len(lines), "cost_usd", resp.CostUSD)
 }
 
+// linkGoal links a project to the goal it serves, if it serves none yet.
+func (m *Mind) linkGoal(ctx context.Context, project, goal ulid.ULID) {
+	if goal.IsZero() {
+		return
+	}
+	p, ok, err := m.Store.Project(ctx, project)
+	if err != nil || !ok || !p.GoalID.IsZero() {
+		return
+	}
+	p.GoalID = goal
+	if err := m.Store.SaveProject(ctx, p); err != nil {
+		m.Log.Error("save project", "err", err)
+	}
+}
+
 // intend saves an activity of its own day: i's text, time, project and ability.
 func (m *Mind) intend(ctx context.Context, i memory.Intention, now time.Time) bool {
 	i.ID, i.Subject, i.Kind, i.Status = ulid.Make(), memory.SubjectSelf, memory.IntentionActivity, memory.IntentionPending
@@ -276,14 +310,17 @@ func activityFormat(crafts []self.Craft) *system2.Format {
 	}
 	return &system2.Format{Name: "activity", Schema: map[string]any{
 		"type": "object", "additionalProperties": false,
-		"required": []string{"title", "kind", "text", "project_notes", "project_done", "remember"},
+		"required": []string{"title", "kind", "text", "project_notes", "project_done", "remember", "lessons", "ask_for_review", "review_question"},
 		"properties": map[string]any{
-			"title":         map[string]any{"type": "string"},
-			"kind":          map[string]any{"type": "string", "enum": kinds},
-			"text":          map[string]any{"type": "string"},
-			"project_notes": map[string]any{"type": "string"},
-			"project_done":  map[string]any{"type": "boolean"},
-			"remember":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"title":           map[string]any{"type": "string"},
+			"kind":            map[string]any{"type": "string", "enum": kinds},
+			"text":            map[string]any{"type": "string"},
+			"project_notes":   map[string]any{"type": "string"},
+			"project_done":    map[string]any{"type": "boolean"},
+			"remember":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"lessons":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"ask_for_review":  map[string]any{"type": "boolean"},
+			"review_question": map[string]any{"type": "string"},
 		},
 	}}
 }
@@ -380,12 +417,15 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	}
 	d.Provider, d.CostUSD = resp.Provider, resp.CostUSD
 	var out struct {
-		Title        string   `json:"title"`
-		Kind         string   `json:"kind"`
-		Text         string   `json:"text"`
-		ProjectNotes string   `json:"project_notes"`
-		ProjectDone  bool     `json:"project_done"`
-		Remember     []string `json:"remember"`
+		Title          string   `json:"title"`
+		Kind           string   `json:"kind"`
+		Text           string   `json:"text"`
+		ProjectNotes   string   `json:"project_notes"`
+		ProjectDone    bool     `json:"project_done"`
+		Remember       []string `json:"remember"`
+		Lessons        []string `json:"lessons"`
+		AskForReview   bool     `json:"ask_for_review"`
+		ReviewQuestion string   `json:"review_question"`
 	}
 	if err := json.Unmarshal([]byte(resp.Text), &out); err != nil || strings.TrimSpace(out.Text) == "" {
 		m.finish(ctx, i, memory.IntentionMissed, "nothing came of it", now)
@@ -425,6 +465,11 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	}
 	d.Reply = title + "\n\n" + w.Text
 	m.finishLife(ctx, d, start, decision.OutcomeOK, fmt.Sprintf("made %s %q", w.Kind, title))
+	m.scoreWork(ctx, w, p.ID, &d.ID)
+	m.learnFromWork(ctx, w, out.Lessons)
+	if out.AskForReview && action == "activity" { // not what it made for someone else
+		m.askForReview(ctx, w, strings.TrimSpace(out.ReviewQuestion), now)
+	}
 	log.Info("made something", "action", action, "ability", i.Ability, "kind", w.Kind, "title", title, "cost_usd", d.CostUSD)
 	return w, true
 }
@@ -436,6 +481,7 @@ func (m *Mind) activityNote(ctx context.Context, i memory.Intention, what string
 	var b strings.Builder
 	b.WriteString(m.now(now))
 	b.WriteString("\n\n" + what)
+	b.WriteString(m.lessonsNote(ctx))
 	if i.ProjectID.IsZero() {
 		return b.String(), nil, true
 	}

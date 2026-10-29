@@ -60,6 +60,7 @@ func (m *Mind) tick(ctx context.Context, now time.Time) {
 	m.sendApprovals(ctx)
 	m.doDueIntentions(ctx, now)
 	m.preparePromises(ctx, now)
+	m.weeklyReview(ctx, now)
 	if m.checkInTime(now) {
 		m.checkIn(ctx, now)
 	}

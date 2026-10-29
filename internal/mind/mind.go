@@ -75,6 +75,20 @@ type Store interface {
 	DeleteFact(ctx context.Context, id ulid.ULID) (bool, error)
 	SaveLabel(ctx context.Context, l memory.Label) error
 	LastRead(ctx context.Context, setID, source, thread string, before time.Time) (ulid.ULID, bool, error)
+	SaveDream(ctx context.Context, d memory.Dream) error
+	Dreams(ctx context.Context, activeOnly bool) ([]memory.Dream, error)
+	SaveGoal(ctx context.Context, g memory.Goal) error
+	Goals(ctx context.Context, activeOnly bool) ([]memory.Goal, error)
+	AddSkill(ctx context.Context, sk memory.Skill) error
+	Skills(ctx context.Context) ([]memory.Skill, error)
+	SetSkillLevel(ctx context.Context, name string, level float64, at time.Time) error
+	SaveEvidence(ctx context.Context, e memory.Evidence) error
+	RecentEvidence(ctx context.Context, skill string, limit int) ([]memory.Evidence, error)
+	SaveLesson(ctx context.Context, l memory.Lesson) error
+	Lessons(ctx context.Context, skill string, limit int) ([]memory.Lesson, error)
+	RetireLesson(ctx context.Context, id ulid.ULID, at time.Time) error
+	MarkReviewAsked(ctx context.Context, work ulid.ULID, at time.Time) error
+	AskedForReview(ctx context.Context, since time.Time) (memory.Work, bool, error)
 	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
 	SaveProject(ctx context.Context, p memory.Project) error
 	Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error)
@@ -143,6 +157,9 @@ type Config struct {
 	// Abilities are what it can do in its day beyond writing: read, write its
 	// journal (which its day needs). nil: none.
 	Abilities *ability.Set
+	// SkillLevel scores a work as evidence of a skill (one score question);
+	// zero value: works aren't scored, and skills only move with feedback.
+	SkillLevel questions.Set
 	// Autonomy is what it may do on its own; the zero value allows everything.
 	Autonomy action.Policy
 	// Asker asks the owner what Autonomy says to ask first; nil: requests
@@ -155,6 +172,7 @@ type Mind struct {
 	Config
 	lastTick time.Time // when the clock last ticked; zero before the first tick
 	planned  string    // the local date ("2006-01-02") its day was last planned for
+	reviewed time.Time // the weekly review time it last considered
 }
 
 func New(c Config) *Mind {
@@ -167,6 +185,7 @@ func New(c Config) *Mind {
 func (m *Mind) Run(ctx context.Context) error {
 	m.loadPermissions(ctx)
 	m.bornKnowing(ctx)
+	m.bornWanting(ctx)
 	m.labelUnlabelledFacts(ctx)
 	for {
 		select {
@@ -582,6 +601,8 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	more = append(more, m.correctFacts(ctx, p, d, refs, resp.Corrections, n)...)
 	more = append(more, m.changePermissions(ctx, p, d, resp.Permissions)...)
 	more = append(more, m.labelMisread(ctx, p, d, resp.Misread)...)
+	more = append(more, m.takeFeedback(ctx, p, d, resp.Feedback)...)
+	more = append(more, m.takeLessons(ctx, p, d, resp.Lessons)...)
 	return resp.Text, more
 }
 
@@ -714,7 +735,8 @@ func (m *Mind) instructions(ctx context.Context, person memory.Person, n names) 
 	return strings.NewReplacer("{name}", n.agent, "{speaker}", n.speaker, "{life_story}", story,
 		"{personality}", personality, "{who_they_are}", m.whoTheyAre(ctx, person, n),
 		"{makes}", m.makesList(), "{abilities}", m.abilitiesList(), "{intents}", strings.Join(m.intents(), ", "),
-		"{correct_self}", m.correctSelf(person), "{permissions_help}", m.permissionsHelp(person, n)).Replace(m.ReplyPrompt.Text)
+		"{correct_self}", m.correctSelf(person), "{permissions_help}", m.permissionsHelp(person, n),
+		"{feedback_help}", m.feedbackHelp(ctx, person)).Replace(m.ReplyPrompt.Text)
 }
 
 // turns lays recalled exchanges out as a conversation for System 2.

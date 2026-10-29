@@ -69,10 +69,12 @@ daily_life:
   abilities: [read_book, read_article]
   plan_at: "06:00"
   journal_at: "22:00"
+  review_at: "Sun 20:00" # its weekly review: goals checked, new ones set, dreams revisited
   activities: 4      # things it plans a day, besides the journal
   budget_usd: 0.05   # most its own day may cost; past it, the rest is missed
   plan_prompt: prompts/plan.md
   activity_prompt: prompts/activity.md
+  review_prompt: prompts/review.md
 
 # What it may do on its own (the autonomy gate). Each kind of action is auto
 # (on its own), ask (it asks the owner first, on Telegram, with Approve and
@@ -82,6 +84,7 @@ daily_life:
 #   reach_out         messaging someone first (reminders, check-ins, deliveries)
 #   commit            promising to make something for someone
 #   publish           putting a work on its public page
+#   dream             adding, rewording or dropping one of its dreams
 #   spend, external_message   money, and email or posts outside the chat (later)
 autonomy:
   # owner: telegram:123   # who approves; default: the first of telegram.owner_ids
@@ -90,6 +93,7 @@ autonomy:
     reach_out: ask
     commit: ask
     publish: ask
+    dream: ask
     spend: forbid
     external_message: forbid
   ask_expires: 24h # unanswered, a request is denied

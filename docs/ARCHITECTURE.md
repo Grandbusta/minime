@@ -722,6 +722,38 @@ everything it says it read or made exists, so its profile's Work section is hone
 
 ---
 
+
+### 4.12 Growth: dreams, goals and skills (phase A)
+
+Who the agent wants to become, and how good it is getting.
+
+- **Dreams** (years, open-ended) → **goals** (weeks, checkable: a "done when" and a due
+  date, at most 3 active) → **projects** (`projects.goal_id`) → **activities**. The
+  creator seeds dreams and starting skills in `self/life.yaml`; they are copied into memory
+  the first time (`bornWanting`), and after that they are the agent's own.
+- **Skills grow from evidence** (`skill_evidence`): System 1 scores each work whose kind
+  shows a skill (`skill_level`, one score question, 10 levels; a live replay put a one-line
+  beat idea at 1.5, Daniel's works at 4.2 to 5.9 and Shakespeare's Sonnet 18 at 6.7), and
+  the owner's feedback in chat (System 2 returns `feedback`) counts double. A skill's level
+  is the weighted average of its last 10 scores, so it can fall.
+- **The weekly review** (`daily_life.review_at`, Sunday 20:00; `minime review` on demand):
+  System 2 sees its dreams, goals, skills with recent scores, projects and the week's works
+  and journals, and returns goal progress (done, dropped), new goals, project links and
+  dream changes. Dream changes go through the autonomy gate (`dream`, default ask). The
+  review is kept as a private `review` work, never public.
+- **The plan** sees dreams, goals and skills and names the goal each activity serves.
+- **Learning from correction** (learning loop, stage 1): `lessons` are specific rules for
+  doing a skill well, from the owner's corrections (System 2 returns `lessons`, owner only),
+  its own work (the activity format returns up to two), or studying others (stage 3). Each
+  skill's three newest active lessons go into every practice note; the weekly review retires
+  absorbed ones and adds what the week taught. After making something it may ask its owner
+  to review it (`ask_for_review`, at most once a day, percept kind `review_request`); the
+  owner's feedback and lessons within 48 hours are tied to that work.
+- **Next in the learning loop:** learning plans per skill goal (stages, resources, practice
+  projects), then the open web (`internal/search`, OpenAI web search first, switchable to
+  TinyFish; `web_search` and `read_page` abilities, fenced and capped; comparison notes).
+- **Later (phase B):** skill packs (a skill's crafts, tools and guidance), and a wishlist of
+  tools it lacks; then new tools (web search, code, audio), each an ability behind the gate.
 ## 5. Technology
 
 | Concern     | Choice |
@@ -826,6 +858,10 @@ mini-me/
    3. ✅ Promises from chat: commitments become `task` intentions, made and delivered when due.
    4. ✅ Work on its profile: a Work section from the works it decides are public, each on its
       own page; the owner can hide or show any with `minime work`.
+   5. ✅ Growth, phase A (§4.12): dreams, goals and skills; skills scored from works and the
+      owner's feedback; a weekly review; plans that work toward goals.
+   6. Learning loop: ✅ lessons and asking the owner for review; next, learning plans, then
+      the open web.
    - Later: the same machinery takes jobs from other sources (chat, email, a job board); audio
      for its music is TBD.
 7. ✅ **Autonomy gate:** action classes and a config policy (auto, ask, forbid); asking the

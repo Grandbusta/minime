@@ -32,9 +32,10 @@ type Sensor interface {
 // is on the decision, and the percept places it in the conversation, so a
 // reply to it reads as an answer.
 const (
-	KindReminder = "reminder" // reminding someone of what they asked
-	KindCheckIn  = "check_in" // asking how something in their life is going
-	KindDelivery = "delivery" // sending what it promised to make for them
+	KindReminder      = "reminder"       // reminding someone of what they asked
+	KindCheckIn       = "check_in"       // asking how something in their life is going
+	KindDelivery      = "delivery"       // sending what it promised to make for them
+	KindReviewRequest = "review_request" // asking its owner to look at something it made
 )
 
 // KindApproval is the owner answering something the agent asked before

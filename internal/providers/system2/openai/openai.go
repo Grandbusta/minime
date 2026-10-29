@@ -58,7 +58,7 @@ type wireFormat struct {
 var replyWithFacts = &wireText{Format: wireFormat{
 	Type: "json_schema", Name: "reply_with_facts", Strict: true,
 	Schema: map[string]any{
-		"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises", "permissions", "corrections", "misread"},
+		"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises", "permissions", "corrections", "misread", "feedback", "lessons"},
 		"properties": map[string]any{
 			"reply":        map[string]any{"type": "string"},
 			"who_they_are": map[string]any{"type": "string"},
@@ -85,6 +85,21 @@ var replyWithFacts = &wireText{Format: wireFormat{
 				},
 			}},
 			"misread": map[string]any{"type": "string"},
+			"lessons": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object", "additionalProperties": false, "required": []string{"skill", "lesson"},
+				"properties": map[string]any{
+					"skill":  map[string]any{"type": "string"},
+					"lesson": map[string]any{"type": "string"},
+				},
+			}},
+			"feedback": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object", "additionalProperties": false, "required": []string{"skill", "level", "about"},
+				"properties": map[string]any{
+					"skill": map[string]any{"type": "string"},
+					"level": map[string]any{"type": "integer"},
+					"about": map[string]any{"type": "string"},
+				},
+			}},
 			"promises": map[string]any{"type": "array", "items": map[string]any{
 				"type": "object", "additionalProperties": false, "required": []string{"by", "what", "ability", "query"},
 				"properties": map[string]any{
@@ -210,6 +225,8 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		perms      []system2.Permission
 		fixes      []system2.Correction
 		misread    string
+		feedback   []system2.Feedback
+		lessons    []system2.LessonLearned
 	)
 	switch {
 	case refusal.Len() > 0:
@@ -241,7 +258,16 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 				Action string `json:"action"`
 				Text   string `json:"text"`
 			} `json:"corrections"`
-			Misread string `json:"misread"`
+			Misread  string `json:"misread"`
+			Feedback []struct {
+				Skill string `json:"skill"`
+				Level int    `json:"level"`
+				About string `json:"about"`
+			} `json:"feedback"`
+			Lessons []struct {
+				Skill  string `json:"skill"`
+				Lesson string `json:"lesson"`
+			} `json:"lessons"`
 		}
 		if err := json.Unmarshal([]byte(reply), &out); err != nil {
 			return system2.Response{}, fmt.Errorf("openai responses: reply is not the requested JSON: %w", err)
@@ -271,6 +297,16 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 			}
 		}
 		misread = strings.TrimSpace(out.Misread)
+		for _, l := range out.Lessons {
+			if skill, text := strings.TrimSpace(l.Skill), strings.TrimSpace(l.Lesson); skill != "" && text != "" {
+				lessons = append(lessons, system2.LessonLearned{Skill: skill, Text: text})
+			}
+		}
+		for _, f := range out.Feedback {
+			if skill := strings.TrimSpace(f.Skill); skill != "" && f.Level >= 1 && f.Level <= 10 {
+				feedback = append(feedback, system2.Feedback{Skill: skill, Level: f.Level, About: strings.TrimSpace(f.About)})
+			}
+		}
 		for _, p := range out.Promises {
 			if by, what := strings.TrimSpace(p.By), strings.TrimSpace(p.What); by != "" && what != "" {
 				promises = append(promises, system2.Promise{By: by, What: what, Ability: strings.TrimSpace(p.Ability),
@@ -297,6 +333,8 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		Permissions: perms,
 		Corrections: fixes,
 		Misread:     misread,
+		Feedback:    feedback,
+		Lessons:     lessons,
 		Usage:       system2.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, ReasoningTokens: u.OutputTokensDetails.ReasoningTokens},
 		CostUSD: c.price.Cost(pricing.Usage{
 			InputTokens: u.InputTokens, CachedTokens: u.InputTokensDetails.CachedTokens,
