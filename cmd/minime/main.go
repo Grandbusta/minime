@@ -3,6 +3,7 @@
 //	minime [run] [-config path]          run the agent
 //	minime decisions [-n 20] [-config path]  show the latest decisions
 //	minime profile [-force] [-config path]   update the profile page now
+//	minime day [-date YYYY-MM-DD] [-config path]  what it planned and made that day
 package main
 
 import (
@@ -27,8 +28,10 @@ import (
 	"minime/internal/bus"
 	"minime/internal/channel/telegram"
 	"minime/internal/config"
+	"minime/internal/console"
 	"minime/internal/decision"
 	"minime/internal/decision/questions"
+	"minime/internal/memory"
 	"minime/internal/mind"
 	"minime/internal/perception"
 	"minime/internal/portfolio"
@@ -57,6 +60,7 @@ func run(args []string) error {
 	cfgPath := fs.String("config", "configs/minime.yaml", "path to the config file")
 	limit := fs.Int("n", 20, "number of decisions to show")
 	force := fs.Bool("force", false, "profile: rewrite the page even if nothing changed")
+	date := fs.String("date", "", "day: the day to show, YYYY-MM-DD (default today)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -111,8 +115,19 @@ func run(args []string) error {
 		}
 		defer st.Close()
 		return updateProfile(ctx, cfg, life, st, *force, log)
+	case "day":
+		zone, err := cfg.Initiative.Zone()
+		if err != nil {
+			return err
+		}
+		st, err := store.Open(ctx, cfg.Database.URL)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		return printDay(ctx, st, zone, *date)
 	default:
-		return fmt.Errorf("unknown command %q (want run, decisions or profile)", cmd)
+		return fmt.Errorf("unknown command %q (want run, decisions, profile or day)", cmd)
 	}
 }
 
@@ -184,6 +199,19 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		return err
 	}
 	ticks := make(chan time.Time)
+	var day mind.Day
+	if dl := cfg.DailyLife; dl.Enabled {
+		if day.PlanAt, day.JournalAt, err = dl.Times(); err != nil {
+			return err
+		}
+		if day.PlanPrompt, err = loadPrompt(dl.PlanPrompt); err != nil {
+			return err
+		}
+		if day.ActivityPrompt, err = loadPrompt(dl.ActivityPrompt); err != nil {
+			return err
+		}
+		day.MaxActivities, day.BudgetUSD = dl.Activities, dl.BudgetUSD
+	}
 
 	tg := telegram.NewClient(cfg.Telegram.Token)
 	percepts := bus.New[perception.Percept](64)
@@ -195,7 +223,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		PersonCircle:  personCircle,
 		FactRelevance: factRelevance, OpenThreads: openThreads, RecallCandidates: cfg.Memory.RecallCandidates,
 		Working: mind.WorkingMemory{Turns: cfg.WorkingMemory.Turns, Window: cfg.WorkingMemory.Window},
-		Ticks:   ticks, Zone: zone, CheckIns: mind.CheckIns{Times: checkIns, Quiet: cfg.Initiative.Quiet},
+		Ticks:   ticks, Zone: zone, CheckIns: mind.CheckIns{Times: checkIns, Quiet: cfg.Initiative.Quiet}, Day: day,
 		Log: log.With("component", "mind"),
 	})
 	sensor := telegram.NewSensor(tg, cfg.Telegram.OwnerIDs, cfg.Telegram.PollTimeoutSeconds, percepts,
@@ -205,11 +233,23 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		"system1", cfg.Decision.Provider.Provider, "question_set", incoming.Ref(), "follow_up", followUp.Ref(),
 		"life_area", lifeArea.Ref(), "person_circle", personCircle.Ref(), "fact_relevance", factRelevance.Ref(),
 		"open_threads", openThreads.Ref(), "timezone", zone.String(), "check_ins", cfg.Initiative.CheckIns,
+		"daily_life", cfg.DailyLife.Enabled, "routine_lines", len(life.Routine),
 		"system2", cfg.Reasoning.Provider.Provider+"/"+cfg.Reasoning.Model, "effort", cfg.Reasoning.Effort, "prompt", replyPrompt.Ref)
+	started := time.Now()
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return sensor.Run(ctx) })
 	g.Go(func() error { return m.Run(ctx) })
 	g.Go(func() error { return runClock(ctx, ticks) })
+	if cfg.Console.Addr != "" {
+		sets := []string{incoming.Ref(), followUp.Ref(), lifeArea.Ref(), personCircle.Ref(), factRelevance.Ref(),
+			openThreads.Ref(), replyPrompt.Ref, day.PlanPrompt.Ref, day.ActivityPrompt.Ref}
+		con := &console.Server{Store: st, Token: cfg.Console.Token, Log: log.With("component", "console"), Info: console.Info{
+			Name: life.Name, Zone: zone, Started: started, Sets: sets,
+			System1: cfg.Decision.Provider.Provider + "/" + orDefault(cfg.Decision.Model, s1openai.DefaultModel),
+			System2: fmt.Sprintf("%s/%s (effort %s)", cfg.Reasoning.Provider.Provider, cfg.Reasoning.Model, orDefault(cfg.Reasoning.Effort, "default")),
+		}}
+		g.Go(func() error { return console.Serve(ctx, cfg.Console.Addr, con.Handler(), con.Log) })
+	}
 	if profile != nil {
 		g.Go(func() error { return profile.Run(ctx) })
 		g.Go(func() error {
@@ -397,6 +437,57 @@ func printDecisions(ctx context.Context, st *store.Store, n int) error {
 			d.Tier, d.SetID, provider, d.Action, confidence, d.Gate, outcome, d.Latency.Round(time.Millisecond), d.CostUSD, reply)
 	}
 	return w.Flush()
+}
+
+// printDay shows what the agent planned on a day, how each went, and what it made.
+func printDay(ctx context.Context, st *store.Store, zone *time.Location, date string) error {
+	day := time.Now().In(zone)
+	if date != "" {
+		var err error
+		if day, err = time.ParseInLocation("2006-01-02", date, zone); err != nil {
+			return fmt.Errorf("-date must be YYYY-MM-DD: %w", err)
+		}
+	}
+	from := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, zone)
+	to := from.AddDate(0, 0, 1)
+	intentions, err := st.IntentionsDue(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	works, err := st.WorksBetween(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s (%s)\n\nPlanned:\n", from.Format("Monday 2 January 2006"), zone)
+	if len(intentions) == 0 {
+		fmt.Println("  nothing")
+	}
+	for _, i := range intentions {
+		who := "himself"
+		if i.Subject != memory.SubjectSelf {
+			who = i.Subject
+		}
+		line := fmt.Sprintf("  %s  %-9s %-8s for %s: %s", i.DueAt.In(zone).Format("15:04"), i.Status, i.Kind, who, i.Text)
+		if i.Result != "" {
+			line += " → " + i.Result
+		}
+		fmt.Println(line)
+	}
+	fmt.Println("\nMade:")
+	if len(works) == 0 {
+		fmt.Println("  nothing yet")
+	}
+	for _, w := range works {
+		fmt.Printf("\n--- %s · %s · %s\n%s\n", w.CreatedAt.In(zone).Format("15:04"), w.Kind, w.Title, w.Text)
+	}
+	return nil
+}
+
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
 }
 
 func newLogger(level string) (*slog.Logger, error) {

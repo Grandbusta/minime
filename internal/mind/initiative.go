@@ -30,18 +30,39 @@ type CheckIns struct {
 }
 
 const (
-	remindersPerTick = 10
+	intentionsPerTick = 10
 	// reminderGiveUp is how late a reminder may still be sent, e.g. after
-	// the agent was down; later, it is marked failed.
+	// the agent was down; later, it is marked missed.
 	reminderGiveUp = 24 * time.Hour
 )
 
 func (m *Mind) tick(ctx context.Context, now time.Time) {
-	m.sendDueReminders(ctx, now)
+	m.planDay(ctx, now)
+	m.doDueIntentions(ctx, now)
 	if m.checkInTime(now) {
 		m.checkIn(ctx, now)
 	}
 	m.lastTick = now
+}
+
+// doDueIntentions does what is due: reminders for people, activities of its own.
+func (m *Mind) doDueIntentions(ctx context.Context, now time.Time) {
+	due, err := m.Store.DueIntentions(ctx, now, intentionsPerTick)
+	if err != nil {
+		m.Log.Warn("loading due intentions failed", "err", err)
+		return
+	}
+	for _, i := range due {
+		switch i.Kind {
+		case memory.IntentionRemind:
+			m.remind(ctx, i, now)
+		case memory.IntentionActivity:
+			m.doActivity(ctx, i, now)
+		default:
+			m.Log.Warn("intention of unknown kind; cancelled", "intention", i.ID.String(), "kind", i.Kind)
+			m.finish(ctx, i, memory.IntentionCancelled, "", now)
+		}
+	}
 }
 
 // checkInTime reports whether a check-in time passed since the last tick.
@@ -60,35 +81,28 @@ func (m *Mind) checkInTime(now time.Time) bool {
 	return false
 }
 
-func (m *Mind) sendDueReminders(ctx context.Context, now time.Time) {
-	due, err := m.Store.DueReminders(ctx, now, remindersPerTick)
-	if err != nil {
-		m.Log.Warn("loading due reminders failed", "err", err)
+func (m *Mind) remind(ctx context.Context, r memory.Intention, now time.Time) {
+	conv, ok := m.conversationWith(ctx, r.Subject)
+	if !ok || now.Sub(r.DueAt) > reminderGiveUp {
+		m.Log.Warn("reminder could not be sent", "intention", r.ID.String(), "person", r.Subject, "due", r.DueAt)
+		m.finish(ctx, r, memory.IntentionMissed, "", now)
 		return
 	}
-	for _, r := range due {
-		conv, ok := m.conversationWith(ctx, r.Person)
-		if !ok || now.Sub(r.DueAt) > reminderGiveUp {
-			m.Log.Warn("reminder could not be sent", "reminder", r.ID.String(), "person", r.Person, "due", r.DueAt)
-			m.setReminderStatus(ctx, r, memory.ReminderFailed)
-			continue
-		}
-		person := m.person(ctx, r.Person)
-		p := outgoing(conv, person, perception.KindReminder, now)
-		n := m.namesFor(p)
-		note := fmt.Sprintf("You are messaging %s first: it's time for the reminder %s asked you for on %s: %s. "+
-			"Remind them now, in your own words, briefly, like a friend would.",
-			n.speaker, n.speaker, r.CreatedAt.In(m.Zone).Format("Monday 2 January at 15:04"), n.fill(r.Text))
-		if m.speakFirst(ctx, p, person, nil, "remind", note) {
-			m.setReminderStatus(ctx, r, memory.ReminderSent)
-		}
-		// Not sent: still pending, so the next tick tries again.
+	person := m.person(ctx, r.Subject)
+	p := outgoing(conv, person, perception.KindReminder, now)
+	n := m.namesFor(p)
+	note := fmt.Sprintf("You are messaging %s first: it's time for the reminder %s asked you for on %s: %s. "+
+		"Remind them now, in your own words, briefly, like a friend would.",
+		n.speaker, n.speaker, r.CreatedAt.In(m.Zone).Format("Monday 2 January at 15:04"), n.fill(r.Text))
+	if m.speakFirst(ctx, p, person, nil, "remind", note) {
+		m.finish(ctx, r, memory.IntentionDone, "", now)
 	}
+	// Not sent: still pending, so the next tick tries again.
 }
 
-func (m *Mind) setReminderStatus(ctx context.Context, r memory.Reminder, status string) {
-	if err := m.Store.SetReminderStatus(ctx, r.ID, status); err != nil {
-		m.Log.Error("set reminder status", "reminder", r.ID.String(), "err", err)
+func (m *Mind) finish(ctx context.Context, i memory.Intention, status, result string, now time.Time) {
+	if err := m.Store.FinishIntention(ctx, i.ID, status, result, now.UTC()); err != nil {
+		m.Log.Error("finish intention", "intention", i.ID.String(), "err", err)
 	}
 }
 

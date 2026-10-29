@@ -33,34 +33,125 @@ type fakeStore struct {
 	recallAreas    [][]string // areas each RecallCandidates call was given
 	recallSubjects [][]string // and subjects
 	people         map[string]memory.Person
-	reminders      []memory.Reminder
+	intentions     []memory.Intention
+	projects       map[ulid.ULID]memory.Project
+	works          []memory.Work
+	spent          float64 // what CostSince returns
 	convs          []memory.Conversation
 	percepts       []perception.Percept // saved, in order
 	asked          map[ulid.ULID]time.Time
 }
 
-func (s *fakeStore) SaveReminder(_ context.Context, r memory.Reminder) error {
-	s.reminders = append(s.reminders, r)
+func (s *fakeStore) SaveIntention(_ context.Context, i memory.Intention) error {
+	s.intentions = append(s.intentions, i)
 	return nil
 }
 
-func (s *fakeStore) DueReminders(_ context.Context, now time.Time, limit int) ([]memory.Reminder, error) {
-	var out []memory.Reminder
-	for _, r := range s.reminders {
-		if r.Status == memory.ReminderPending && !r.DueAt.After(now) && len(out) < limit {
-			out = append(out, r)
+func (s *fakeStore) DueIntentions(_ context.Context, now time.Time, limit int) ([]memory.Intention, error) {
+	var out []memory.Intention
+	for _, i := range s.intentions {
+		if i.Status == memory.IntentionPending && !i.DueAt.After(now) && len(out) < limit {
+			out = append(out, i)
 		}
 	}
 	return out, nil
 }
 
-func (s *fakeStore) SetReminderStatus(_ context.Context, id ulid.ULID, status string) error {
-	for i := range s.reminders {
-		if s.reminders[i].ID == id {
-			s.reminders[i].Status = status
+func (s *fakeStore) IntentionsDue(_ context.Context, from, to time.Time) ([]memory.Intention, error) {
+	var out []memory.Intention
+	for _, i := range s.intentions {
+		if !i.DueAt.Before(from) && i.DueAt.Before(to) {
+			out = append(out, i)
+		}
+	}
+	slices.SortStableFunc(out, func(a, b memory.Intention) int { return a.DueAt.Compare(b.DueAt) })
+	return out, nil
+}
+
+func (s *fakeStore) FinishIntention(_ context.Context, id ulid.ULID, status, result string, at time.Time) error {
+	for n := range s.intentions {
+		if s.intentions[n].ID == id {
+			s.intentions[n].Status, s.intentions[n].Result, s.intentions[n].DoneAt = status, result, at
 		}
 	}
 	return nil
+}
+
+func (s *fakeStore) PostponeIntention(_ context.Context, id ulid.ULID, due time.Time) error {
+	for n := range s.intentions {
+		if s.intentions[n].ID == id {
+			s.intentions[n].DueAt = due
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) intention(id ulid.ULID) memory.Intention {
+	for _, i := range s.intentions {
+		if i.ID == id {
+			return i
+		}
+	}
+	return memory.Intention{}
+}
+
+func (s *fakeStore) SaveProject(_ context.Context, p memory.Project) error {
+	s.projects[p.ID] = p
+	return nil
+}
+
+func (s *fakeStore) Project(_ context.Context, id ulid.ULID) (memory.Project, bool, error) {
+	p, ok := s.projects[id]
+	return p, ok, nil
+}
+
+func (s *fakeStore) ActiveProjects(_ context.Context, limit int) ([]memory.Project, error) {
+	var out []memory.Project
+	for _, p := range s.projects {
+		if p.Status == memory.ProjectActive && len(out) < limit {
+			out = append(out, p)
+		}
+	}
+	slices.SortFunc(out, func(a, b memory.Project) int { return strings.Compare(a.Title, b.Title) })
+	return out, nil
+}
+
+func (s *fakeStore) SaveWork(_ context.Context, w memory.Work) error {
+	s.works = append(s.works, w)
+	return nil
+}
+
+func (s *fakeStore) WorksBetween(_ context.Context, from, to time.Time) ([]memory.Work, error) {
+	var out []memory.Work
+	for _, w := range s.works {
+		if !w.CreatedAt.Before(from) && w.CreatedAt.Before(to) {
+			out = append(out, w)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) ProjectWorks(_ context.Context, project ulid.ULID, limit int) ([]memory.Work, error) {
+	var out []memory.Work
+	for _, w := range s.works {
+		if w.ProjectID == project {
+			out = append(out, w)
+		}
+	}
+	return out[max(0, len(out)-limit):], nil
+}
+
+func (s *fakeStore) LatestWork(_ context.Context, kind string) (memory.Work, bool, error) {
+	for n := len(s.works) - 1; n >= 0; n-- {
+		if s.works[n].Kind == kind {
+			return s.works[n], true, nil
+		}
+	}
+	return memory.Work{}, false, nil
+}
+
+func (s *fakeStore) CostSince(context.Context, time.Time, []string) (float64, error) {
+	return s.spent, nil
 }
 
 func (s *fakeStore) Conversations(context.Context) ([]memory.Conversation, error) {
@@ -308,6 +399,7 @@ type fakeSystem2 struct {
 	remember   []system2.Memory
 	whoTheyAre string
 	reminders  []system2.Reminder
+	formats    map[string]string // reply text by Format.Name, for structured requests
 	requests   []system2.Request
 }
 
@@ -315,6 +407,9 @@ func (f *fakeSystem2) Reason(_ context.Context, req system2.Request) (system2.Re
 	f.requests = append(f.requests, req)
 	if f.err != nil {
 		return system2.Response{}, f.err
+	}
+	if req.Format != nil {
+		return system2.Response{Provider: "fake2/1", Text: f.formats[req.Format.Name], CostUSD: 0.002}, nil
 	}
 	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, CostUSD: 0.001}, nil
 }
@@ -366,7 +461,8 @@ var testFollowUp = questions.Set{
 var testLife = self.Life{Name: "Tobi", Story: []string{"Tobi is 29 years old.", "Tobi is a Catholic."}}
 
 func newMind(r Replier, s1 system1.DecisionModel, s2 system2.Reasoner) (*Mind, *fakeStore) {
-	s := &fakeStore{seen: map[string]bool{}, people: map[string]memory.Person{}, asked: map[ulid.ULID]time.Time{}}
+	s := &fakeStore{seen: map[string]bool{}, people: map[string]memory.Person{}, asked: map[ulid.ULID]time.Time{},
+		projects: map[ulid.ULID]memory.Project{}}
 	return New(Config{
 		Life:  testLife,
 		Store: s, Replier: r, System1: s1, System2: s2, Incoming: testSet, FollowUp: testFollowUp, LifeArea: testLifeArea,

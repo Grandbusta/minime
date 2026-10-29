@@ -1,6 +1,6 @@
 // Package memory holds what the agent remembers: working memory (the recent
 // back-and-forth of a conversation), facts, the people it knows, and what it
-// promised to remind them of.
+// means to do: for them, and in its own day.
 package memory
 
 import (
@@ -54,22 +54,63 @@ type Fact struct {
 	Areas     []string  // life areas it is about, e.g. ["home", "family"]; empty if not labelled
 }
 
-// Reminder is something a person asked the agent to remind them of: prospective memory.
-type Reminder struct {
+// Intention is something the agent means to do later: prospective memory.
+// For a person, it is a reminder they asked for or a task it promised them;
+// for itself (Subject SubjectSelf), an activity of its own day.
+type Intention struct {
 	ID        ulid.ULID
-	Person    string    // who to remind, e.g. "telegram:123"
-	PerceptID ulid.ULID // the message that asked for it
-	Text      string    // what to remind them of, e.g. "call mum"
+	Subject   string    // SubjectSelf, or who it is for, e.g. "telegram:123"
+	Kind      string    // IntentionRemind, IntentionTask or IntentionActivity
+	PerceptID ulid.ULID // the message it came from; zero if the agent planned it itself
+	ProjectID ulid.ULID // the project it is part of; zero if none
+	Text      string    // what to do, e.g. "call mum", "write the hook for Lagos Rain"
 	DueAt     time.Time
-	Status    string // ReminderPending, ReminderSent or ReminderFailed
+	Status    string // IntentionPending, IntentionDone, IntentionMissed or IntentionCancelled
+	Result    string // what came of it, e.g. the title of what it made; "" until done
 	CreatedAt time.Time
+	DoneAt    time.Time // zero until done
 }
 
 const (
-	ReminderPending = "pending"
-	ReminderSent    = "sent"
-	ReminderFailed  = "failed" // could not be sent in time
+	IntentionRemind   = "remind"   // remind a person of something they asked
+	IntentionTask     = "task"     // something it promised a person
+	IntentionActivity = "activity" // something of its own day
 )
+
+const (
+	IntentionPending   = "pending"
+	IntentionDone      = "done"
+	IntentionMissed    = "missed" // could not be done in time
+	IntentionCancelled = "cancelled"
+)
+
+// Project is something that takes the agent more than a day: a book, a beat, a topic.
+type Project struct {
+	ID        ulid.ULID
+	Title     string
+	Kind      string // music, writing, reading, learning, ...
+	Status    string // ProjectActive, ProjectDone or ProjectDropped
+	Notes     string // where it got to, so the next session continues from there
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+const (
+	ProjectActive  = "active"
+	ProjectDone    = "done"
+	ProjectDropped = "dropped"
+)
+
+// Work is something the agent made: a journal entry, lyrics, a beat idea, notes.
+type Work struct {
+	ID          ulid.ULID
+	IntentionID ulid.ULID // the intention it came from; zero if none
+	ProjectID   ulid.ULID // zero if none
+	Kind        string    // journal, lyrics, beat_idea, notes, ...
+	Title       string
+	Text        string
+	CreatedAt   time.Time
+}
 
 // Conversation is where the agent last talked with a person, so it can
 // message them first.

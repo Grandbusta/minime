@@ -54,6 +54,28 @@ initiative:
   check_ins: ["11:00", "18:00"] # at most one check-in a day per person; [] turns them off
   quiet: 4h # only after the conversation has been quiet this long
 
+# Its own day, like a person's: in the morning it plans a few things from its
+# interests, projects and routine (self/life.yaml); through the day it does
+# them, for real, in writing (lyrics, beat ideas, notes); at night it writes a
+# journal. What it makes is kept, and what it did becomes facts about itself.
+# Times are in initiative.timezone.
+daily_life:
+  enabled: true
+  plan_at: "06:00"
+  journal_at: "22:00"
+  activities: 4      # things it plans a day, besides the journal
+  budget_usd: 0.05   # most its own day may cost; past it, the rest is missed
+  plan_prompt: prompts/plan.md
+  activity_prompt: prompts/activity.md
+
+# The owner's private mind console: its brain firing live, every decision and
+# why, its memory, its day and what it made. Read-only. Never on the public
+# profile's address. Anywhere but localhost it needs a token: open it once as
+# http://<host>/?token=<CONSOLE_TOKEN> and the browser remembers it.
+console:
+  addr: 127.0.0.1:8090 # empty: no console
+  token: ${CONSOLE_TOKEN}
+
 # The agent's public profile page, like a person's own website: it writes it
 # itself from its life story and the facts about itself it decides are fine to
 # share (public_profile question set). Read-only: no way to contact it yet.

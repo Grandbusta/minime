@@ -505,7 +505,7 @@ autonomy:
 | Working     | ✅ The recent conversation: the last `working_memory.turns` exchanges (the person's message + the agent's reply) in the same thread, within `working_memory.window` (30 min; 2 h pulled finished topics into new ones). Given to System 2 as chat turns | Recalled facts |
 | Episodic    | Percepts & decisions (Postgres)      | Summaries |
 | Semantic    | ✅ Facts (`facts` table), each with a **subject**: `self` (the agent) or a person's key (e.g. `telegram:123`). Saved two ways: verbatim, as a fact about the speaker, when System 1 confidently reads *remember*; and by System 2, which returns facts tagged *self* or *speaker* alongside its reply (Structured Outputs). These are lasting facts it heard about the speaker ("It is 2027" after a passport question → "Sam's passport expires in 2027") and facts it **decided about itself** ("Tobi's favourite colour is forest green"). Recall only considers the agent's own facts and the current speaker's. Every fact is **filed by life area** when saved (see below). Before each System 2 reply, System 1 checks the newest `memory.recall_candidates` facts with one yes/no question each ([fact_relevance](../decisions/fact_relevance.yaml)) and passes the relevant ones on. The check is recorded as its own decision between the read and the reply | A cheap pre-filter (pgvector embeddings or full-text) once there are too many facts to check them all; updating and forgetting facts |
-| Prospective | ✅ Reminders (`reminders` table): set by System 2 when asked, sent by the clock when due, in the agent's own words. Check-ins on what people told it, each fact asked about once (`facts.asked_at`) | Listing and cancelling reminders; repeating ones; event-triggered intentions |
+| Prospective | ✅ Intentions (`intentions` table): reminders people ask for (set by System 2, sent by the clock in the agent's own words), and the activities of its own day (planned each morning, done through the day). Check-ins on what people told it, each fact asked about once (`facts.asked_at`). Projects carry its work over from day to day; works keep what it made | Listing and cancelling reminders; repeating ones; promises to people (step 6.3); event-triggered intentions |
 
 ### 4.6 Safety & control
 - Kill switch and pause (API + SIGTERM-safe shutdown).
@@ -515,8 +515,17 @@ autonomy:
 
 ### 4.7 Observability
 - `slog` JSON logs.
-- Prometheus metrics: decisions by tier, escalation rate, cost, latency.
-- `minime decisions` CLI to browse the decision log.
+- ✅ **Mind console** (`internal/console`, `console.addr`, 127.0.0.1:8090): a private,
+  read-only web UI served by the agent itself, on its own port, never with the public
+  profile. Its brain shows the parts of its mind (senses, System 1, router, System 2, the
+  memories, the clock, its daily life, the profile) firing live as each decision flows
+  through them. It also shows vitals, the decision log with every chain (answers and
+  confidence, recall, reply, outcome), memory, people, its day, its works, and its
+  conversations. New decisions stream to the browser (server-sent events, from the decision
+  log). Off localhost it requires a token. Later: controls (pause, approve actions from
+  the autonomy gate).
+- `minime decisions` and `minime day` in the terminal.
+- Later: Prometheus metrics: decisions by tier, escalation rate, cost, latency.
 
 ### 4.8 Later (borrowed structure, not v1)
 - **Goals/intentions:** a goal hierarchy and commitment.
@@ -621,9 +630,12 @@ everything it says it read or made exists, so its profile's Work section is hone
 - **Intentions** (prospective memory): `reminders` becomes `intentions`, for `self` or a
   person, of kind `remind`, `task` (something it promised) or `activity` (something of its
   own), with status pending, doing, done, missed or cancelled, and optionally a project.
-- **Doing:** a due intention of its own enters the mind as a percept. System 1 decides whether
-  to do it now, postpone it, or drop it; System 2 does it, with only safe tools: reading and
-  writing its own memory, and fetching pages from an allow-list (Gutenberg, Wikipedia).
+- **Doing:** a due intention of its own is a percept of its own life (source `life`). For now
+  simple rules decide whether to do it: if it is in a conversation it waits 30 minutes; over 6
+  hours late or over the day's budget, it is missed. (System 1 can take that over once there
+  is a real choice to make, like competing promises.) System 2 does it, with only safe tools:
+  reading and writing its own memory, and, from step 6.2, fetching pages from an allow-list
+  (Gutenberg, Wikipedia).
   - Reading: a real book chapter by chapter, or an article; it keeps notes and its opinion.
   - Writing: a journal, lyrics, beat ideas and arrangements, notes on what it learned.
   - Making actual audio needs a music model: **TBD**.
@@ -690,6 +702,8 @@ mini-me/
 │   ├── channel/telegram/     # Telegram client, sensor, replier
 │   ├── mind/                 # the cognitive cycle (percept → decide → act → record)
 │   ├── mind/router.go        # confidence thresholds → act / ask / escalate
+│   ├── mind/initiative.go    # the clock: reminders, check-ins
+│   ├── mind/life.go          # its own day: plan, activities, journal
 │   ├── decision/             # Decision record
 │   │   └── questions/        # loads and validates decisions/*.yaml
 │   ├── providers/
@@ -701,6 +715,7 @@ mini-me/
 │   ├── action/               # (step 7) Actuator/Tool interface, autonomy gate
 │   ├── memory/               # (steps 3, 5) episodic, semantic, prospective
 │   ├── portfolio/            # its public profile page: writer + web server
+│   ├── console/              # the owner's private mind console: API, live stream, web UI
 │   ├── store/                # Postgres + embedded migrations/
 │   └── config/
 ├── decisions/                # question sets + thresholds (versioned)
@@ -741,8 +756,9 @@ mini-me/
    - ✅ Check-ins: at set times, about something still going on in your life, at most daily.
    - Later: listing and cancelling reminders, repeating ones.
 6. **A daily life** (§4.11): it does real, text-first things of its own each day.
-   1. Intentions and a day of its own: `reminders` → `intentions`; morning plan, writing
+   1. ✅ Intentions and a day of its own: `reminders` → `intentions`; morning plan, writing
       activities (journal, lyrics, ideas), evening journal; results as facts and works.
+      `minime day` shows what it planned and made.
    2. Reading and learning from real sources: an allow-listed page fetcher, reading progress
       per book or topic.
    3. Promises from chat: commitments become its own intentions and are delivered when done.

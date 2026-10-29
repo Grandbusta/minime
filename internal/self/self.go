@@ -19,6 +19,9 @@ type Life struct {
 	// Personality is how the agent is with people: its temperament and how it
 	// talks, third person with its name. Optional.
 	Personality []string `yaml:"personality"`
+	// Routine steers how the agent plans its days, third person with its name,
+	// e.g. "Daniel makes music in the evenings". Optional; it plans the rest itself.
+	Routine []string `yaml:"routine"`
 	// Family the agent is born knowing, like anyone knows their parents and
 	// cousins whether or not they ever talk to them. Copied into memory the
 	// first time; after that memory wins.
@@ -48,6 +51,7 @@ func Load(path string) (Life, error) {
 	l.Name = strings.TrimSpace(l.Name)
 	l.Story = nonEmpty(l.Story)
 	l.Personality = nonEmpty(l.Personality)
+	l.Routine = nonEmpty(l.Routine)
 	if l.Name == "" || len(l.Story) == 0 {
 		return Life{}, errors.New(path + ": write the agent's name and at least one line of its life story first")
 	}

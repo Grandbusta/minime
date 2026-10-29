@@ -13,7 +13,8 @@
 //
 // A clock ticks into the same loop (initiative.go), so the agent can speak
 // first: reminders people asked for, and checking in on what is going on in
-// their lives.
+// their lives. It also lives a day of its own (life.go): it plans it, does
+// real things, and writes a journal at night.
 package mind
 
 import (
@@ -52,9 +53,19 @@ type Store interface {
 	KnownPeople(ctx context.Context, limit int) ([]memory.Person, error)
 	SavePerson(ctx context.Context, p memory.Person) error
 	AddPersonIfNew(ctx context.Context, p memory.Person) (bool, error)
-	SaveReminder(ctx context.Context, r memory.Reminder) error
-	DueReminders(ctx context.Context, now time.Time, limit int) ([]memory.Reminder, error)
-	SetReminderStatus(ctx context.Context, id ulid.ULID, status string) error
+	SaveIntention(ctx context.Context, i memory.Intention) error
+	DueIntentions(ctx context.Context, now time.Time, limit int) ([]memory.Intention, error)
+	IntentionsDue(ctx context.Context, from, to time.Time) ([]memory.Intention, error)
+	FinishIntention(ctx context.Context, id ulid.ULID, status, result string, at time.Time) error
+	PostponeIntention(ctx context.Context, id ulid.ULID, due time.Time) error
+	SaveProject(ctx context.Context, p memory.Project) error
+	Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error)
+	ActiveProjects(ctx context.Context, limit int) ([]memory.Project, error)
+	SaveWork(ctx context.Context, w memory.Work) error
+	WorksBetween(ctx context.Context, from, to time.Time) ([]memory.Work, error)
+	ProjectWorks(ctx context.Context, project ulid.ULID, limit int) ([]memory.Work, error)
+	LatestWork(ctx context.Context, kind string) (memory.Work, bool, error)
+	CostSince(ctx context.Context, since time.Time, actions []string) (float64, error)
 	Conversations(ctx context.Context) ([]memory.Conversation, error)
 	LastSpokeFirst(ctx context.Context, person, kind string) (time.Time, bool, error)
 	UnaskedFacts(ctx context.Context, person string, since time.Time, limit int) ([]memory.Fact, error)
@@ -110,12 +121,14 @@ type Config struct {
 	// Zone is the agent's time zone: reminders and check-in times are in it. nil: UTC.
 	Zone     *time.Location
 	CheckIns CheckIns
+	Day      Day // its own day: plan, activities, journal
 	Log      *slog.Logger
 }
 
 type Mind struct {
 	Config
 	lastTick time.Time // when the clock last ticked; zero before the first tick
+	planned  string    // the local date ("2006-01-02") its day was last planned for
 }
 
 func New(c Config) *Mind {
@@ -538,8 +551,8 @@ func (m *Mind) saveReminders(ctx context.Context, p perception.Percept, rs []sys
 			m.Log.Warn("dropped a reminder", "percept", p.ID.String(), "when", r.When, "what", r.What, "err", err)
 			continue
 		}
-		err = m.Store.SaveReminder(ctx, memory.Reminder{ID: ulid.Make(), Person: p.Speaker, PerceptID: p.ID,
-			Text: r.What, DueAt: due.UTC(), Status: memory.ReminderPending, CreatedAt: time.Now().UTC()})
+		err = m.Store.SaveIntention(ctx, memory.Intention{ID: ulid.Make(), Subject: p.Speaker, Kind: memory.IntentionRemind,
+			PerceptID: p.ID, Text: r.What, DueAt: due.UTC(), Status: memory.IntentionPending, CreatedAt: time.Now().UTC()})
 		if err != nil {
 			m.Log.Error("save reminder", "percept", p.ID.String(), "err", err)
 			continue

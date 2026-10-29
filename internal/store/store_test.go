@@ -343,31 +343,39 @@ func TestRemindersConversationsAndCheckIns(t *testing.T) {
 	if _, err := s.SavePercept(ctx, msg); err != nil {
 		t.Fatal(err)
 	}
-	due := memory.Reminder{ID: ulid.Make(), Person: person, PerceptID: msg.ID, Text: "call mum",
-		DueAt: base.Add(time.Hour), Status: memory.ReminderPending, CreatedAt: base}
-	if err := s.SaveReminder(ctx, due); err != nil {
+	due := memory.Intention{ID: ulid.Make(), Subject: person, Kind: memory.IntentionRemind, PerceptID: msg.ID, Text: "call mum",
+		DueAt: base.Add(time.Hour), Status: memory.IntentionPending, CreatedAt: base}
+	if err := s.SaveIntention(ctx, due); err != nil {
 		t.Fatal(err)
 	}
-	ours := func(rs []memory.Reminder) (out []memory.Reminder) {
-		for _, r := range rs {
-			if r.Person == person {
-				out = append(out, r)
+	ours := func(is []memory.Intention) (out []memory.Intention) {
+		for _, i := range is {
+			if i.Subject == person {
+				out = append(out, i)
 			}
 		}
 		return out
 	}
-	if rs, err := s.DueReminders(ctx, base, 100); err != nil || len(ours(rs)) != 0 {
-		t.Fatalf("due before its time: %+v, %v", rs, err)
+	if is, err := s.DueIntentions(ctx, base, 100); err != nil || len(ours(is)) != 0 {
+		t.Fatalf("due before its time: %+v, %v", is, err)
 	}
-	rs, err := s.DueReminders(ctx, base.Add(time.Hour), 100)
-	if got := ours(rs); err != nil || len(got) != 1 || got[0].Text != "call mum" || !got[0].DueAt.Equal(due.DueAt) {
+	is, err := s.DueIntentions(ctx, base.Add(time.Hour), 100)
+	if got := ours(is); err != nil || len(got) != 1 || got[0].Text != "call mum" || !got[0].DueAt.Equal(due.DueAt) ||
+		got[0].PerceptID != msg.ID || !got[0].ProjectID.IsZero() || !got[0].DoneAt.IsZero() {
 		t.Fatalf("due = %+v, %v", got, err)
 	}
-	if err := s.SetReminderStatus(ctx, due.ID, memory.ReminderSent); err != nil {
+	if err := s.PostponeIntention(ctx, due.ID, base.Add(90*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if rs, _ := s.DueReminders(ctx, base.Add(time.Hour), 100); len(ours(rs)) != 0 {
-		t.Error("a sent reminder is still due")
+	if is, _ := s.DueIntentions(ctx, base.Add(time.Hour), 100); len(ours(is)) != 0 {
+		t.Error("a postponed intention is still due")
+	}
+	if err := s.FinishIntention(ctx, due.ID, memory.IntentionDone, "", base.Add(90*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	is, err = s.IntentionsDue(ctx, base, base.Add(2*time.Hour))
+	if got := ours(is); err != nil || len(got) != 1 || got[0].Status != memory.IntentionDone || got[0].DoneAt.IsZero() {
+		t.Errorf("intentions due = %+v, %v", got, err)
 	}
 
 	// The agent speaks first in the same thread.
@@ -420,5 +428,73 @@ func TestRemindersConversationsAndCheckIns(t *testing.T) {
 	}
 	if fs, _ := s.UnaskedFacts(ctx, person, base.Add(-time.Hour), 10); len(fs) != 0 {
 		t.Errorf("still unasked: %+v", fs)
+	}
+}
+
+func TestProjectsWorksAndOwnIntentions(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Microsecond)
+
+	song := memory.Project{ID: ulid.Make(), Title: "Lagos Rain " + ulid.Make().String(), Kind: "music", Status: memory.ProjectActive,
+		CreatedAt: base, UpdatedAt: base}
+	if err := s.SaveProject(ctx, song); err != nil {
+		t.Fatal(err)
+	}
+	song.Notes, song.UpdatedAt = "verse 1 done", base.Add(time.Minute)
+	if err := s.SaveProject(ctx, song); err != nil {
+		t.Fatal(err)
+	}
+	if p, ok, err := s.Project(ctx, song.ID); err != nil || !ok || p.Notes != "verse 1 done" {
+		t.Fatalf("project = %+v, %v, %v", p, ok, err)
+	}
+	active, err := s.ActiveProjects(ctx, 100)
+	if err != nil || !slices.ContainsFunc(active, func(p memory.Project) bool { return p.ID == song.ID }) {
+		t.Errorf("active = %+v, %v", active, err)
+	}
+
+	// An activity of its own: no percept, part of the project.
+	own := memory.Intention{ID: ulid.Make(), Subject: memory.SubjectSelf, Kind: memory.IntentionActivity, ProjectID: song.ID,
+		Text: "write verse 2", DueAt: base, Status: memory.IntentionPending, CreatedAt: base}
+	if err := s.SaveIntention(ctx, own); err != nil {
+		t.Fatal(err)
+	}
+	is, err := s.IntentionsDue(ctx, base, base.Add(time.Second))
+	if err != nil || !slices.ContainsFunc(is, func(i memory.Intention) bool { return i.ID == own.ID && i.ProjectID == song.ID && i.PerceptID.IsZero() }) {
+		t.Errorf("own intentions = %+v, %v", is, err)
+	}
+
+	for n, title := range []string{"verse 1", "verse 2"} {
+		w := memory.Work{ID: ulid.Make(), IntentionID: own.ID, ProjectID: song.ID, Kind: "lyrics", Title: title, Text: "...",
+			CreatedAt: base.Add(time.Duration(n) * time.Minute)}
+		if err := s.SaveWork(ctx, w); err != nil {
+			t.Fatal(err)
+		}
+	}
+	journal := memory.Work{ID: ulid.Make(), Kind: "journal", Title: "today", Text: "good day", CreatedAt: base.Add(time.Hour)}
+	if err := s.SaveWork(ctx, journal); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := s.ProjectWorks(ctx, song.ID, 1)
+	if err != nil || len(ws) != 1 || ws[0].Title != "verse 2" || ws[0].IntentionID != own.ID {
+		t.Errorf("project works = %+v, %v", ws, err)
+	}
+	if ws, err := s.WorksBetween(ctx, base, base.Add(2*time.Minute)); err != nil || len(ws) != 2 || ws[0].Title != "verse 1" {
+		t.Errorf("works between = %+v, %v", ws, err)
+	}
+	if j, ok, err := s.LatestWork(ctx, "journal"); err != nil || !ok || j.ID != journal.ID || !j.ProjectID.IsZero() {
+		t.Errorf("latest journal = %+v, %v, %v", j, ok, err)
+	}
+
+	d := decision.Decision{ID: ulid.Make(), At: base, SetID: "activity@1", Tier: decision.TierSystem2, Action: "activity",
+		Gate: decision.GateAuto, CostUSD: 0.0021}
+	if err := s.SaveDecision(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	if cost, err := s.CostSince(ctx, base, []string{"activity", "plan_day"}); err != nil || cost < 0.0021 {
+		t.Errorf("cost = %v, %v", cost, err)
+	}
+	if cost, _ := s.CostSince(ctx, base, []string{"reply"}); cost != 0 {
+		t.Errorf("cost of other actions = %v, want 0", cost)
 	}
 }

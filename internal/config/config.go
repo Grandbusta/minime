@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"time"
 
@@ -22,6 +23,8 @@ type Config struct {
 	Memory        Memory        `yaml:"memory"`
 	Portfolio     Portfolio     `yaml:"portfolio"`
 	Initiative    Initiative    `yaml:"initiative"`
+	DailyLife     DailyLife     `yaml:"daily_life"`
+	Console       Console       `yaml:"console"`
 	// Pricing per model, used to record what each decision cost.
 	Pricing map[string]pricing.Price `yaml:"pricing"`
 	Log     Log                      `yaml:"log"`
@@ -82,6 +85,44 @@ func (i Initiative) CheckInTimes() ([]time.Duration, error) {
 		out[n] = at
 	}
 	return out, nil
+}
+
+// Console is the owner's private mind console.
+type Console struct {
+	Addr  string `yaml:"addr"`  // e.g. 127.0.0.1:8090; empty: no console
+	Token string `yaml:"token"` // required unless addr is localhost
+}
+
+// Local reports whether the console only listens on this machine.
+func (c Console) Local() bool {
+	host, _, err := net.SplitHostPort(c.Addr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return host == "localhost" || (ip != nil && ip.IsLoopback())
+}
+
+// DailyLife is the agent's own day: it plans it, does things, and journals.
+type DailyLife struct {
+	Enabled        bool    `yaml:"enabled"`
+	PlanAt         string  `yaml:"plan_at"`    // "HH:MM" in its time zone
+	JournalAt      string  `yaml:"journal_at"` // "HH:MM" in its time zone
+	Activities     int     `yaml:"activities"` // things it plans a day, besides the journal
+	BudgetUSD      float64 `yaml:"budget_usd"` // most its own day may cost
+	PlanPrompt     string  `yaml:"plan_prompt"`
+	ActivityPrompt string  `yaml:"activity_prompt"`
+}
+
+// Times are PlanAt and JournalAt as times of day: the time since midnight.
+func (d DailyLife) Times() (plan, journal time.Duration, err error) {
+	if plan, err = timeOfDay(d.PlanAt); err != nil {
+		return 0, 0, fmt.Errorf("config: daily_life.plan_at must be HH:MM, have %q", d.PlanAt)
+	}
+	if journal, err = timeOfDay(d.JournalAt); err != nil || journal <= plan {
+		return 0, 0, fmt.Errorf("config: daily_life.journal_at must be HH:MM after plan_at, have %q", d.JournalAt)
+	}
+	return plan, journal, nil
 }
 
 // timeOfDay parses "HH:MM" into the time since midnight.
@@ -153,7 +194,9 @@ func Load(path string) (*Config, error) {
 		Memory:        Memory{RecallCandidates: 30},
 		Portfolio:     Portfolio{Prompt: "prompts/profile.md", UpdateAt: "00:00"},
 		Initiative:    Initiative{Timezone: "UTC", Quiet: 4 * time.Hour},
-		Log:           Log{Level: "info"},
+		DailyLife: DailyLife{PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
+			PlanPrompt: "prompts/plan.md", ActivityPrompt: "prompts/activity.md"},
+		Log: Log{Level: "info"},
 	}
 	if err := yaml.Unmarshal([]byte(os.ExpandEnv(string(raw))), cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
@@ -192,6 +235,17 @@ func (c *Config) ValidateAgent() error {
 	}
 	if _, err := c.Initiative.CheckInTimes(); err != nil {
 		return err
+	}
+	if c.Console.Addr != "" && !c.Console.Local() && len(c.Console.Token) < 16 {
+		return errors.New("config: console.token (16+ characters) is required when console.addr is not localhost")
+	}
+	if c.DailyLife.Enabled {
+		if _, _, err := c.DailyLife.Times(); err != nil {
+			return err
+		}
+		if c.DailyLife.Activities < 1 || c.DailyLife.BudgetUSD < 0 {
+			return errors.New("config: daily_life.activities must be at least 1 and budget_usd not negative")
+		}
 	}
 	return nil
 }

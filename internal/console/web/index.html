@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mind Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><span class="glyph">◈</span><span>MINI·ME</span><span class="ver">MIND CONSOLE</span></div>
+    <div class="agent">
+      <div class="agent-orb"><span></span></div>
+      <div>
+        <div class="agent-name" id="agentName">…</div>
+        <div class="agent-sub"><span class="dot" id="liveDot"></span><span id="agentState">connecting</span></div>
+      </div>
+    </div>
+    <nav class="nav" id="nav">
+      <button data-view="mind" class="on"><i></i><span>Mind</span><em>neural map</em></button>
+      <button data-view="activity"><i></i><span>Activity</span><em>decision chains</em></button>
+      <button data-view="memory"><i></i><span>Memory</span><em>facts &amp; people</em></button>
+      <button data-view="day"><i></i><span>Day</span><em>plan &amp; outcomes</em></button>
+      <button data-view="works"><i></i><span>Works</span><em>what it made</em></button>
+      <button data-view="talk"><i></i><span>Conversations</span><em>what was said</em></button>
+    </nav>
+    <div class="side-foot">
+      <div class="kv"><span>uptime</span><b id="uptime">–</b></div>
+      <div class="kv"><span>zone</span><b id="zone">–</b></div>
+      <div class="kv"><span>system 1</span><b id="s1">–</b></div>
+      <div class="kv"><span>system 2</span><b id="s2">–</b></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="top">
+      <div class="crumb"><span id="viewTitle">MIND</span><span class="slash">//</span><span id="crumbName">…</span></div>
+      <div class="top-right">
+        <div class="pill"><span class="dot live"></span>LIVE</div>
+        <div class="pill mono" id="clock">--:--:--</div>
+        <div class="pill accent" id="costPill">$0.0000 today</div>
+      </div>
+    </header>
+
+    <!-- MIND -->
+    <section class="view on" id="view-mind">
+      <div class="mind-grid">
+        <div class="col">
+          <div class="card">
+            <div class="card-h">NEURAL LOAD · TODAY</div>
+            <div class="dial">
+              <svg viewBox="0 0 200 200" id="dialSvg"></svg>
+              <div class="dial-n"><b id="decToday">0</b><span>decisions</span></div>
+            </div>
+            <div class="tiers" id="tiers"></div>
+            <div class="stats">
+              <div><span>escalated</span><b id="escRate">–</b></div>
+              <div><span>avg latency</span><b id="avgLat">–</b></div>
+              <div><span>cost</span><b id="costToday">–</b></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h">MEMORY CELLS</div>
+            <div class="cells" id="counts"></div>
+          </div>
+        </div>
+
+        <div class="card brain-card">
+          <div class="card-h">NEURAL MAP <span class="muted">· the parts of its mind, firing as it decides</span>
+            <span class="hud-tag">LIVE · SIDE VIEW</span></div>
+          <div class="brain-wrap"><canvas id="brain"></canvas><div class="tip" id="tip"></div></div>
+          <div class="eeg-wrap">
+            <div class="eeg-h"><span>NEURAL ACTIVITY</span><span class="muted">last 2h · each spike is a decision</span></div>
+            <canvas id="eeg"></canvas>
+          </div>
+          <div class="legend">
+            <span><i class="sw s1"></i>System 1 · fast</span>
+            <span><i class="sw s2"></i>System 2 · slow</span>
+            <span><i class="sw rx"></i>reflex</span>
+            <span><i class="sw lf"></i>its own life</span>
+          </div>
+        </div>
+
+        <div class="card feed-card">
+          <div class="card-h">SIGNAL FEED <span class="muted">· newest first</span></div>
+          <div class="axon-feed" id="feed"></div>
+        </div>
+      </div>
+
+      <div class="row3">
+        <div class="card">
+          <div class="card-h">TODAY · ITS PLAN</div>
+          <div class="plan-axon" id="plan"></div>
+        </div>
+        <div class="card">
+          <div class="card-h">COST · 14 DAYS</div>
+          <div class="bars" id="bars"></div>
+          <div class="bars-axis" id="barsAxis"></div>
+        </div>
+        <div class="card next">
+          <div class="card-h">NEXT INTENTION</div>
+          <div id="next" class="next-body muted">nothing pending</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ACTIVITY -->
+    <section class="view" id="view-activity">
+      <div class="view-head">
+        <div><h1>Decision chains</h1><p>Each message, tick or plan, and the parts of the mind it passed through. Click a chain for every answer.</p></div>
+        <div class="chips" id="logChips"></div>
+      </div>
+      <div class="chains" id="log"></div>
+    </section>
+
+    <!-- MEMORY -->
+    <section class="view" id="view-memory">
+      <div class="view-head">
+        <div><h1>Memory network</h1><p>What it knows, about itself and the people in its life. Hover a node to read it.</p></div>
+      </div>
+      <div class="mem-grid">
+        <div class="card net-card">
+          <div class="card-h">NETWORK <span class="muted">· hubs are people; points are facts</span></div>
+          <div class="net-wrap"><canvas id="net"></canvas><div class="tip" id="netTip"></div></div>
+          <div class="people" id="people"></div>
+        </div>
+        <div class="card">
+          <div class="card-h">FACTS <div class="chips" id="factChips"></div></div>
+          <input class="search" id="factSearch" placeholder="search memory…">
+          <div class="facts" id="facts"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- DAY -->
+    <section class="view" id="view-day">
+      <div class="view-head">
+        <div><h1 id="dayTitle">Today</h1><p>What it meant to do, when, and what came of it.</p></div>
+        <div class="day-nav"><button id="dayPrev" aria-label="previous day">‹</button><b id="dayLabel">today</b><button id="dayNext" aria-label="next day">›</button></div>
+      </div>
+      <div class="day-grid">
+        <div class="card">
+          <div class="card-h">AXON · PLAN &amp; OUTCOMES</div>
+          <div class="timeline" id="dayTimeline"></div>
+        </div>
+        <div class="col">
+          <div class="card">
+            <div class="card-h">MADE THAT DAY</div>
+            <div class="worklist" id="dayWorks"></div>
+          </div>
+          <div class="card">
+            <div class="card-h">PROJECTS</div>
+            <div class="projects" id="projects"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- WORKS -->
+    <section class="view" id="view-works">
+      <div class="view-head">
+        <div><h1>Works</h1><p>Everything it made, for real: lyrics, beat ideas, notes, its journal.</p></div>
+        <div class="chips" id="workChips"></div>
+      </div>
+      <div class="works-grid" id="works"></div>
+    </section>
+
+    <!-- CONVERSATIONS -->
+    <section class="view" id="view-talk">
+      <div class="view-head">
+        <div><h1>Conversations</h1><p>The last 14 days, including what it said first.</p></div>
+      </div>
+      <div class="card talk-card">
+        <div class="talk" id="talk"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="drawer" id="drawer">
+  <div class="drawer-h"><span id="drawerTitle">CHAIN</span><button id="drawerClose" aria-label="close">✕</button></div>
+  <div class="drawer-b" id="drawerBody"></div>
+</div>
+<div class="scrim" id="scrim"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

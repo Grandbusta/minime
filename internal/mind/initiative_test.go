@@ -27,12 +27,12 @@ func TestRemindersAreSavedInTheAgentsZone(t *testing.T) {
 	m.Zone = lagos
 	m.handle(context.Background(), percept("1", "Remind me tomorrow at 9 to call the bank"))
 
-	if len(s.reminders) != 1 {
-		t.Fatalf("reminders = %+v, want only the valid future one", s.reminders)
+	if len(s.intentions) != 1 {
+		t.Fatalf("intentions = %+v, want only the valid future reminder", s.intentions)
 	}
-	r := s.reminders[0]
-	if !r.DueAt.Equal(time.Date(2026, 10, 28, 8, 0, 0, 0, time.UTC)) || r.Person != sam ||
-		r.Status != memory.ReminderPending || r.Text != "Sam should call the bank" {
+	r := s.intentions[0]
+	if !r.DueAt.Equal(time.Date(2026, 10, 28, 8, 0, 0, 0, time.UTC)) || r.Subject != sam || r.Kind != memory.IntentionRemind ||
+		r.Status != memory.IntentionPending || r.Text != "Sam should call the bank" {
 		t.Errorf("reminder = %+v", r)
 	}
 	if note := s2.requests[0].Note; !strings.Contains(note, "It is now Tuesday 27 October 2026, 14:16 (Africa/Lagos time).") {
@@ -53,20 +53,21 @@ func TestDueRemindersAreSent(t *testing.T) {
 	r := &fakeReplier{}
 	s2 := &fakeSystem2{}
 	m, s := initiativeMind(r, &fakeSystem1{}, s2)
-	due := memory.Reminder{ID: ulid.Make(), Person: sam, Text: "Sam should call the bank", DueAt: now.Add(-time.Minute),
-		Status: memory.ReminderPending, CreatedAt: now.Add(-24 * time.Hour)}
-	stale := memory.Reminder{ID: ulid.Make(), Person: sam, Text: "old", DueAt: now.Add(-48 * time.Hour), Status: memory.ReminderPending}
-	later := memory.Reminder{ID: ulid.Make(), Person: sam, Text: "later", DueAt: now.Add(time.Hour), Status: memory.ReminderPending}
-	s.reminders = []memory.Reminder{due, stale, later}
+	remind := func(text string, due time.Time) memory.Intention {
+		return memory.Intention{ID: ulid.Make(), Subject: sam, Kind: memory.IntentionRemind, Text: text, DueAt: due,
+			Status: memory.IntentionPending, CreatedAt: now.Add(-24 * time.Hour)}
+	}
+	s.intentions = []memory.Intention{remind("Sam should call the bank", now.Add(-time.Minute)),
+		remind("old", now.Add(-48*time.Hour)), remind("later", now.Add(time.Hour))}
 
 	m.tick(context.Background(), now)
 
 	if len(r.sent) != 1 || r.sent[0] != "a thoughtful reply" {
 		t.Fatalf("sent = %v, want one reminder", r.sent)
 	}
-	if got := []string{s.reminders[0].Status, s.reminders[1].Status, s.reminders[2].Status}; got[0] != memory.ReminderSent ||
-		got[1] != memory.ReminderFailed || got[2] != memory.ReminderPending {
-		t.Errorf("statuses = %v, want sent, failed, pending", got)
+	if got := []string{s.intentions[0].Status, s.intentions[1].Status, s.intentions[2].Status}; got[0] != memory.IntentionDone ||
+		got[1] != memory.IntentionMissed || got[2] != memory.IntentionPending {
+		t.Errorf("statuses = %v, want done, missed, pending", got)
 	}
 	req := s2.requests[0]
 	if req.Message != "" || !strings.Contains(req.Note, "Sam should call the bank") || !strings.Contains(req.Note, "It is now") {
@@ -83,10 +84,11 @@ func TestDueRemindersAreSent(t *testing.T) {
 
 func TestUnsentReminderStaysPending(t *testing.T) {
 	m, s := initiativeMind(&fakeReplier{err: errors.New("network down")}, &fakeSystem1{}, &fakeSystem2{})
-	s.reminders = []memory.Reminder{{ID: ulid.Make(), Person: sam, Text: "x", DueAt: now, Status: memory.ReminderPending}}
+	s.intentions = []memory.Intention{{ID: ulid.Make(), Subject: sam, Kind: memory.IntentionRemind, Text: "x", DueAt: now,
+		Status: memory.IntentionPending}}
 	m.tick(context.Background(), now)
-	if s.reminders[0].Status != memory.ReminderPending {
-		t.Errorf("status = %s, want pending so the next tick retries", s.reminders[0].Status)
+	if s.intentions[0].Status != memory.IntentionPending {
+		t.Errorf("status = %s, want pending so the next tick retries", s.intentions[0].Status)
 	}
 }
 

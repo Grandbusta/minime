@@ -135,6 +135,25 @@ conversation has been quiet for `quiet` (4h), and never asks about the same thin
 Set `check_ins: []` to turn this off. Reminders and check-ins show up in the decision log
 as `remind` and `check_in`.
 
+### Its own day
+
+The agent lives a day of its own. At `plan_at` (08:00) it plans a few things to do, mostly
+continuing its projects (a song, a beat, something it's learning), steered by the optional
+`routine` lines in [self/life.yaml](self/life.yaml). Through the day it does them for real,
+in writing: lyrics, beat ideas, notes. At `journal_at` (22:00) it writes a journal entry.
+What it makes is kept; what it did becomes facts about itself, so it can tell you about it.
+If you're chatting when something is due, it waits 30 minutes; past `budget_usd` a day,
+the rest waits for tomorrow. Settings are under `daily_life:` in
+[configs/minime.yaml](configs/minime.yaml), and the prompts are
+[prompts/plan.md](prompts/plan.md) and [prompts/activity.md](prompts/activity.md).
+
+See what it planned and made, today or on another day:
+
+```bash
+set -a; . ./.env; set +a; go run ./cmd/minime day
+set -a; . ./.env; set +a; go run ./cmd/minime day -date 2026-10-29
+```
+
 ### Its profile page
 
 While it runs, the agent serves its own public profile page at
@@ -157,6 +176,25 @@ It rewrites the page only if there's something new to share; add `-force` to rew
 Change where it's served and when it updates (`update_at`), or turn it off (`addr: ""`), under `portfolio:` in
 [configs/minime.yaml](configs/minime.yaml). Change how it writes the page in
 [prompts/profile.md](prompts/profile.md).
+
+### Its mind console
+
+While it runs, open [http://127.0.0.1:8090/](http://127.0.0.1:8090/): a private, read-only
+console that shows everything about the agent, live.
+- **Mind:** its brain, the parts of its mind lighting up as each decision flows through
+  them; vitals for today; a live activity feed; today's plan; and cost per day.
+- **Activity:** the decision log. Click any decision to see its whole chain: the message,
+  System 1's answers with their confidence, recall, System 2's reply, and the outcome.
+- **Memory:** every fact (about itself and about people, with life areas and whether it's
+  public) and everyone it knows.
+- **Day:** what it planned on any day, what came of it, what it made, and its projects.
+- **Works:** everything it made, to read in full.
+- **Conversations:** your chats with it, including what it said first.
+
+It only listens on localhost. To reach it from elsewhere (e.g. on the VPS), set `console.addr`
+in [configs/minime.yaml](configs/minime.yaml) and `CONSOLE_TOKEN` in `.env` (16+
+characters, e.g. `openssl rand -hex 24`), then open it once as
+`http://<host>:8090/?token=<CONSOLE_TOKEN>`; the browser remembers it.
 
 ### See what it decided
 

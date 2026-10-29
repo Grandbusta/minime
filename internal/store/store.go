@@ -113,59 +113,67 @@ func (s *Store) SaveDecision(ctx context.Context, d decision.Decision) error {
 
 // RecentDecisions returns the newest n decisions, newest first.
 func (s *Store) RecentDecisions(ctx context.Context, n int) ([]decision.Decision, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, parent_id, at, percept_id, set_id, tier, provider, answers,
-		       action, coalesce(reply, ''), gate, latency_ms, cost_usd::float8, outcome, affect
-		FROM decisions ORDER BY at DESC LIMIT $1`, n)
+	rows, err := s.pool.Query(ctx, `SELECT `+decisionColumns+` FROM decisions d ORDER BY d.at DESC LIMIT $1`, n)
 	if err != nil {
 		return nil, fmt.Errorf("query decisions: %w", err)
 	}
 	defer rows.Close()
-
 	var out []decision.Decision
 	for rows.Next() {
-		var (
-			d                        decision.Decision
-			id                       string
-			parentID, perceptID      *string
-			tier, gate               string
-			answers, outcome, affect []byte
-			latencyMS                float64
-		)
-		if err := rows.Scan(&id, &parentID, &d.At, &perceptID, &d.SetID, &tier, &d.Provider,
-			&answers, &d.Action, &d.Reply, &gate, &latencyMS, &d.CostUSD, &outcome, &affect); err != nil {
+		d, err := scanDecision(rows)
+		if err != nil {
 			return nil, err
 		}
-		if d.ID, err = ulid.Parse(id); err != nil {
-			return nil, err
-		}
-		if perceptID != nil { // nil: a decision of the agent's own, not about a message
-			if d.PerceptID, err = ulid.Parse(*perceptID); err != nil {
-				return nil, err
-			}
-		}
-		if parentID != nil {
-			pid, err := ulid.Parse(*parentID)
-			if err != nil {
-				return nil, err
-			}
-			d.ParentID = &pid
-		}
-		d.Tier, d.Gate = decision.Tier(tier), decision.Gate(gate)
-		d.Latency = time.Duration(latencyMS * float64(time.Millisecond))
-		if err := json.Unmarshal(answers, &d.Answers); err != nil {
-			return nil, err
-		}
-		if outcome != nil {
-			d.Outcome = &decision.Outcome{}
-			if err := json.Unmarshal(outcome, d.Outcome); err != nil {
-				return nil, err
-			}
-		}
-		d.Affect = affect
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+const decisionColumns = `d.id, d.parent_id, d.at, d.percept_id, d.set_id, d.tier, d.provider, d.answers,
+	d.action, coalesce(d.reply, ''), d.gate, d.latency_ms, d.cost_usd::float8, d.outcome, d.affect`
+
+// scanDecision reads decisionColumns, then into extra any columns after them.
+func scanDecision(row pgx.Row, extra ...any) (decision.Decision, error) {
+	var (
+		d                        decision.Decision
+		id                       string
+		parentID, perceptID      *string
+		tier, gate               string
+		answers, outcome, affect []byte
+		latencyMS                float64
+	)
+	dest := append([]any{&id, &parentID, &d.At, &perceptID, &d.SetID, &tier, &d.Provider,
+		&answers, &d.Action, &d.Reply, &gate, &latencyMS, &d.CostUSD, &outcome, &affect}, extra...)
+	if err := row.Scan(dest...); err != nil {
+		return d, err
+	}
+	var err error
+	if d.ID, err = ulid.Parse(id); err != nil {
+		return d, err
+	}
+	if d.PerceptID, err = parseNullULID(perceptID); err != nil { // zero: a decision of the agent's own
+		return d, err
+	}
+	if parentID != nil {
+		pid, err := ulid.Parse(*parentID)
+		if err != nil {
+			return d, err
+		}
+		d.ParentID = &pid
+	}
+	d.Tier, d.Gate = decision.Tier(tier), decision.Gate(gate)
+	d.Latency = time.Duration(latencyMS * float64(time.Millisecond))
+	if err := json.Unmarshal(answers, &d.Answers); err != nil {
+		return d, err
+	}
+	if outcome != nil {
+		d.Outcome = &decision.Outcome{}
+		if err := json.Unmarshal(outcome, d.Outcome); err != nil {
+			return d, err
+		}
+	}
+	d.Affect = affect
+	return d, nil
 }
 
 // RecentExchanges returns up to limit messages in a conversation since
@@ -320,52 +328,218 @@ func (s *Store) queryFacts(ctx context.Context, sql string, args ...any) ([]memo
 	return out, rows.Err()
 }
 
-// SaveReminder stores a reminder someone asked for.
-func (s *Store) SaveReminder(ctx context.Context, r memory.Reminder) error {
+const intentionColumns = `id, subject, kind, percept_id, project_id, text, due_at, status,
+	coalesce(result, ''), created_at, done_at`
+
+// SaveIntention stores something the agent means to do later.
+func (s *Store) SaveIntention(ctx context.Context, i memory.Intention) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO reminders (id, person, percept_id, text, due_at, status, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		r.ID.String(), r.Person, r.PerceptID.String(), r.Text, r.DueAt, r.Status, r.CreatedAt)
+		INSERT INTO intentions (id, subject, kind, percept_id, project_id, text, due_at, status, result, created_at, done_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		i.ID.String(), i.Subject, i.Kind, nullULID(i.PerceptID), nullULID(i.ProjectID), i.Text, i.DueAt, i.Status,
+		nullString(i.Result), i.CreatedAt, nullTime(i.DoneAt))
 	if err != nil {
-		return fmt.Errorf("save reminder: %w", err)
+		return fmt.Errorf("save intention: %w", err)
 	}
 	return nil
 }
 
-// DueReminders returns up to limit pending reminders due by now, earliest first.
-func (s *Store) DueReminders(ctx context.Context, now time.Time, limit int) ([]memory.Reminder, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, person, percept_id, text, due_at, status, created_at FROM reminders
-		WHERE status = $1 AND due_at <= $2 ORDER BY due_at, id LIMIT $3`, memory.ReminderPending, now, limit)
+// DueIntentions returns up to limit pending intentions due by now, earliest first.
+func (s *Store) DueIntentions(ctx context.Context, now time.Time, limit int) ([]memory.Intention, error) {
+	return s.queryIntentions(ctx, `SELECT `+intentionColumns+` FROM intentions
+		WHERE status = $1 AND due_at <= $2 ORDER BY due_at, id LIMIT $3`, memory.IntentionPending, now, limit)
+}
+
+// IntentionsDue returns the intentions due in [from, to), whatever their status, earliest first.
+func (s *Store) IntentionsDue(ctx context.Context, from, to time.Time) ([]memory.Intention, error) {
+	return s.queryIntentions(ctx, `SELECT `+intentionColumns+` FROM intentions
+		WHERE due_at >= $1 AND due_at < $2 ORDER BY due_at, id`, from, to)
+}
+
+// FinishIntention records how an intention ended (done, missed, cancelled) and what came of it.
+func (s *Store) FinishIntention(ctx context.Context, id ulid.ULID, status, result string, at time.Time) error {
+	_, err := s.pool.Exec(ctx, `UPDATE intentions SET status = $2, result = $3, done_at = $4 WHERE id = $1`,
+		id.String(), status, nullString(result), at)
 	if err != nil {
-		return nil, fmt.Errorf("query reminders: %w", err)
+		return fmt.Errorf("finish intention: %w", err)
+	}
+	return nil
+}
+
+// PostponeIntention moves a pending intention to a later time.
+func (s *Store) PostponeIntention(ctx context.Context, id ulid.ULID, due time.Time) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE intentions SET due_at = $2 WHERE id = $1`, id.String(), due); err != nil {
+		return fmt.Errorf("postpone intention: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) queryIntentions(ctx context.Context, sql string, args ...any) ([]memory.Intention, error) {
+	rows, err := s.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query intentions: %w", err)
 	}
 	defer rows.Close()
-	var out []memory.Reminder
+	var out []memory.Intention
 	for rows.Next() {
 		var (
-			r             memory.Reminder
-			id, perceptID string
+			i                    memory.Intention
+			id                   string
+			perceptID, projectID *string
+			doneAt               *time.Time
 		)
-		if err := rows.Scan(&id, &r.Person, &perceptID, &r.Text, &r.DueAt, &r.Status, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&id, &i.Subject, &i.Kind, &perceptID, &projectID, &i.Text, &i.DueAt, &i.Status,
+			&i.Result, &i.CreatedAt, &doneAt); err != nil {
 			return nil, err
 		}
-		if r.ID, err = ulid.Parse(id); err != nil {
+		if i.ID, err = ulid.Parse(id); err != nil {
 			return nil, err
 		}
-		if r.PerceptID, err = ulid.Parse(perceptID); err != nil {
+		if i.PerceptID, err = parseNullULID(perceptID); err != nil {
 			return nil, err
 		}
-		out = append(out, r)
+		if i.ProjectID, err = parseNullULID(projectID); err != nil {
+			return nil, err
+		}
+		if doneAt != nil {
+			i.DoneAt = *doneAt
+		}
+		out = append(out, i)
 	}
 	return out, rows.Err()
 }
 
-func (s *Store) SetReminderStatus(ctx context.Context, id ulid.ULID, status string) error {
-	if _, err := s.pool.Exec(ctx, `UPDATE reminders SET status = $2 WHERE id = $1`, id.String(), status); err != nil {
-		return fmt.Errorf("set reminder status: %w", err)
+const projectColumns = `id, title, kind, status, notes, created_at, updated_at`
+
+// SaveProject stores a project, replacing what was known about it.
+func (s *Store) SaveProject(ctx context.Context, p memory.Project) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO projects (id, title, kind, status, notes, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, kind = EXCLUDED.kind, status = EXCLUDED.status,
+			notes = EXCLUDED.notes, updated_at = EXCLUDED.updated_at`,
+		p.ID.String(), p.Title, p.Kind, p.Status, p.Notes, p.CreatedAt, p.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("save project: %w", err)
 	}
 	return nil
+}
+
+// Project returns the project with id, and whether there is one.
+func (s *Store) Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error) {
+	ps, err := s.queryProjects(ctx, `SELECT `+projectColumns+` FROM projects WHERE id = $1`, id.String())
+	if err != nil || len(ps) == 0 {
+		return memory.Project{}, false, err
+	}
+	return ps[0], true, nil
+}
+
+// ActiveProjects returns up to limit active projects, most recently worked on first.
+func (s *Store) ActiveProjects(ctx context.Context, limit int) ([]memory.Project, error) {
+	return s.queryProjects(ctx, `SELECT `+projectColumns+` FROM projects
+		WHERE status = $1 ORDER BY updated_at DESC, id LIMIT $2`, memory.ProjectActive, limit)
+}
+
+func (s *Store) queryProjects(ctx context.Context, sql string, args ...any) ([]memory.Project, error) {
+	rows, err := s.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query projects: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Project
+	for rows.Next() {
+		var (
+			p  memory.Project
+			id string
+		)
+		if err := rows.Scan(&id, &p.Title, &p.Kind, &p.Status, &p.Notes, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if p.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+const workColumns = `id, intention_id, project_id, kind, title, text, created_at`
+
+// SaveWork stores something the agent made.
+func (s *Store) SaveWork(ctx context.Context, w memory.Work) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO works (id, intention_id, project_id, kind, title, text, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		w.ID.String(), nullULID(w.IntentionID), nullULID(w.ProjectID), w.Kind, w.Title, w.Text, w.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("save work: %w", err)
+	}
+	return nil
+}
+
+// WorksBetween returns what the agent made in [from, to), oldest first.
+func (s *Store) WorksBetween(ctx context.Context, from, to time.Time) ([]memory.Work, error) {
+	return s.queryWorks(ctx, `SELECT `+workColumns+` FROM works
+		WHERE created_at >= $1 AND created_at < $2 ORDER BY created_at, id`, from, to)
+}
+
+// ProjectWorks returns up to limit of the newest works in a project, oldest first.
+func (s *Store) ProjectWorks(ctx context.Context, project ulid.ULID, limit int) ([]memory.Work, error) {
+	ws, err := s.queryWorks(ctx, `SELECT `+workColumns+` FROM works
+		WHERE project_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2`, project.String(), limit)
+	slices.Reverse(ws)
+	return ws, err
+}
+
+// LatestWork returns the newest work of kind, and whether there is one.
+func (s *Store) LatestWork(ctx context.Context, kind string) (memory.Work, bool, error) {
+	ws, err := s.queryWorks(ctx, `SELECT `+workColumns+` FROM works
+		WHERE kind = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, kind)
+	if err != nil || len(ws) == 0 {
+		return memory.Work{}, false, err
+	}
+	return ws[0], true, nil
+}
+
+func (s *Store) queryWorks(ctx context.Context, sql string, args ...any) ([]memory.Work, error) {
+	rows, err := s.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query works: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Work
+	for rows.Next() {
+		var (
+			w                      memory.Work
+			id                     string
+			intentionID, projectID *string
+		)
+		if err := rows.Scan(&id, &intentionID, &projectID, &w.Kind, &w.Title, &w.Text, &w.CreatedAt); err != nil {
+			return nil, err
+		}
+		if w.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if w.IntentionID, err = parseNullULID(intentionID); err != nil {
+			return nil, err
+		}
+		if w.ProjectID, err = parseNullULID(projectID); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// CostSince returns what the decisions with these actions cost since the given time.
+func (s *Store) CostSince(ctx context.Context, since time.Time, actions []string) (float64, error) {
+	var cost float64
+	err := s.pool.QueryRow(ctx, `SELECT coalesce(sum(cost_usd), 0)::float8 FROM decisions
+		WHERE at >= $1 AND action = ANY($2)`, since, actions).Scan(&cost)
+	if err != nil {
+		return 0, fmt.Errorf("query cost: %w", err)
+	}
+	return cost, nil
 }
 
 // Conversations returns, for each person who has messaged the agent, the
@@ -501,6 +675,22 @@ func nullULID(id ulid.ULID) any {
 		return nil
 	}
 	return id.String()
+}
+
+// parseNullULID parses a nullable ULID column; NULL is the zero ULID.
+func parseNullULID(s *string) (ulid.ULID, error) {
+	if s == nil {
+		return ulid.ULID{}, nil
+	}
+	return ulid.Parse(*s)
+}
+
+// nullTime maps the zero time to SQL NULL.
+func nullTime(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t
 }
 
 func nullString(s string) any {
