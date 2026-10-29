@@ -31,6 +31,7 @@ import (
 	"minime/internal/console"
 	"minime/internal/decision"
 	"minime/internal/decision/questions"
+	"minime/internal/library"
 	"minime/internal/memory"
 	"minime/internal/mind"
 	"minime/internal/perception"
@@ -199,6 +200,10 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		return err
 	}
 	ticks := make(chan time.Time)
+	var lib mind.Library // a nil interface, not a nil *library.Client, when reading is off
+	if cfg.DailyLife.Enabled && cfg.DailyLife.Reading {
+		lib = library.New("", "")
+	}
 	var day mind.Day
 	if dl := cfg.DailyLife; dl.Enabled {
 		if day.PlanAt, day.JournalAt, err = dl.Times(); err != nil {
@@ -224,7 +229,8 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		FactRelevance: factRelevance, OpenThreads: openThreads, RecallCandidates: cfg.Memory.RecallCandidates,
 		Working: mind.WorkingMemory{Turns: cfg.WorkingMemory.Turns, Window: cfg.WorkingMemory.Window},
 		Ticks:   ticks, Zone: zone, CheckIns: mind.CheckIns{Times: checkIns, Quiet: cfg.Initiative.Quiet}, Day: day,
-		Log: log.With("component", "mind"),
+		Library: lib,
+		Log:     log.With("component", "mind"),
 	})
 	sensor := telegram.NewSensor(tg, cfg.Telegram.OwnerIDs, cfg.Telegram.PollTimeoutSeconds, percepts,
 		log.With("component", "telegram"))
@@ -233,7 +239,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		"system1", cfg.Decision.Provider.Provider, "question_set", incoming.Ref(), "follow_up", followUp.Ref(),
 		"life_area", lifeArea.Ref(), "person_circle", personCircle.Ref(), "fact_relevance", factRelevance.Ref(),
 		"open_threads", openThreads.Ref(), "timezone", zone.String(), "check_ins", cfg.Initiative.CheckIns,
-		"daily_life", cfg.DailyLife.Enabled, "routine_lines", len(life.Routine),
+		"daily_life", cfg.DailyLife.Enabled, "reading", lib != nil, "routine_lines", len(life.Routine),
 		"system2", cfg.Reasoning.Provider.Provider+"/"+cfg.Reasoning.Model, "effort", cfg.Reasoning.Effort, "prompt", replyPrompt.Ref)
 	started := time.Now()
 	g, ctx := errgroup.WithContext(ctx)

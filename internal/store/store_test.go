@@ -498,3 +498,49 @@ func TestProjectsWorksAndOwnIntentions(t *testing.T) {
 		t.Errorf("cost of other actions = %v, want 0", cost)
 	}
 }
+
+func TestSourcesAndReadingProgress(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	url := "https://example.org/book/" + ulid.Make().String()
+
+	src := memory.Source{ID: ulid.Make(), Reading: memory.Reading{Kind: memory.ReadBook, Title: "Pride and Prejudice",
+		Author: "Jane Austen"}, URL: url, Text: "It is a truth universally acknowledged.", FetchedAt: now}
+	id, err := s.SaveSource(ctx, src)
+	if err != nil || id != src.ID {
+		t.Fatalf("save = %v, %v", id, err)
+	}
+	again := src
+	again.ID = ulid.Make()
+	if id, err := s.SaveSource(ctx, again); err != nil || id != src.ID {
+		t.Errorf("same URL again = %v, %v; want the first ID", id, err)
+	}
+	if text, err := s.SourceText(ctx, src.ID); err != nil || text != src.Text {
+		t.Errorf("text = %q, %v", text, err)
+	}
+
+	p := memory.Project{ID: ulid.Make(), Title: "Pride and Prejudice", Kind: "reading", Status: memory.ProjectActive,
+		SourceID: src.ID, Position: 12, CreatedAt: now, UpdatedAt: now}
+	if err := s.SaveProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := s.Project(ctx, p.ID)
+	if err != nil || !ok || got.SourceID != src.ID || got.Position != 12 || got.Source == nil ||
+		got.Source.Title != "Pride and Prejudice" || got.Source.Chars != len(src.Text) {
+		t.Errorf("project = %+v (%+v), %v", got, got.Source, err)
+	}
+
+	i := memory.Intention{ID: ulid.Make(), Subject: memory.SubjectSelf, Kind: memory.IntentionActivity, Text: "learn",
+		ReadKind: memory.ReadArticle, ReadQuery: "polyrhythm", DueAt: now.AddDate(0, 0, -50), Status: memory.IntentionPending, CreatedAt: now}
+	if err := s.SaveIntention(ctx, i); err != nil {
+		t.Fatal(err)
+	}
+	is, err := s.IntentionsDue(ctx, i.DueAt, i.DueAt.Add(time.Second))
+	if err != nil || len(is) != 1 || is[0].ReadKind != memory.ReadArticle || is[0].ReadQuery != "polyrhythm" {
+		t.Errorf("intention = %+v, %v", is, err)
+	}
+	if err := s.FinishIntention(ctx, i.ID, memory.IntentionDone, "", now); err != nil {
+		t.Fatal(err)
+	}
+}

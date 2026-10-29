@@ -106,6 +106,7 @@ func (c Console) Local() bool {
 // DailyLife is the agent's own day: it plans it, does things, and journals.
 type DailyLife struct {
 	Enabled        bool    `yaml:"enabled"`
+	Reading        bool    `yaml:"reading"`    // read Gutenberg books and Wikipedia articles
 	PlanAt         string  `yaml:"plan_at"`    // "HH:MM" in its time zone
 	JournalAt      string  `yaml:"journal_at"` // "HH:MM" in its time zone
 	Activities     int     `yaml:"activities"` // things it plans a day, besides the journal
@@ -194,7 +195,7 @@ func Load(path string) (*Config, error) {
 		Memory:        Memory{RecallCandidates: 30},
 		Portfolio:     Portfolio{Prompt: "prompts/profile.md", UpdateAt: "00:00"},
 		Initiative:    Initiative{Timezone: "UTC", Quiet: 4 * time.Hour},
-		DailyLife: DailyLife{PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
+		DailyLife: DailyLife{Reading: true, PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
 			PlanPrompt: "prompts/plan.md", ActivityPrompt: "prompts/activity.md"},
 		Log: Log{Level: "info"},
 	}

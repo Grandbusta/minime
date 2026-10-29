@@ -137,10 +137,14 @@ as `remind` and `check_in`.
 
 ### Its own day
 
-The agent lives a day of its own. At `plan_at` (08:00) it plans a few things to do, mostly
+The agent lives a day of its own. At `plan_at` it plans a few things to do, mostly
 continuing its projects (a song, a beat, something it's learning), steered by the optional
 `routine` lines in [self/life.yaml](self/life.yaml). Through the day it does them for real,
-in writing: lyrics, beat ideas, notes. At `journal_at` (22:00) it writes a journal entry.
+in writing: lyrics, beat ideas, notes. It also reads, for real: public-domain books from
+Project Gutenberg, a passage per sitting over many days, and Wikipedia articles on what it's
+learning, and writes reading notes. It fetches only from those two sites; set
+`daily_life.reading: false` to turn reading off. At `journal_at` (22:00) it writes a journal
+entry.
 What it makes is kept; what it did becomes facts about itself, so it can tell you about it.
 If you're chatting when something is due, it waits 30 minutes; past `budget_usd` a day,
 the rest waits for tomorrow. Settings are under `daily_life:` in

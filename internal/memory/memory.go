@@ -64,6 +64,8 @@ type Intention struct {
 	PerceptID ulid.ULID // the message it came from; zero if the agent planned it itself
 	ProjectID ulid.ULID // the project it is part of; zero if none
 	Text      string    // what to do, e.g. "call mum", "write the hook for Lagos Rain"
+	ReadKind  string    // what it means to read: "", ReadBook or ReadArticle
+	ReadQuery string    // what to look for, e.g. "Pride and Prejudice", "polyrhythm"
 	DueAt     time.Time
 	Status    string // IntentionPending, IntentionDone, IntentionMissed or IntentionCancelled
 	Result    string // what came of it, e.g. the title of what it made; "" until done
@@ -88,11 +90,37 @@ const (
 type Project struct {
 	ID        ulid.ULID
 	Title     string
-	Kind      string // music, writing, reading, learning, ...
-	Status    string // ProjectActive, ProjectDone or ProjectDropped
-	Notes     string // where it got to, so the next session continues from there
+	Kind      string    // music, writing, reading, learning, ...
+	Status    string    // ProjectActive, ProjectDone or ProjectDropped
+	Notes     string    // where it got to, so the next session continues from there
+	SourceID  ulid.ULID // the book a reading project follows; zero if none
+	Position  int       // how far into it, in bytes of its text
+	Source    *Reading  // about that book, when loaded with the project; nil if none
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// What the agent reads from.
+const (
+	ReadBook    = "book"    // a public-domain book, read over many days
+	ReadArticle = "article" // a Wikipedia article, read at once
+)
+
+// Reading is a book or article, without its text.
+type Reading struct {
+	Kind   string // ReadBook or ReadArticle
+	Title  string
+	Author string
+	Chars  int // length of its text, in bytes
+}
+
+// Source is a book or article the agent fetched, with its text.
+type Source struct {
+	ID ulid.ULID
+	Reading
+	URL       string
+	Text      string
+	FetchedAt time.Time
 }
 
 const (

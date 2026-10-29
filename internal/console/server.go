@@ -442,8 +442,16 @@ func workViews(ws []memory.Work, withText bool) []map[string]any {
 func projectViews(ps []memory.Project) []map[string]any {
 	out := make([]map[string]any, len(ps))
 	for i, p := range ps {
-		out[i] = map[string]any{"id": p.ID.String(), "title": p.Title, "kind": p.Kind, "status": p.Status,
+		v := map[string]any{"id": p.ID.String(), "title": p.Title, "kind": p.Kind, "status": p.Status,
 			"notes": p.Notes, "created_at": p.CreatedAt, "updated_at": p.UpdatedAt}
+		if p.Source != nil {
+			pct := 0
+			if p.Source.Chars > 0 {
+				pct = min(100, p.Position*100/p.Source.Chars)
+			}
+			v["reading"] = map[string]any{"title": p.Source.Title, "author": p.Source.Author, "percent": pct}
+		}
+		out[i] = v
 	}
 	return out
 }

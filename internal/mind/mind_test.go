@@ -37,6 +37,7 @@ type fakeStore struct {
 	projects       map[ulid.ULID]memory.Project
 	works          []memory.Work
 	spent          float64 // what CostSince returns
+	sources        map[ulid.ULID]memory.Source
 	convs          []memory.Conversation
 	percepts       []perception.Percept // saved, in order
 	asked          map[ulid.ULID]time.Time
@@ -152,6 +153,20 @@ func (s *fakeStore) LatestWork(_ context.Context, kind string) (memory.Work, boo
 
 func (s *fakeStore) CostSince(context.Context, time.Time, []string) (float64, error) {
 	return s.spent, nil
+}
+
+func (s *fakeStore) SaveSource(_ context.Context, src memory.Source) (ulid.ULID, error) {
+	for id, have := range s.sources {
+		if have.URL == src.URL {
+			return id, nil
+		}
+	}
+	s.sources[src.ID] = src
+	return src.ID, nil
+}
+
+func (s *fakeStore) SourceText(_ context.Context, id ulid.ULID) (string, error) {
+	return s.sources[id].Text, nil
 }
 
 func (s *fakeStore) Conversations(context.Context) ([]memory.Conversation, error) {
@@ -462,7 +477,7 @@ var testLife = self.Life{Name: "Tobi", Story: []string{"Tobi is 29 years old.", 
 
 func newMind(r Replier, s1 system1.DecisionModel, s2 system2.Reasoner) (*Mind, *fakeStore) {
 	s := &fakeStore{seen: map[string]bool{}, people: map[string]memory.Person{}, asked: map[ulid.ULID]time.Time{},
-		projects: map[ulid.ULID]memory.Project{}}
+		projects: map[ulid.ULID]memory.Project{}, sources: map[ulid.ULID]memory.Source{}}
 	return New(Config{
 		Life:  testLife,
 		Store: s, Replier: r, System1: s1, System2: s2, Incoming: testSet, FollowUp: testFollowUp, LifeArea: testLifeArea,

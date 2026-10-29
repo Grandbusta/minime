@@ -61,6 +61,9 @@ initiative:
 # Times are in initiative.timezone.
 daily_life:
   enabled: true
+  # It can read public-domain books (Project Gutenberg, a passage at a time)
+  # and Wikipedia articles; nothing else on the web.
+  reading: true
   plan_at: "06:00"
   journal_at: "22:00"
   activities: 4      # things it plans a day, besides the journal

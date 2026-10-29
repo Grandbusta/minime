@@ -206,16 +206,16 @@ b { font-weight: 600; }
 
 .row3 { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, .8fr); gap: 16px; margin-top: 16px; }
 /* today's plan on a horizontal axon, with a now marker */
-.plan-axon { position: relative; height: 176px; margin: 0 70px; }
-.plan-axon .line { position: absolute; left: -60px; right: -60px; top: 88px; height: 1px; background: linear-gradient(90deg, rgba(124,255,107,.1), rgba(124,255,107,.5), rgba(180,140,255,.4)); }
-.plan-axon .hour { position: absolute; top: 94px; font: 9px var(--mono); color: var(--dim); transform: translateX(-50%); }
-.plan-axon .now { position: absolute; top: 66px; height: 44px; width: 1px; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+.plan-axon { position: relative; height: 176px; margin: 0 66px; }
+.plan-axon .line { position: absolute; left: -60px; right: -60px; height: 1px; background: linear-gradient(90deg, rgba(124,255,107,.1), rgba(124,255,107,.5), rgba(180,140,255,.4)); }
+.plan-axon .hour { position: absolute; font: 9px var(--mono); color: var(--dim); transform: translateX(-50%); }
+.plan-axon .now { position: absolute; height: 44px; width: 1px; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
 .plan-axon .now::after { content: "NOW"; position: absolute; top: -13px; left: 50%; transform: translateX(-50%); font: 600 9px var(--mono); color: var(--accent); letter-spacing: .14em; }
-.pnode { position: absolute; top: 82px; transform: translateX(-50%); width: 13px; height: 13px; border-radius: 50%; background: var(--bg); border: 2px solid currentColor; box-shadow: 0 0 10px currentColor; }
+.pnode { position: absolute; z-index: 1; transform: translateX(-50%); width: 13px; height: 13px; border-radius: 50%; background: var(--bg); border: 2px solid currentColor; box-shadow: 0 0 10px currentColor; }
 .pnode.done { background: currentColor; }
 .pstem { position: absolute; width: 1px; transform: translateX(-50%); background: linear-gradient(currentColor, transparent); opacity: .5; }
-.plabel { position: absolute; width: 150px; transform: translateX(-50%); font-size: 11px; color: var(--soft); text-align: center; line-height: 1.35; }
-.plabel.below { top: 112px; } .plabel.above { bottom: 112px; }
+.plabel { position: absolute; height: 44px; transform: translateX(-50%); font-size: 11px; color: var(--soft); text-align: center; line-height: 1.35; }
+.pmore { position: absolute; right: -60px; bottom: 0; font: 9px var(--mono); color: var(--dim); }
 .plabel time { display: block; font: 600 11px var(--mono); color: var(--lf); }
 .plabel span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .bars { display: flex; align-items: flex-end; gap: 5px; height: 112px; padding-top: 6px; }
@@ -292,6 +292,11 @@ b { font-weight: 600; }
 .pj b { display: block; font-size: 15px; }
 .pj span { font: 10px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
 .pj p { margin: 6px 0 0; font-size: 12px; color: var(--soft); }
+.progress { margin-top: 8px; }
+.progress-h { display: flex; justify-content: space-between; gap: 8px; font: 10px var(--mono); color: var(--muted); }
+.progress-h b { color: var(--c); }
+.progress-bar { height: 4px; margin-top: 4px; border-radius: 2px; background: rgba(255,255,255,.06); overflow: hidden; }
+.progress-bar i { display: block; height: 100%; background: var(--c); box-shadow: 0 0 8px var(--c); }
 
 /* ---------- works ---------- */
 .works-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 14px; }

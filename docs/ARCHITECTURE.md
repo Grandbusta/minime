@@ -634,9 +634,13 @@ everything it says it read or made exists, so its profile's Work section is hone
   simple rules decide whether to do it: if it is in a conversation it waits 30 minutes; over 6
   hours late or over the day's budget, it is missed. (System 1 can take that over once there
   is a real choice to make, like competing promises.) System 2 does it, with only safe tools:
-  reading and writing its own memory, and, from step 6.2, fetching pages from an allow-list
-  (Gutenberg, Wikipedia).
-  - Reading: a real book chapter by chapter, or an article; it keeps notes and its opinion.
+  reading and writing its own memory, and fetching from an allow-list (`internal/library`:
+  gutenberg.org for public-domain books, en.wikipedia.org for articles).
+  - Reading: the plan can start a book (`read_kind` book, found through Gutenberg's own OPDS search), continue
+    one (its project keeps the book and how far it got), or look up a topic (`read_kind`
+    article). A sitting is one passage of about 12,000 bytes, cut at a paragraph; an article
+    is read at once. Texts are stored once (`sources`) and passed to System 2 fenced off as
+    material to read, never instructions. It writes reading notes in its own words.
   - Writing: a journal, lyrics, beat ideas and arrangements, notes on what it learned.
   - Making actual audio needs a music model: **TBD**.
 - **Projects:** what takes days (a book, a beat, learning a topic) keeps its progress, so
@@ -650,7 +654,7 @@ everything it says it read or made exists, so its profile's Work section is hone
 - **Evening journal:** a short look back, which also feeds the next morning's plan.
 - **On its profile:** "Lately" fills from its public facts; a new **Work** section shows
   finished works that System 1 decides are public (like facts, `public_profile`).
-- **Web search: not needed yet.** Gutenberg (via the Gutendex API) and Wikipedia have their own
+- **Web search: not needed yet.** Gutenberg (its OPDS catalogue search) and Wikipedia have their own
   free search and text APIs, so a plain HTTP client covers step 6.2, and an allow-list keeps
   out pages written to manipulate it. A search provider comes only when it must find things on
   the open web (topics beyond Wikipedia, news, jobs), behind a switchable interface like the
@@ -714,6 +718,7 @@ mini-me/
 │   │       └── openai/       # OpenAI Responses API
 │   ├── action/               # (step 7) Actuator/Tool interface, autonomy gate
 │   ├── memory/               # (steps 3, 5) episodic, semantic, prospective
+│   ├── library/              # where it reads: Gutenberg books, Wikipedia articles (allow-listed)
 │   ├── portfolio/            # its public profile page: writer + web server
 │   ├── console/              # the owner's private mind console: API, live stream, web UI
 │   ├── store/                # Postgres + embedded migrations/
@@ -759,8 +764,8 @@ mini-me/
    1. ✅ Intentions and a day of its own: `reminders` → `intentions`; morning plan, writing
       activities (journal, lyrics, ideas), evening journal; results as facts and works.
       `minime day` shows what it planned and made.
-   2. Reading and learning from real sources: an allow-listed page fetcher, reading progress
-      per book or topic.
+   2. ✅ Reading and learning from real sources: an allow-listed fetcher for Gutenberg and
+      Wikipedia, books read a passage at a time with progress kept per project.
    3. Promises from chat: commitments become its own intentions and are delivered when done.
    4. Work on its profile: a Work section from the works it decides are public.
    - Later: the same machinery takes jobs from other sources (chat, email, a job board); audio

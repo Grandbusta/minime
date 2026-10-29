@@ -328,16 +328,17 @@ func (s *Store) queryFacts(ctx context.Context, sql string, args ...any) ([]memo
 	return out, rows.Err()
 }
 
-const intentionColumns = `id, subject, kind, percept_id, project_id, text, due_at, status,
+const intentionColumns = `id, subject, kind, percept_id, project_id, text, read_kind, read_query, due_at, status,
 	coalesce(result, ''), created_at, done_at`
 
 // SaveIntention stores something the agent means to do later.
 func (s *Store) SaveIntention(ctx context.Context, i memory.Intention) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO intentions (id, subject, kind, percept_id, project_id, text, due_at, status, result, created_at, done_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		i.ID.String(), i.Subject, i.Kind, nullULID(i.PerceptID), nullULID(i.ProjectID), i.Text, i.DueAt, i.Status,
-		nullString(i.Result), i.CreatedAt, nullTime(i.DoneAt))
+		INSERT INTO intentions (id, subject, kind, percept_id, project_id, text, read_kind, read_query, due_at, status,
+		                        result, created_at, done_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		i.ID.String(), i.Subject, i.Kind, nullULID(i.PerceptID), nullULID(i.ProjectID), i.Text, i.ReadKind, i.ReadQuery,
+		i.DueAt, i.Status, nullString(i.Result), i.CreatedAt, nullTime(i.DoneAt))
 	if err != nil {
 		return fmt.Errorf("save intention: %w", err)
 	}
@@ -388,8 +389,8 @@ func (s *Store) queryIntentions(ctx context.Context, sql string, args ...any) ([
 			perceptID, projectID *string
 			doneAt               *time.Time
 		)
-		if err := rows.Scan(&id, &i.Subject, &i.Kind, &perceptID, &projectID, &i.Text, &i.DueAt, &i.Status,
-			&i.Result, &i.CreatedAt, &doneAt); err != nil {
+		if err := rows.Scan(&id, &i.Subject, &i.Kind, &perceptID, &projectID, &i.Text, &i.ReadKind, &i.ReadQuery,
+			&i.DueAt, &i.Status, &i.Result, &i.CreatedAt, &doneAt); err != nil {
 			return nil, err
 		}
 		if i.ID, err = ulid.Parse(id); err != nil {
@@ -409,16 +410,18 @@ func (s *Store) queryIntentions(ctx context.Context, sql string, args ...any) ([
 	return out, rows.Err()
 }
 
-const projectColumns = `id, title, kind, status, notes, created_at, updated_at`
+// projectSelect reads projects with the book each one follows, if any.
+const projectSelect = `SELECT p.id, p.title, p.kind, p.status, p.notes, p.source_id, p.position, p.created_at, p.updated_at,
+	s.kind, s.title, s.author, s.chars FROM projects p LEFT JOIN sources s ON s.id = p.source_id`
 
 // SaveProject stores a project, replacing what was known about it.
 func (s *Store) SaveProject(ctx context.Context, p memory.Project) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO projects (id, title, kind, status, notes, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO projects (id, title, kind, status, notes, source_id, position, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, kind = EXCLUDED.kind, status = EXCLUDED.status,
-			notes = EXCLUDED.notes, updated_at = EXCLUDED.updated_at`,
-		p.ID.String(), p.Title, p.Kind, p.Status, p.Notes, p.CreatedAt, p.UpdatedAt)
+			notes = EXCLUDED.notes, source_id = EXCLUDED.source_id, position = EXCLUDED.position, updated_at = EXCLUDED.updated_at`,
+		p.ID.String(), p.Title, p.Kind, p.Status, p.Notes, nullULID(p.SourceID), p.Position, p.CreatedAt, p.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("save project: %w", err)
 	}
@@ -427,7 +430,7 @@ func (s *Store) SaveProject(ctx context.Context, p memory.Project) error {
 
 // Project returns the project with id, and whether there is one.
 func (s *Store) Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error) {
-	ps, err := s.queryProjects(ctx, `SELECT `+projectColumns+` FROM projects WHERE id = $1`, id.String())
+	ps, err := s.queryProjects(ctx, projectSelect+` WHERE p.id = $1`, id.String())
 	if err != nil || len(ps) == 0 {
 		return memory.Project{}, false, err
 	}
@@ -436,8 +439,8 @@ func (s *Store) Project(ctx context.Context, id ulid.ULID) (memory.Project, bool
 
 // ActiveProjects returns up to limit active projects, most recently worked on first.
 func (s *Store) ActiveProjects(ctx context.Context, limit int) ([]memory.Project, error) {
-	return s.queryProjects(ctx, `SELECT `+projectColumns+` FROM projects
-		WHERE status = $1 ORDER BY updated_at DESC, id LIMIT $2`, memory.ProjectActive, limit)
+	return s.queryProjects(ctx, projectSelect+` WHERE p.status = $1 ORDER BY p.updated_at DESC, p.id LIMIT $2`,
+		memory.ProjectActive, limit)
 }
 
 func (s *Store) queryProjects(ctx context.Context, sql string, args ...any) ([]memory.Project, error) {
@@ -449,18 +452,51 @@ func (s *Store) queryProjects(ctx context.Context, sql string, args ...any) ([]m
 	var out []memory.Project
 	for rows.Next() {
 		var (
-			p  memory.Project
-			id string
+			p                      memory.Project
+			id                     string
+			sourceID               *string
+			sKind, sTitle, sAuthor *string
+			sChars                 *int
 		)
-		if err := rows.Scan(&id, &p.Title, &p.Kind, &p.Status, &p.Notes, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&id, &p.Title, &p.Kind, &p.Status, &p.Notes, &sourceID, &p.Position, &p.CreatedAt, &p.UpdatedAt,
+			&sKind, &sTitle, &sAuthor, &sChars); err != nil {
 			return nil, err
 		}
 		if p.ID, err = ulid.Parse(id); err != nil {
 			return nil, err
 		}
+		if p.SourceID, err = parseNullULID(sourceID); err != nil {
+			return nil, err
+		}
+		if sTitle != nil {
+			p.Source = &memory.Reading{Kind: *sKind, Title: *sTitle, Author: *sAuthor, Chars: *sChars}
+		}
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// SaveSource stores a book or article it fetched and returns its ID: the one
+// already stored if the same URL was fetched before.
+func (s *Store) SaveSource(ctx context.Context, src memory.Source) (ulid.ULID, error) {
+	var id string
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO sources (id, kind, title, author, url, text, chars, fetched_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (url) DO UPDATE SET url = EXCLUDED.url RETURNING id`,
+		src.ID.String(), src.Kind, src.Title, src.Author, src.URL, src.Text, len(src.Text), src.FetchedAt).Scan(&id)
+	if err != nil {
+		return ulid.ULID{}, fmt.Errorf("save source: %w", err)
+	}
+	return ulid.Parse(id)
+}
+
+// SourceText returns the text of a book or article it fetched.
+func (s *Store) SourceText(ctx context.Context, id ulid.ULID) (string, error) {
+	var text string
+	if err := s.pool.QueryRow(ctx, `SELECT text FROM sources WHERE id = $1`, id.String()).Scan(&text); err != nil {
+		return "", fmt.Errorf("load source: %w", err)
+	}
+	return text, nil
 }
 
 const workColumns = `id, intention_id, project_id, kind, title, text, created_at`

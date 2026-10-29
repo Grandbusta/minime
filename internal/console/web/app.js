@@ -511,7 +511,7 @@ const eeg = (() => {
 /* ---------- shared bits ---------- */
 
 const FAMILY_COLOR = { system1: "var(--s1)", system2: "var(--s2)", reflex: "var(--rx)", life: "var(--lf)" };
-const KIND_COLOR = { journal: "#b48cff", lyrics: "#7cff6b", beat_idea: "#ffc35c", notes: "#5be7ff", writing: "#ff9de2" };
+const KIND_COLOR = { journal: "#b48cff", lyrics: "#7cff6b", beat_idea: "#ffc35c", notes: "#5be7ff", reading_notes: "#8affd6", writing: "#ff9de2" };
 const AREA_COLORS = ["#5be7ff", "#7cff6b", "#ffc35c", "#b48cff", "#ff9de2", "#8affd6", "#ff8a6b", "#c7ff6b"];
 const areaColor = (a) => {
   if (!a) return "#8a94a6";
@@ -596,18 +596,59 @@ async function loadOverview() {
   } else $("#next").innerHTML = "nothing pending";
 }
 
+let planDay = null;
 async function loadPlan() {
-  const d = await api("/api/day"), el = $("#plan");
-  if (!d.intentions.length) { el.innerHTML = `<div class="empty">nothing planned today</div>`; return; }
+  planDay = await api("/api/day");
+  renderPlan();
+}
+let planWidth = 0; // its height follows the layout, so only a new width re-lays it out
+new ResizeObserver(([e]) => { if (planDay && e.contentRect.width !== planWidth) renderPlan(); }).observe($("#plan"));
+function renderPlan() {
+  const d = planDay, el = $("#plan");
+  if (!d.intentions.length) { el.innerHTML = `<div class="empty">nothing planned today</div>`; el.style.height = ""; return; }
   const ms = d.intentions.map((i) => minutesOfDay(i.due_at)), nowM = minutesOfDay(new Date().toISOString());
   const lo = Math.min(...ms, nowM) - 30, hi = Math.max(...ms, nowM) + 30, pos = (m) => ((m - lo) / (hi - lo)) * 100;
-  let html = `<div class="line"></div><div class="now" style="left:${pos(nowM)}%"></div>`;
-  for (let h = Math.ceil(lo / 60); h * 60 <= hi; h++) html += `<span class="hour" style="left:${pos(h * 60)}%">${String(h).padStart(2, "0")}</span>`;
+
+  // Give each label a lane (below or above the axon, then further out) where
+  // it overlaps no other; a label that fits nowhere is left to its node's tooltip.
+  const W = (planWidth = el.clientWidth) || 300, LW = 132, LH = 44, GAP = 6, TIERS = 2;
+  const lanes = []; // lanes[side*TIERS+tier] = occupied [from, to] in px
+  for (let k = 0; k < 2 * TIERS; k++) lanes.push([]);
+  const nowX = (pos(nowM) / 100) * W;
+  lanes[TIERS].push([nowX - 18, nowX + 18]); // the NOW tag sits just above the axon
+  const free = (lane, a, b) => lanes[lane].every(([x, y]) => b + GAP <= x || a >= y + GAP);
+  const order = ms.map((m, k) => k).sort((a, b) => ms[a] - ms[b]);
+  const place = [];
+  let above = 1, below = 0, hidden = 0;
+  for (const k of order) {
+    // a label may lean inwards at the ends, into the axon's margin, but not past it
+    const x = Math.min(Math.max((pos(ms[k]) / 100) * W, LW / 2 - 60), W - LW / 2 + 60), a = x - LW / 2, b = x + LW / 2;
+    let lane = -1;
+    for (let tier = 0; tier < TIERS && lane < 0; tier++)
+      for (const side of [0, 1]) if (free(side * TIERS + tier, a, b)) { lane = side * TIERS + tier; break; }
+    if (lane < 0) { hidden++; continue; }
+    lanes[lane].push([a, b]);
+    const side = Math.floor(lane / TIERS), tier = lane % TIERS;
+    place[k] = { side, tier, x };
+    if (side) above = Math.max(above, tier + 1); else below = Math.max(below, tier + 1);
+  }
+  const L = 22 + above * (LH + GAP) + 6, H = L + 22 + below * (LH + GAP);
+  el.style.height = H + "px";
+
+  let html = `<div class="line" style="top:${L}px"></div><div class="now" style="left:${pos(nowM)}%;top:${L - 22}px"></div>`;
+  for (let h = Math.ceil(lo / 60); h * 60 <= hi; h++) html += `<span class="hour" style="left:${pos(h * 60)}%;top:${L + 6}px">${String(h).padStart(2, "0")}</span>`;
   d.intentions.forEach((i, k) => {
     const col = i.status === "missed" ? "var(--bad)" : i.status === "done" ? "var(--accent)" : i.kind === "remind" ? "var(--s1)" : "var(--lf)";
-    html += `<span class="pnode ${i.status === "done" ? "done" : ""}" style="left:${pos(ms[k])}%;color:${col}" title="${esc(i.status)}"></span>
-      <div class="plabel ${k % 2 ? "above" : "below"}" style="left:${pos(ms[k])}%"><time>${fmtTime(i.due_at)}</time><span>${esc(i.result || i.text)}</span></div>`;
+    const tip = `${fmtTime(i.due_at)} · ${i.status} · ${i.result || i.text}`;
+    html += `<span class="pnode ${i.status === "done" ? "done" : ""}" style="left:${pos(ms[k])}%;top:${L - 6}px;color:${col}" title="${esc(tip)}"></span>`;
+    const p = place[k];
+    if (!p) return;
+    const top = p.side ? L - 20 - LH - p.tier * (LH + GAP) : L + 20 + p.tier * (LH + GAP);
+    const stem = p.side ? [top + LH, L - 7] : [L + 7, top];
+    html += `<span class="pstem" style="left:${pos(ms[k])}%;top:${stem[0]}px;height:${stem[1] - stem[0]}px;color:${col}"></span>
+      <div class="plabel" style="left:${p.x}px;top:${top}px;width:${LW}px"><time style="color:${col}">${fmtTime(i.due_at)}</time><span>${esc(i.result || i.text)}</span></div>`;
   });
+  if (hidden) html += `<span class="pmore">+${hidden} more · hover the dots</span>`;
   el.innerHTML = html;
 }
 
@@ -777,6 +818,7 @@ async function loadDay() {
   day.works.forEach((w) => $("#dayWorks").appendChild(workButton(w, "wk")));
   $("#projects").innerHTML = day.projects.length ? day.projects.map((p) =>
     `<div class="pj" style="--c:${PROJECT_COLOR[p.kind] || "#b48cff"}"><b>${esc(p.title)}</b><span>${esc(p.kind)} · ${esc(p.status)} · since ${fmtTime(p.created_at, true)}</span>
+     ${p.reading ? `<div class="progress"><div class="progress-h"><span>${esc(p.reading.title)}${p.reading.author ? " · " + esc(p.reading.author) : ""}</span><b>${p.reading.percent}%</b></div><div class="progress-bar"><i style="width:${p.reading.percent}%"></i></div></div>` : ""}
      <p>${esc(p.notes || "no notes yet")}</p></div>`).join("") : `<div class="empty">no projects yet</div>`;
 }
 $("#dayPrev").onclick = () => { dayOffset--; loadDay(); };

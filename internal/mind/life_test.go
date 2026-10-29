@@ -2,6 +2,7 @@ package mind
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"minime/internal/memory"
+	"minime/internal/providers/system2"
 )
 
 // at is a time on a day in October 2026, in the agent's zone (lagos, UTC+1).
@@ -194,5 +196,40 @@ func TestJournalLooksBackAtTheDay(t *testing.T) {
 	}
 	if w := s.works[len(s.works)-1]; w.Kind != "journal" || w.Text != "Wrote verse 2 today." {
 		t.Errorf("journal = %+v", w)
+	}
+}
+
+// flakySystem2 fails its first request, then answers like fakeSystem2.
+type flakySystem2 struct {
+	fakeSystem2
+	failed bool
+}
+
+func (f *flakySystem2) Reason(ctx context.Context, req system2.Request) (system2.Response, error) {
+	if !f.failed {
+		f.failed = true
+		return system2.Response{}, errors.New("timeout")
+	}
+	return f.fakeSystem2.Reason(ctx, req)
+}
+
+func TestFailedActivityIsRetriedWithItsOwnPercept(t *testing.T) {
+	m, s, _, _, i := activityMind()
+	flaky := &flakySystem2{fakeSystem2: fakeSystem2{formats: map[string]string{"activity": activityJSON}}}
+	m.System2 = flaky
+	m.tick(context.Background(), at(29, 10, 0))
+	if got := s.intention(i.ID); got.Status != memory.IntentionPending {
+		t.Fatalf("after a failure: %+v, want still pending", got)
+	}
+	m.tick(context.Background(), at(29, 10, 1))
+	if got := s.intention(i.ID); got.Status != memory.IntentionDone {
+		t.Fatalf("after the retry: %+v", got)
+	}
+	if len(s.percepts) != 2 || s.percepts[0].ExternalID == s.percepts[1].ExternalID {
+		t.Fatalf("percepts = %+v, want one per attempt", s.percepts)
+	}
+	last := s.decisions[len(s.decisions)-1]
+	if s.facts[0].PerceptID != s.percepts[1].ID || last.PerceptID != s.percepts[1].ID {
+		t.Errorf("the retry's fact and decision don't point at its saved percept")
 	}
 }

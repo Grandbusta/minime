@@ -31,6 +31,7 @@ import (
 
 	"minime/internal/decision"
 	"minime/internal/decision/questions"
+	"minime/internal/library"
 	"minime/internal/memory"
 	"minime/internal/perception"
 	"minime/internal/providers/system1"
@@ -66,6 +67,8 @@ type Store interface {
 	ProjectWorks(ctx context.Context, project ulid.ULID, limit int) ([]memory.Work, error)
 	LatestWork(ctx context.Context, kind string) (memory.Work, bool, error)
 	CostSince(ctx context.Context, since time.Time, actions []string) (float64, error)
+	SaveSource(ctx context.Context, src memory.Source) (ulid.ULID, error)
+	SourceText(ctx context.Context, id ulid.ULID) (string, error)
 	Conversations(ctx context.Context) ([]memory.Conversation, error)
 	LastSpokeFirst(ctx context.Context, person, kind string) (time.Time, bool, error)
 	UnaskedFacts(ctx context.Context, person string, since time.Time, limit int) ([]memory.Fact, error)
@@ -77,6 +80,13 @@ type Store interface {
 type WorkingMemory struct {
 	Turns  int
 	Window time.Duration
+}
+
+// Library finds and fetches what the agent reads (library.Client).
+type Library interface {
+	FindBook(ctx context.Context, query string) (library.Book, error)
+	BookText(ctx context.Context, b library.Book) (string, error)
+	FindArticle(ctx context.Context, query string) (library.Article, error)
 }
 
 // Replier answers on the channel a percept came from.
@@ -122,7 +132,9 @@ type Config struct {
 	Zone     *time.Location
 	CheckIns CheckIns
 	Day      Day // its own day: plan, activities, journal
-	Log      *slog.Logger
+	// Library is where it reads books and articles; nil: it reads nothing new.
+	Library Library
+	Log     *slog.Logger
 }
 
 type Mind struct {

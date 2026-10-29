@@ -165,7 +165,7 @@ func (s *Store) AllPeople(ctx context.Context, limit int) ([]memory.Person, erro
 
 // AllProjects returns up to limit projects, most recently worked on first.
 func (s *Store) AllProjects(ctx context.Context, limit int) ([]memory.Project, error) {
-	return s.queryProjects(ctx, `SELECT `+projectColumns+` FROM projects ORDER BY updated_at DESC, id LIMIT $1`, limit)
+	return s.queryProjects(ctx, projectSelect+` ORDER BY p.updated_at DESC, p.id LIMIT $1`, limit)
 }
 
 // RecentWorks returns up to limit works, newest first.
