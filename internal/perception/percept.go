@@ -36,3 +36,14 @@ const (
 	KindCheckIn  = "check_in" // asking how something in their life is going
 	KindDelivery = "delivery" // sending what it promised to make for them
 )
+
+// KindApproval is the owner answering something the agent asked before
+// doing it (the autonomy gate). Its Payload is an Answer; it has no Text,
+// so it is never part of the conversation.
+const KindApproval = "approval"
+
+// Answer is the owner's answer to an approval.
+type Answer struct {
+	Approval string `json:"approval"` // the approval's ID
+	Approve  bool   `json:"approve"`
+}

@@ -3,6 +3,7 @@ package mind
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"slices"
@@ -40,6 +41,90 @@ type fakeStore struct {
 	convs          []memory.Conversation
 	percepts       []perception.Percept // saved, in order
 	asked          map[ulid.ULID]time.Time
+	approvals      []memory.Approval
+	public         map[ulid.ULID]string // works set public: "true by owner", ...
+}
+
+func (s *fakeStore) AwaitIntention(_ context.Context, id ulid.ULID) error {
+	for n := range s.intentions {
+		if s.intentions[n].ID == id && s.intentions[n].Status == memory.IntentionPending {
+			s.intentions[n].Status = memory.IntentionAwaiting
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) ResumeIntention(_ context.Context, id ulid.ULID, notBefore time.Time) error {
+	for n := range s.intentions {
+		if i := &s.intentions[n]; i.ID == id && i.Status == memory.IntentionAwaiting {
+			i.Status = memory.IntentionPending
+			if i.DueAt.Before(notBefore) {
+				i.DueAt = notBefore
+			}
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) SaveApproval(_ context.Context, a memory.Approval) error {
+	s.approvals = append(s.approvals, a)
+	return nil
+}
+
+func (s *fakeStore) Approval(_ context.Context, id ulid.ULID) (memory.Approval, bool, error) {
+	for _, a := range s.approvals {
+		if a.ID == id {
+			return a, true, nil
+		}
+	}
+	return memory.Approval{}, false, nil
+}
+
+func (s *fakeStore) UnsentApprovals(_ context.Context, limit int) ([]memory.Approval, error) {
+	var out []memory.Approval
+	for _, a := range s.approvals {
+		if a.Status == memory.ApprovalPending && a.SentAt.IsZero() && len(out) < limit {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) MarkApprovalSent(_ context.Context, id ulid.ULID, message []byte, at time.Time) error {
+	for n := range s.approvals {
+		if s.approvals[n].ID == id {
+			s.approvals[n].SentAt, s.approvals[n].Message = at, message
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) DecideApproval(_ context.Context, id ulid.ULID, status string, at time.Time) (bool, error) {
+	for n := range s.approvals {
+		if a := &s.approvals[n]; a.ID == id && a.Status == memory.ApprovalPending {
+			a.Status, a.DecidedAt = status, at
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *fakeStore) StaleApprovals(_ context.Context, before time.Time, limit int) ([]memory.Approval, error) {
+	var out []memory.Approval
+	for _, a := range s.approvals {
+		if a.Status == memory.ApprovalPending && a.AskedAt.Before(before) && len(out) < limit {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) SetWorkPublic(_ context.Context, id ulid.ULID, public bool, by string) (bool, error) {
+	if s.public == nil {
+		s.public = map[ulid.ULID]string{}
+	}
+	s.public[id] = fmt.Sprintf("%v by %s", public, by)
+	return true, nil
 }
 
 func (s *fakeStore) SaveIntention(_ context.Context, i memory.Intention) error {

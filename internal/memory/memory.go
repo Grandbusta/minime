@@ -82,7 +82,8 @@ const (
 const (
 	IntentionPending   = "pending"
 	IntentionDone      = "done"
-	IntentionMissed    = "missed" // could not be done in time
+	IntentionMissed    = "missed"   // could not be done in time
+	IntentionAwaiting  = "awaiting" // waiting for the owner's approval (the autonomy gate)
 	IntentionCancelled = "cancelled"
 )
 
@@ -150,10 +151,36 @@ type Work struct {
 	PublicBy    string // who decided: PublicBySystem1 or PublicByOwner; "" until decided
 }
 
+// Approval is something the agent asked its owner before doing it: the
+// autonomy gate's "ask".
+type Approval struct {
+	ID        ulid.ULID
+	Class     string    // the action class, e.g. "reach_out"
+	Person    string    // who it concerns, e.g. "telegram:123"; "" if no one
+	What      string    // what it asks, as the owner sees it
+	Text      string    // reach_out: the message it would send
+	Kind      string    // reach_out: the percept kind, e.g. "reminder"
+	Ref       ulid.ULID // the intention or work it is about; zero if none
+	Status    string    // ApprovalPending, ApprovalApproved, ApprovalDenied or ApprovalExpired
+	AskedAt   time.Time
+	SentAt    time.Time       // when the owner was asked; zero until then
+	DecidedAt time.Time       // zero until decided
+	Message   json.RawMessage // where the request was sent, to update it after; nil until sent
+}
+
+const (
+	ApprovalPending  = "pending"
+	ApprovalApproved = "approved"
+	ApprovalDenied   = "denied"
+	ApprovalExpired  = "expired" // not answered in time: denied
+)
+
 // Who decided whether a work is public.
 const (
-	PublicBySystem1 = "system1" // the daily check (public_work question set)
-	PublicByOwner   = "owner"   // its owner, which the daily check never overrides
+	PublicBySystem1 = "system1"  // the daily check (public_work question set)
+	PublicByOwner   = "owner"    // its owner, which the daily check never overrides
+	PublicByGate    = "gate"     // the autonomy gate: forbidden, or the owner didn't answer
+	PublicAwaiting  = "awaiting" // judged public, waiting for the owner's approval
 )
 
 // Conversation is where the agent last talked with a person, so it can

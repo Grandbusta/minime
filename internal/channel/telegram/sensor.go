@@ -83,6 +83,11 @@ func (s *Sensor) Run(ctx context.Context) error {
 			if !ok {
 				continue
 			}
+			if q := u.CallbackQuery; q != nil {
+				if err := s.client.AnswerCallback(ctx, q.ID, "Got it"); err != nil {
+					s.log.Warn("answering a button tap failed", "err", err)
+				}
+			}
 			if err := s.out.Publish(ctx, p); err != nil {
 				return nil
 			}
@@ -93,6 +98,9 @@ func (s *Sensor) Run(ctx context.Context) error {
 
 // percept converts an update into a percept, dropping anything not from an owner.
 func (s *Sensor) percept(u Update) (perception.Percept, bool) {
+	if u.CallbackQuery != nil {
+		return s.answer(u.CallbackQuery)
+	}
 	m := u.Message
 	if m == nil || m.From == nil {
 		return perception.Percept{}, false
@@ -114,6 +122,63 @@ func (s *Sensor) percept(u Update) (perception.Percept, bool) {
 		Payload:     payload,
 		At:          time.Unix(m.Date, 0).UTC(),
 	}, true
+}
+
+// The data of an approval's buttons: "gate:<approval id>:y" or ":n".
+const gatePrefix = "gate:"
+
+// answer turns an owner's tap on an approval's button into a percept.
+func (s *Sensor) answer(q *CallbackQuery) (perception.Percept, bool) {
+	if q.From == nil || !s.owners[q.From.ID] || q.Message == nil {
+		return perception.Percept{}, false
+	}
+	rest, ok := strings.CutPrefix(q.Data, gatePrefix)
+	id, choice, ok2 := strings.Cut(rest, ":")
+	if !ok || !ok2 || (choice != "y" && choice != "n") {
+		return perception.Percept{}, false
+	}
+	payload, _ := json.Marshal(perception.Answer{Approval: id, Approve: choice == "y"})
+	return perception.Percept{
+		ID:          ulid.Make(),
+		Source:      Source,
+		ExternalID:  "callback:" + q.ID,
+		Thread:      strconv.FormatInt(q.Message.Chat.ID, 10),
+		Speaker:     Speaker(q.From.ID),
+		SpeakerName: speakerName(q.From),
+		Kind:        perception.KindApproval,
+		Payload:     payload,
+		At:          time.Now().UTC(),
+	}, true
+}
+
+// AskMessage is where an approval request was sent, to update it after.
+type AskMessage struct {
+	ChatID    int64 `json:"chat_id"`
+	MessageID int64 `json:"message_id"`
+}
+
+// Ask sends text, with Approve and Deny buttons for approval id, to the chat
+// p is in, and returns where it was sent.
+func (c *Client) Ask(ctx context.Context, p perception.Percept, text, id string) (json.RawMessage, error) {
+	var pl MessagePayload
+	if err := json.Unmarshal(p.Payload, &pl); err != nil {
+		return nil, fmt.Errorf("telegram ask: bad payload: %w", err)
+	}
+	msgID, err := c.SendButtons(ctx, pl.ChatID, text, []Button{
+		{Text: "✅ Approve", Data: gatePrefix + id + ":y"}, {Text: "❌ Deny", Data: gatePrefix + id + ":n"}})
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(AskMessage{ChatID: pl.ChatID, MessageID: msgID})
+}
+
+// Settle replaces an approval request's text with how it ended, removing its buttons.
+func (c *Client) Settle(ctx context.Context, where json.RawMessage, text string) error {
+	var m AskMessage
+	if err := json.Unmarshal(where, &m); err != nil || m.MessageID == 0 {
+		return fmt.Errorf("telegram settle: bad message %s", where)
+	}
+	return c.EditMessage(ctx, m.ChatID, m.MessageID, text)
 }
 
 // Speaker is the stable key of a Telegram user, used to file what they say.

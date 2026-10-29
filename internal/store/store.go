@@ -385,6 +385,25 @@ func orEmpty(m map[string]string) map[string]string {
 	return m
 }
 
+// AwaitIntention puts a pending intention on hold until the owner approves it.
+func (s *Store) AwaitIntention(ctx context.Context, id ulid.ULID) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE intentions SET status = $2 WHERE id = $1 AND status = $3`,
+		id.String(), memory.IntentionAwaiting, memory.IntentionPending); err != nil {
+		return fmt.Errorf("await intention: %w", err)
+	}
+	return nil
+}
+
+// ResumeIntention makes an intention that was waiting for approval pending
+// again, due when it was or at notBefore, whichever is later.
+func (s *Store) ResumeIntention(ctx context.Context, id ulid.ULID, notBefore time.Time) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE intentions SET status = $2, due_at = GREATEST(due_at, $3) WHERE id = $1 AND status = $4`,
+		id.String(), memory.IntentionPending, notBefore, memory.IntentionAwaiting); err != nil {
+		return fmt.Errorf("resume intention: %w", err)
+	}
+	return nil
+}
+
 // PostponeIntention moves a pending intention to a later time.
 func (s *Store) PostponeIntention(ctx context.Context, id ulid.ULID, due time.Time) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE intentions SET due_at = $2 WHERE id = $1`, id.String(), due); err != nil {
@@ -561,7 +580,17 @@ func (s *Store) ProjectWorks(ctx context.Context, project ulid.ULID, limit int) 
 // haven't been decided on yet, oldest first.
 func (s *Store) UndecidedPublicWorks(ctx context.Context, limit int) ([]memory.Work, error) {
 	return s.queryWorks(ctx, `SELECT `+workColumns+` FROM works w
-		WHERE w.public IS NULL AND `+shareableWork+` ORDER BY w.created_at, w.id LIMIT $1`, limit)
+		WHERE w.public IS NULL AND w.public_by IS NULL AND `+shareableWork+` ORDER BY w.created_at, w.id LIMIT $1`, limit)
+}
+
+// AwaitWorkPublic marks an undecided work as judged public but waiting for
+// the owner's approval, so the daily check doesn't ask about it again.
+func (s *Store) AwaitWorkPublic(ctx context.Context, id ulid.ULID) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE works SET public_by = $2 WHERE id = $1 AND public IS NULL`,
+		id.String(), memory.PublicAwaiting); err != nil {
+		return fmt.Errorf("await work public: %w", err)
+	}
+	return nil
 }
 
 // SetWorkPublic records whether a work may go on the public page, and who
@@ -820,4 +849,109 @@ func nullJSON(b []byte) any {
 		return nil
 	}
 	return string(b)
+}
+
+const approvalColumns = `id, class, person, what, text, kind, ref, status, asked_at, sent_at, decided_at, message`
+
+// SaveApproval stores something the agent asks its owner before doing it.
+func (s *Store) SaveApproval(ctx context.Context, a memory.Approval) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO approvals (id, class, person, what, text, kind, ref, status, asked_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		a.ID.String(), a.Class, a.Person, a.What, a.Text, a.Kind, ulidOrEmpty(a.Ref), a.Status, a.AskedAt)
+	if err != nil {
+		return fmt.Errorf("save approval: %w", err)
+	}
+	return nil
+}
+
+// Approval returns the approval with id, and whether there is one.
+func (s *Store) Approval(ctx context.Context, id ulid.ULID) (memory.Approval, bool, error) {
+	as, err := s.queryApprovals(ctx, `SELECT `+approvalColumns+` FROM approvals WHERE id = $1`, id.String())
+	if err != nil || len(as) == 0 {
+		return memory.Approval{}, false, err
+	}
+	return as[0], true, nil
+}
+
+// UnsentApprovals returns pending approvals the owner hasn't been asked yet, oldest first.
+func (s *Store) UnsentApprovals(ctx context.Context, limit int) ([]memory.Approval, error) {
+	return s.queryApprovals(ctx, `SELECT `+approvalColumns+` FROM approvals
+		WHERE status = $1 AND sent_at IS NULL ORDER BY asked_at, id LIMIT $2`, memory.ApprovalPending, limit)
+}
+
+// MarkApprovalSent records that the owner was asked, and where.
+func (s *Store) MarkApprovalSent(ctx context.Context, id ulid.ULID, message []byte, at time.Time) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE approvals SET sent_at = $2, message = $3 WHERE id = $1`,
+		id.String(), at, message); err != nil {
+		return fmt.Errorf("mark approval sent: %w", err)
+	}
+	return nil
+}
+
+// DecideApproval settles a pending approval as approved, denied or expired.
+// It reports whether it was still pending: an approval is decided once.
+func (s *Store) DecideApproval(ctx context.Context, id ulid.ULID, status string, at time.Time) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE approvals SET status = $2, decided_at = $3 WHERE id = $1 AND status = $4`,
+		id.String(), status, at, memory.ApprovalPending)
+	if err != nil {
+		return false, fmt.Errorf("decide approval: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// StaleApprovals returns pending approvals asked before before, oldest first.
+func (s *Store) StaleApprovals(ctx context.Context, before time.Time, limit int) ([]memory.Approval, error) {
+	return s.queryApprovals(ctx, `SELECT `+approvalColumns+` FROM approvals
+		WHERE status = $1 AND asked_at < $2 ORDER BY asked_at, id LIMIT $3`, memory.ApprovalPending, before, limit)
+}
+
+// RecentApprovals returns the pending approvals, oldest first, then up to
+// limit of the newest decided ones.
+func (s *Store) RecentApprovals(ctx context.Context, limit int) ([]memory.Approval, error) {
+	return s.queryApprovals(ctx, `(SELECT `+approvalColumns+` FROM approvals WHERE status = $1 ORDER BY asked_at, id)
+		UNION ALL (SELECT `+approvalColumns+` FROM approvals WHERE status <> $1 ORDER BY decided_at DESC, id DESC LIMIT $2)`,
+		memory.ApprovalPending, limit)
+}
+
+func (s *Store) queryApprovals(ctx context.Context, sql string, args ...any) ([]memory.Approval, error) {
+	rows, err := s.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query approvals: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Approval
+	for rows.Next() {
+		var (
+			a                 memory.Approval
+			id, ref           string
+			sentAt, decidedAt *time.Time
+		)
+		if err := rows.Scan(&id, &a.Class, &a.Person, &a.What, &a.Text, &a.Kind, &ref, &a.Status, &a.AskedAt,
+			&sentAt, &decidedAt, &a.Message); err != nil {
+			return nil, err
+		}
+		if a.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if ref != "" {
+			if a.Ref, err = ulid.Parse(ref); err != nil {
+				return nil, err
+			}
+		}
+		if sentAt != nil {
+			a.SentAt = *sentAt
+		}
+		if decidedAt != nil {
+			a.DecidedAt = *decidedAt
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func ulidOrEmpty(id ulid.ULID) string {
+	if id.IsZero() {
+		return ""
+	}
+	return id.String()
 }

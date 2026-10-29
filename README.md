@@ -49,7 +49,7 @@ own person, clone it and change these files; then follow [Run locally](#run-loca
 | File | What you change |
 |---|---|
 | [self/life.yaml](self/life.yaml) | **Who they are:** `name`, `story` (their life, one fact per line, third person), `personality` (how they are with people), `routine` (how their days go), `makes` (what they make in their own day), `family` (who they're born knowing, including you). |
-| [configs/minime.yaml](configs/minime.yaml) | **Where they live and what they can do:** `initiative.timezone` and `check_ins`, `daily_life` (when they plan and journal, a daily `budget_usd`, and `abilities`), the profile page and console addresses. |
+| [configs/minime.yaml](configs/minime.yaml) | **Where they live and what they can do:** `initiative.timezone` and `check_ins`, `daily_life` (when they plan and journal, a daily `budget_usd`, and `abilities`), `autonomy` (what they may do without asking you), the profile page and console addresses. |
 | `.env` (from [.env.example](.env.example)) | **Secrets and accounts:** the Telegram bot token and your Telegram user ID, the Postgres URL, the OpenAI key and model. |
 
 `makes` is what they create, in writing, for real. Each entry is a `kind` (snake_case; their
@@ -246,6 +246,31 @@ public, private or undecided.
 Change where it's served and when it updates (`update_at`), or turn it off (`addr: ""`), under `portfolio:` in
 [configs/minime.yaml](configs/minime.yaml). Change how it writes the page in
 [prompts/profile.md](prompts/profile.md).
+
+### What it may do on its own
+
+Everything the agent does belongs to a kind of action, and `autonomy:` in
+[configs/minime.yaml](configs/minime.yaml) says for each whether it does it on its own
+(`auto`), asks you first (`ask`), or never (`forbid`):
+
+| Kind | What it covers | Default |
+|---|---|---|
+| `remember`, `reply` | keeping facts, answering messages | always auto |
+| `read_web` | abilities that fetch from the web (reading) | auto |
+| `reach_out` | messaging someone first: reminders, check-ins, what it promised | ask |
+| `commit` | promising to make something for someone | ask |
+| `publish` | putting a work on its public page | ask |
+| `spend`, `external_message` | money, and email or posts outside the chat (later) | forbid |
+
+Anything only for you (a reminder you asked for, a promise to you) never needs your OK.
+
+When it asks, it messages you on Telegram with **✅ Approve** and **❌ Deny** buttons: the
+exact message it would send someone, what it was asked to make, or the work it would
+publish. Then it carries on: it sends the message word for word, keeps or kindly drops the
+promise (and tells them), or publishes the work or not. Only you (`autonomy.owner`, by
+default the first of `telegram.owner_ids`) can answer. Unanswered after `ask_expires`
+(24h), a request is denied. The console's Mind view shows what's waiting, and the decision
+log marks each as `asked` or `denied`.
 
 ### Its mind console
 

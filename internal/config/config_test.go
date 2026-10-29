@@ -101,3 +101,43 @@ func TestAbilityNames(t *testing.T) {
 		}
 	}
 }
+
+func TestPolicy(t *testing.T) {
+	cfg, err := Load(writeConfig(t, "database: {url: x}\ntelegram:\n  owner_ids: [42, 7]\nautonomy:\n  classes: {publish: auto}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := cfg.Policy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Owner != "telegram:42" || p.AskExpires != 24*time.Hour || p.Classes["publish"] != "auto" || p.Classes["commit"] != "ask" {
+		t.Errorf("policy = %+v", p)
+	}
+	for _, body := range []string{"autonomy:\n  classes: {reply: forbid}\n", "autonomy:\n  classes: {fly: auto}\n",
+		"autonomy:\n  ask_expires: -1h\n"} {
+		cfg, err := Load(writeConfig(t, "database: {url: x}\n"+body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cfg.Policy(); err == nil {
+			t.Errorf("%q: no error", body)
+		}
+	}
+}
+
+func TestShippedConfigPolicy(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	t.Setenv("TELEGRAM_OWNER_ID", "42")
+	cfg, err := Load("../../configs/minime.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := cfg.Policy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Owner != "telegram:42" || p.Classes["commit"] != "ask" || p.Classes["spend"] != "forbid" {
+		t.Errorf("policy = %+v", p)
+	}
+}

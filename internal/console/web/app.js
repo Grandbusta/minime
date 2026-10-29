@@ -39,7 +39,8 @@ const ACTIONS = {
   small_talk: "small talk", other: "other", continue: "continued a thread", ask: "fairly sure → System 2",
   escalate: "unsure → System 2", reply: "replied", recall: "recalled facts", recall_all: "recalled everything",
   recall_open: "looked for open threads", check_in: "check-in", no_check_in: "nothing to check in on",
-  plan_day: "planned the day", activity: "did something", task: "made what it promised", deliver: "sent what it promised", decide_public: "chose what's public", decide_public_works: "chose public works",
+  plan_day: "planned the day", activity: "did something", task: "made what it promised", deliver: "sent what it promised", decide_public: "chose what's public", decide_public_works: "chose public works", approved: "you said yes", denied: "you said no", expired: "no answer: not done",
+  send: "sent what you approved", follow_up: "followed up",
   write_profile: "wrote the profile page", error: "error",
 };
 const actionText = (a) => ACTIONS[a] || a;
@@ -64,6 +65,9 @@ function pathFor(e) {
   if (a === "check_in" || a === "no_check_in") return e.tier === "system2" ? ["clock", "system2", "senses"] : ["clock", "system1", "facts"];
   if (a === "decide_public") return ["facts", "system1", "profile"];
   if (a === "decide_public_works") return ["life", "system1", "profile"];
+  if (["approved", "denied", "expired"].includes(a)) return ["senses", "router", "intentions"];
+  if (a === "send") return ["intentions", "router", "senses"];
+  if (a === "follow_up") return ["intentions", "system2", "senses"];
   if (a === "write_profile") return ["facts", "system2", "profile"];
   if (["recall", "recall_open", "recall_all"].includes(a)) return ["router", "system1", "facts"];
   if (e.tier === "reflex") return ["senses", "router", "senses"];
@@ -608,6 +612,20 @@ async function loadOverview() {
 }
 
 let planDay = null;
+// approvals: what it asked its owner (the autonomy gate), waiting first.
+const CLASS_TEXT = { reach_out: "message first", commit: "promise", publish: "publish", spend: "spend", external_message: "message outside" };
+async function loadApprovals() {
+  const as = await api("/api/approvals?limit=3"), el = $("#approvals");
+  if (!as.length) { el.innerHTML = `<div class="empty">nothing asked yet</div>`; return; }
+  el.innerHTML = as.map((a) => {
+    const who = a.name || (a.person ? a.person : "");
+    const body = a.class === "reach_out" ? a.text : a.what;
+    const state = a.status === "pending" ? (a.sent ? "waiting · since " + fmtTime(a.asked_at) : "not sent yet") : a.status;
+    return `<div class="appr ${a.status === "pending" ? "" : "done"}"><div class="appr-top"><b>${esc(CLASS_TEXT[a.class] || a.class)}${who ? " · " + esc(who) : ""}</b><span>${esc(state)}</span></div>
+      <p>${esc(body)}</p></div>`;
+  }).join("");
+}
+
 async function loadPlan() {
   planDay = await api("/api/day");
   renderPlan();
@@ -920,7 +938,7 @@ async function openChain(id) {
   for (const e of chain) {
     const fam = family(e);
     html += `<div class="step t-${fam}"><h4>${esc(actionText(e.action))}</h4>
-      <div class="meta">${esc(e.tier)} · ${esc(e.set)} · ${esc(e.provider || "no model")} · ${e.latency_ms}ms · ${money(e.cost_usd)}${e.outcome ? " · " + esc(e.outcome.status) + (e.outcome.detail ? ": " + esc(e.outcome.detail) : "") : ""}</div>
+      <div class="meta">${esc(e.tier)} · ${esc(e.set)} · ${esc(e.provider || "no model")} · ${e.latency_ms}ms · ${money(e.cost_usd)}${e.gate && e.gate !== "auto" ? " · gate: " + esc(e.gate) : ""}${e.outcome ? " · " + esc(e.outcome.status) + (e.outcome.detail ? ": " + esc(e.outcome.detail) : "") : ""}</div>
       ${answersHTML(e)}${e.reply ? `<div class="quote">${esc(e.reply)}</div>` : ""}</div>`;
   }
   openDrawer("DECISION CHAIN", `<button class="drawer-replay" id="drawerReplay">▶ REPLAY ON THE BRAIN</button>` + html);
@@ -982,7 +1000,7 @@ document.addEventListener("keydown", (e) => e.key === "Escape" && closeDrawer())
 
 /* ---------- navigation, clock, live stream ---------- */
 
-const LOADERS = { mind: () => Promise.all([loadOverview(), loadFeed(), loadPlan()]), activity: loadLog, memory: loadMemory,
+const LOADERS = { mind: () => Promise.all([loadOverview(), loadFeed(), loadPlan(), loadApprovals()]), activity: loadLog, memory: loadMemory,
   day: loadDay, works: loadWorks, talk: loadTalk };
 let view = "mind";
 function show(v) {
@@ -1017,7 +1035,7 @@ function connect() {
     feed.prepend(sigItem(e, true));
     while (feed.children.length > 60) feed.lastChild.remove();
     clearTimeout(refresh);
-    refresh = setTimeout(() => { loadOverview(); loadPlan(); if (view !== "mind") LOADERS[view](); }, 1200);
+    refresh = setTimeout(() => { loadOverview(); loadPlan(); loadApprovals(); if (view !== "mind") LOADERS[view](); }, 1200);
   });
 }
 
@@ -1028,4 +1046,4 @@ loadOverview().then(() => {
   if (replayID) replay(replayID).catch(console.error);
 }).catch(console.error);
 connect();
-setInterval(() => loadOverview().catch(() => {}), 30000);
+setInterval(() => { loadOverview().catch(() => {}); if (view === "mind") loadApprovals().catch(() => {}); }, 30000);

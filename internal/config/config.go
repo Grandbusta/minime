@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"minime/internal/action"
 	"minime/internal/pricing"
 )
 
@@ -25,6 +28,7 @@ type Config struct {
 	Initiative    Initiative    `yaml:"initiative"`
 	DailyLife     DailyLife     `yaml:"daily_life"`
 	Console       Console       `yaml:"console"`
+	Autonomy      Autonomy      `yaml:"autonomy"`
 	// Pricing per model, used to record what each decision cost.
 	Pricing map[string]pricing.Price `yaml:"pricing"`
 	Log     Log                      `yaml:"log"`
@@ -134,6 +138,41 @@ func (d DailyLife) AbilityNames() []string {
 	return DefaultAbilities
 }
 
+// Autonomy is what the agent may do on its own (see package action).
+type Autonomy struct {
+	// Owner approves what it asks to do, e.g. "telegram:123". Empty: the
+	// first of telegram.owner_ids.
+	Owner string `yaml:"owner"`
+	// Classes overrides the default verdict (auto, ask or forbid) per action class.
+	Classes map[string]string `yaml:"classes"`
+	// AskExpires is how long a request waits for an answer; then it is denied.
+	AskExpires time.Duration `yaml:"ask_expires"`
+}
+
+// Policy is the autonomy policy: the defaults with the config's overrides,
+// and the owner (the first Telegram owner if none is set).
+func (c *Config) Policy() (action.Policy, error) {
+	classes := action.Defaults()
+	overrides := map[action.Class]action.Verdict{}
+	for k, v := range c.Autonomy.Classes {
+		overrides[action.Class(k)] = action.Verdict(strings.TrimSpace(v))
+	}
+	if err := action.Validate(overrides); err != nil {
+		return action.Policy{}, fmt.Errorf("config: %w", err)
+	}
+	for k, v := range overrides {
+		classes[k] = v
+	}
+	owner := strings.TrimSpace(c.Autonomy.Owner)
+	if owner == "" && len(c.Telegram.OwnerIDs) > 0 {
+		owner = "telegram:" + strconv.FormatInt(c.Telegram.OwnerIDs[0], 10)
+	}
+	if c.Autonomy.AskExpires <= 0 {
+		return action.Policy{}, errors.New("config: autonomy.ask_expires must be positive, e.g. 24h")
+	}
+	return action.Policy{Owner: owner, Classes: classes, AskExpires: c.Autonomy.AskExpires}, nil
+}
+
 // Times are PlanAt and JournalAt as times of day: the time since midnight.
 func (d DailyLife) Times() (plan, journal time.Duration, err error) {
 	if plan, err = timeOfDay(d.PlanAt); err != nil {
@@ -216,7 +255,8 @@ func Load(path string) (*Config, error) {
 		Initiative:    Initiative{Timezone: "UTC", Quiet: 4 * time.Hour},
 		DailyLife: DailyLife{PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
 			PlanPrompt: "prompts/plan.md", ActivityPrompt: "prompts/activity.md"},
-		Log: Log{Level: "info"},
+		Autonomy: Autonomy{AskExpires: 24 * time.Hour},
+		Log:      Log{Level: "info"},
 	}
 	if err := yaml.Unmarshal([]byte(os.ExpandEnv(string(raw))), cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)

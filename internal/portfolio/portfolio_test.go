@@ -13,6 +13,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"minime/internal/action"
 	"minime/internal/decision"
 	"minime/internal/decision/questions"
 	"minime/internal/memory"
@@ -30,12 +31,13 @@ type fakeStore struct {
 	at        time.Time
 	decisions []decision.Decision
 	works     []memory.Work // all eligible: the store leaves out the journal and promises
+	approvals []memory.Approval
 }
 
 func (s *fakeStore) UndecidedPublicWorks(_ context.Context, limit int) ([]memory.Work, error) {
 	var out []memory.Work
 	for _, w := range s.works {
-		if w.Public == nil && len(out) < limit {
+		if w.Public == nil && w.PublicBy == "" && len(out) < limit {
 			out = append(out, w)
 		}
 	}
@@ -50,6 +52,20 @@ func (s *fakeStore) SetWorkPublic(_ context.Context, id ulid.ULID, public bool, 
 		}
 	}
 	return false, nil
+}
+
+func (s *fakeStore) AwaitWorkPublic(_ context.Context, id ulid.ULID) error {
+	for i := range s.works {
+		if s.works[i].ID == id {
+			s.works[i].PublicBy = memory.PublicAwaiting
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) SaveApproval(_ context.Context, a memory.Approval) error {
+	s.approvals = append(s.approvals, a)
+	return nil
 }
 
 func (s *fakeStore) PublicWorks(_ context.Context, limit int) ([]memory.Work, error) {
@@ -424,5 +440,43 @@ func TestNoWorksNoSection(t *testing.T) {
 	resp.Body.Close()
 	if strings.Contains(string(body), "<h2>Work</h2>") {
 		t.Error("an empty Work section was shown")
+	}
+}
+
+func TestPublishingCanWaitForTheOwner(t *testing.T) {
+	beat, diary := work("beat_idea", "Harmattan Groove", "92 BPM, A minor.", 27), work("writing", "A hard week", "Dad has been quiet.", 28)
+	st := &fakeStore{public: map[ulid.ULID]bool{}, works: []memory.Work{beat, diary}, page: []byte(pageJSON)}
+	s1 := &fakeS1{probs: map[string]float64{beat.Title: 0.94, diary.Title: 0.04}}
+	w := newWriter(st, s1, &fakeS2{out: pageJSON})
+	w.PublicWork = testPublicWork
+	w.Autonomy = action.Policy{Owner: "telegram:1", Classes: action.Defaults()}
+
+	if _, err := w.Update(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if b := st.works[0]; b.Public != nil || b.PublicBy != memory.PublicAwaiting {
+		t.Errorf("beat = %+v, want waiting", b)
+	}
+	if d := st.works[1]; d.Public == nil || *d.Public || d.PublicBy != memory.PublicBySystem1 {
+		t.Errorf("a work System 1 said no to was asked about: %+v", d)
+	}
+	if len(st.approvals) != 1 || st.approvals[0].Class != "publish" || st.approvals[0].Ref != beat.ID ||
+		!strings.HasPrefix(st.approvals[0].What, "Harmattan Groove (beat idea)\n\n92 BPM") {
+		t.Errorf("approvals = %+v", st.approvals)
+	}
+	// Waiting, it isn't asked about again.
+	if _, err := w.Update(context.Background(), false); err != nil || len(s1.reqs) != 2 || len(st.approvals) != 1 {
+		t.Errorf("asked again: %d requests, %d approvals, %v", len(s1.reqs), len(st.approvals), err)
+	}
+
+	w.Autonomy.Classes[action.Publish] = action.Forbid
+	other := work("lyrics", "Odd one", "...", 29)
+	st.works = append(st.works, other)
+	s1.probs[other.Title] = 0.9
+	if _, err := w.Update(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if o := st.works[2]; o.Public == nil || *o.Public || o.PublicBy != memory.PublicByGate {
+		t.Errorf("forbidden = %+v", o)
 	}
 }

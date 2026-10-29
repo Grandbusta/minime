@@ -74,6 +74,26 @@ daily_life:
   plan_prompt: prompts/plan.md
   activity_prompt: prompts/activity.md
 
+# What it may do on its own (the autonomy gate). Each kind of action is auto
+# (on its own), ask (it asks the owner first, on Telegram, with Approve and
+# Deny buttons) or forbid. Anything only for the owner is auto unless forbidden.
+#   remember, reply   keeping facts, answering messages: always auto
+#   read_web          abilities that fetch from the web: auto or forbid
+#   reach_out         messaging someone first (reminders, check-ins, deliveries)
+#   commit            promising to make something for someone
+#   publish           putting a work on its public page
+#   spend, external_message   money, and email or posts outside the chat (later)
+autonomy:
+  # owner: telegram:123   # who approves; default: the first of telegram.owner_ids
+  classes:
+    read_web: auto
+    reach_out: ask
+    commit: ask
+    publish: ask
+    spend: forbid
+    external_message: forbid
+  ask_expires: 24h # unanswered, a request is denied
+
 # The owner's private mind console: its brain firing live, every decision and
 # why, its memory, its day and what it made. Read-only. Never on the public
 # profile's address. Anywhere but localhost it needs a token: open it once as

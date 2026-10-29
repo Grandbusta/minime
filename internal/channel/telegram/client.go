@@ -17,8 +17,23 @@ import (
 const maxMessageRunes = 4096
 
 type Update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *Message `json:"message"`
+	UpdateID      int64          `json:"update_id"`
+	Message       *Message       `json:"message"`
+	CallbackQuery *CallbackQuery `json:"callback_query"`
+}
+
+// CallbackQuery is a tap on a button the bot sent.
+type CallbackQuery struct {
+	ID      string   `json:"id"`
+	From    *User    `json:"from"`
+	Message *Message `json:"message"`
+	Data    string   `json:"data"`
+}
+
+// Button is an inline button under a message: its label, and the data a tap sends back.
+type Button struct {
+	Text string `json:"text"`
+	Data string `json:"callback_data"`
 }
 
 type Message struct {
@@ -70,7 +85,7 @@ func (c *Client) GetUpdates(ctx context.Context, offset int64, timeoutSeconds in
 	err := c.call(ctx, "getUpdates", map[string]any{
 		"offset":          offset,
 		"timeout":         timeoutSeconds,
-		"allowed_updates": []string{"message"},
+		"allowed_updates": []string{"message", "callback_query"},
 	}, &updates)
 	return updates, err
 }
@@ -86,6 +101,36 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) err
 		}
 	}
 	return nil
+}
+
+// SendButtons sends text with a row of buttons under it, and returns the message's ID.
+func (c *Client) SendButtons(ctx context.Context, chatID int64, text string, buttons []Button) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if r := []rune(text); len(r) > maxMessageRunes {
+		text = string(r[:maxMessageRunes-1]) + "…"
+	}
+	var m Message
+	err := c.call(ctx, "sendMessage", map[string]any{"chat_id": chatID, "text": text,
+		"reply_markup": map[string]any{"inline_keyboard": [][]Button{buttons}}}, &m)
+	return m.MessageID, err
+}
+
+// EditMessage replaces a message's text, and removes its buttons.
+func (c *Client) EditMessage(ctx context.Context, chatID, messageID int64, text string) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if r := []rune(text); len(r) > maxMessageRunes {
+		text = string(r[:maxMessageRunes-1]) + "…"
+	}
+	return c.call(ctx, "editMessageText", map[string]any{"chat_id": chatID, "message_id": messageID, "text": text}, nil)
+}
+
+// AnswerCallback acknowledges a button tap, so the button stops spinning.
+func (c *Client) AnswerCallback(ctx context.Context, id, text string) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	return c.call(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": id, "text": text}, nil)
 }
 
 // split cuts text into parts of at most max runes, at a paragraph break if

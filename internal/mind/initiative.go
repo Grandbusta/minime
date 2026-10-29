@@ -8,6 +8,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"minime/internal/action"
 	"minime/internal/decision"
 	"minime/internal/memory"
 	"minime/internal/perception"
@@ -55,6 +56,8 @@ const (
 
 func (m *Mind) tick(ctx context.Context, now time.Time) {
 	m.planDay(ctx, now)
+	m.expireApprovals(ctx, now)
+	m.sendApprovals(ctx)
 	m.doDueIntentions(ctx, now)
 	m.preparePromises(ctx, now)
 	if m.checkInTime(now) {
@@ -114,10 +117,7 @@ func (m *Mind) remind(ctx context.Context, r memory.Intention, now time.Time) {
 	note := fmt.Sprintf("You are messaging %s first: it's time for the reminder %s asked you for on %s: %s. "+
 		"Remind them now, in your own words, briefly, like a friend would.",
 		n.speaker, n.speaker, r.CreatedAt.In(m.Zone).Format("Monday 2 January at 15:04"), n.fill(r.Text))
-	if m.speakFirst(ctx, p, person, nil, "remind", note, "", nil) {
-		m.finish(ctx, r, memory.IntentionDone, "", now)
-	}
-	// Not sent: still pending, so the next tick tries again.
+	m.settleSpoken(ctx, r, m.speakFirst(ctx, p, person, nil, speech{action: "remind", note: note, ref: r.ID}), "", now)
 }
 
 // keepPromise sends what it promised a person when it is due, with a few
@@ -151,10 +151,8 @@ func (m *Mind) keepPromise(ctx context.Context, i memory.Intention, now time.Tim
 		"it, and it goes right after your message, word for word:\n\n%s\n\nWrite only the one or two short sentences "+
 		"you send with it, the way a friend would (\"here's that verse I promised\"). Don't write anything of your own "+
 		"in its place, and don't repeat it.", n.speaker, promised, i.Text, titled(w))
-	if m.speakFirst(ctx, p, person, nil, "deliver", note, titled(w), firstParagraph) {
-		m.finish(ctx, i, memory.IntentionDone, w.Title, now)
-	}
-	// Not sent: still pending, and the work is kept, so the next tick sends it.
+	got := m.speakFirst(ctx, p, person, nil, speech{action: "deliver", note: note, attachment: titled(w), trim: firstParagraph, ref: i.ID})
+	m.settleSpoken(ctx, i, got, w.Title, now) // not sent: the work is kept, so the next tick sends it
 }
 
 // preparePromises makes what it promised ahead, so it is ready to send on
@@ -242,6 +240,22 @@ func firstParagraph(s string) string {
 	return s
 }
 
+// settleSpoken records what came of speaking first about intention i: done
+// once sent, on hold while the owner is asked, missed if it isn't allowed;
+// if sending failed it stays pending, so the next tick tries again.
+func (m *Mind) settleSpoken(ctx context.Context, i memory.Intention, got spoken, result string, now time.Time) {
+	switch got {
+	case sent:
+		m.finish(ctx, i, memory.IntentionDone, result, now)
+	case asked:
+		if err := m.Store.AwaitIntention(ctx, i.ID); err != nil {
+			m.Log.Error("await intention", "intention", i.ID.String(), "err", err)
+		}
+	case forbidden:
+		m.finish(ctx, i, memory.IntentionMissed, "not allowed", now)
+	}
+}
+
 func (m *Mind) finish(ctx context.Context, i memory.Intention, status, result string, now time.Time) {
 	if err := m.Store.FinishIntention(ctx, i.ID, status, result, now.UTC()); err != nil {
 		m.Log.Error("finish intention", "intention", i.ID.String(), "err", err)
@@ -298,7 +312,7 @@ func (m *Mind) checkIn(ctx context.Context, now time.Time) {
 			fmt.Fprintf(&b, "\n- %s: %s", f.At.Format("2 Jan 2006"), n.fact(f))
 		}
 		b.WriteString("\nAsk how one of them is going, the way a friend texts out of the blue: short and warm, one question at most.")
-		if !m.speakFirst(ctx, p, person, root, "check_in", b.String(), "", nil) {
+		if got := m.speakFirst(ctx, p, person, root, speech{action: "check_in", note: b.String()}); got != sent && got != asked {
 			continue
 		}
 		ids := make([]ulid.ULID, len(kept))
@@ -311,17 +325,46 @@ func (m *Mind) checkIn(ctx context.Context, now time.Time) {
 	}
 }
 
+// speech is what the agent says first: why (note), as which action, and
+// what goes with it.
+type speech struct {
+	action     string
+	note       string              // why it is speaking, for System 2
+	attachment string              // sent after what System 2 wrote, e.g. what it promised; "" if none
+	trim       func(string) string // shortens what System 2 wrote; nil: kept as is
+	ref        ulid.ULID           // the intention it is about; zero if none
+	approved   bool                // the owner already approved it: a follow-up to an approval
+}
+
+// spoken is what came of speaking first.
+type spoken int
+
+const (
+	failed    spoken = iota // not sent; worth trying again
+	sent                    // sent
+	asked                   // written, and waiting for the owner's approval
+	forbidden               // not allowed: not even written
+)
+
 // speakFirst has System 2 write what the agent says first to person, as a
 // child of root (nil: none), and sends it in the conversation p places it in,
-// followed by attachment (e.g. what it promised them) if any. The note says
-// why it is speaking; trim, if set, shortens what System 2 wrote. It reports
-// whether the message was sent.
+// followed by the attachment if any. Unless already approved, it goes through
+// the autonomy gate first (reach_out): forbidden, it isn't written; asked,
+// the owner is shown exactly what would be sent, and it is sent if they approve.
 func (m *Mind) speakFirst(ctx context.Context, p perception.Percept, person memory.Person,
-	root *decision.Decision, action, note, attachment string, trim func(string) string) bool {
-	log := m.Log.With("percept", p.ID.String(), "person", p.Speaker, "action", action)
+	root *decision.Decision, s speech) spoken {
+	log := m.Log.With("percept", p.ID.String(), "person", p.Speaker, "action", s.action)
+	verdict := action.Auto
+	if !s.approved {
+		verdict = m.Autonomy.Check(action.ReachOut, p.Speaker)
+	}
+	if verdict == action.Forbid {
+		log.Info("not allowed to message them first", "class", action.ReachOut)
+		return forbidden
+	}
 	if _, err := m.Store.SavePercept(ctx, p); err != nil {
 		log.Error("save percept", "err", err)
-		return false
+		return failed
 	}
 	var parent *ulid.ULID
 	chain := []*decision.Decision{}
@@ -330,17 +373,17 @@ func (m *Mind) speakFirst(ctx context.Context, p perception.Percept, person memo
 		chain = append(chain, root)
 	}
 	d := newDecision(p, parent, time.Now())
-	d.Tier, d.SetID, d.Action = decision.TierSystem2, m.ReplyPrompt.Ref, action
+	d.Tier, d.SetID, d.Action = decision.TierSystem2, m.ReplyPrompt.Ref, s.action
 	chain = append(chain, d)
 
 	n := m.namesFor(p)
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.instructions(ctx, person, n),
 		History:      turns(m.recall(ctx, p)),
-		Note:         m.now(p.At) + "\n\n" + note,
+		Note:         m.now(p.At) + "\n\n" + s.note,
 		CollectFacts: true, // the format the reply prompt describes; nothing new was said, so nothing is kept
 	})
-	sent := false
+	got := failed
 	switch {
 	case err != nil:
 		log.Error("system 2 failed", "err", err)
@@ -348,18 +391,31 @@ func (m *Mind) speakFirst(ctx context.Context, p perception.Percept, person memo
 		d.Outcome = &decision.Outcome{Status: decision.OutcomeFailed, Detail: err.Error(), At: time.Now().UTC()}
 	default:
 		d.Provider, d.CostUSD, d.Reply = resp.Provider, resp.CostUSD, resp.Text
-		if trim != nil {
-			d.Reply = trim(d.Reply)
+		if s.trim != nil {
+			d.Reply = s.trim(d.Reply)
 		}
-		if attachment != "" {
-			d.Reply += "\n\n" + attachment
+		if s.attachment != "" {
+			d.Reply += "\n\n" + s.attachment
+		}
+		if verdict == action.Ask {
+			d.Gate = decision.GateAsked
+			what := fmt.Sprintf("message %s first (%s)", n.speaker, strings.ReplaceAll(p.Kind, "_", " "))
+			if err := m.ask(ctx, memory.Approval{Class: string(action.ReachOut), Person: p.Speaker, What: what,
+				Text: d.Reply, Kind: p.Kind, Ref: s.ref}); err != nil {
+				log.Error("asking the owner failed", "err", err)
+				d.Outcome = &decision.Outcome{Status: decision.OutcomeFailed, Detail: err.Error(), At: time.Now().UTC()}
+				break
+			}
+			d.Outcome = &decision.Outcome{Status: decision.OutcomeOK, Detail: "written; waiting for the owner's OK", At: time.Now().UTC()}
+			got = asked
+			break
 		}
 		d.Outcome = &decision.Outcome{Status: decision.OutcomeOK, At: time.Now().UTC()}
 		if err := m.Replier.Reply(ctx, p, d.Reply); err != nil {
 			log.Warn("sending failed", "err", err)
 			d.Outcome = &decision.Outcome{Status: decision.OutcomeFailed, Detail: err.Error(), At: time.Now().UTC()}
 		} else {
-			sent = true
+			got = sent
 		}
 	}
 	d.Latency = time.Since(d.At)
@@ -371,10 +427,13 @@ func (m *Mind) speakFirst(ctx context.Context, p perception.Percept, person memo
 			log.Error("save decision", "err", err)
 		}
 	}
-	if sent {
+	switch got {
+	case sent:
 		log.Info("spoke first", "decision", d.ID.String())
+	case asked:
+		log.Info("asked the owner before messaging them first", "decision", d.ID.String())
 	}
-	return sent
+	return got
 }
 
 // outgoing is the percept that places what the agent says first in a

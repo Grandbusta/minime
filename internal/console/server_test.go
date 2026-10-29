@@ -72,6 +72,11 @@ func (f *fakeStore) RecentExchanges(context.Context, string, string, time.Time, 
 	return nil, nil
 }
 
+func (f *fakeStore) RecentApprovals(context.Context, int) ([]memory.Approval, error) {
+	return []memory.Approval{{ID: ulid.Make(), Class: "reach_out", Person: "telegram:1", What: "message Sam first (reminder)",
+		Text: "Don't forget the bank!", Status: memory.ApprovalPending, AskedAt: time.Now()}}, nil
+}
+
 func (f *fakeStore) add(e store.LogEntry) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -183,6 +188,14 @@ func TestPageAndAPI(t *testing.T) {
 	getJSON(t, srv.URL+"/api/works/"+ulid.Make().String(), &work)
 	if work["text"] != "Rain on the roof" || work["words"] != float64(4) {
 		t.Errorf("work = %+v", work)
+	}
+	var approvals []map[string]any
+	getJSON(t, srv.URL+"/api/approvals", &approvals)
+	if len(approvals) != 1 || approvals[0]["name"] != "Sam" || approvals[0]["status"] != "pending" || approvals[0]["sent"] != false {
+		t.Errorf("approvals = %+v", approvals)
+	}
+	if log[0].Gate != "auto" {
+		t.Errorf("gate = %q", log[0].Gate)
 	}
 	if resp, _ := http.Get(srv.URL + "/api/chain/not-an-id"); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("bad chain id = %d", resp.StatusCode)

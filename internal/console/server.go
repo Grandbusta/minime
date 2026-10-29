@@ -47,6 +47,7 @@ type Store interface {
 	Work(ctx context.Context, id ulid.ULID) (memory.Work, bool, error)
 	Conversations(ctx context.Context) ([]memory.Conversation, error)
 	RecentExchanges(ctx context.Context, source, thread string, since time.Time, exclude ulid.ULID, limit int) ([]memory.Exchange, error)
+	RecentApprovals(ctx context.Context, limit int) ([]memory.Approval, error)
 }
 
 // Info is what the console says about the running agent.
@@ -81,6 +82,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/works/{id}", s.work)
 	mux.HandleFunc("GET /api/conversation", s.conversation)
 	mux.HandleFunc("GET /api/events", s.events)
+	mux.HandleFunc("GET /api/approvals", s.approvals)
 	return s.auth(headers(mux))
 }
 
@@ -385,6 +387,31 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// approvals is what the agent asked its owner: what's waiting, then the
+// newest decided. Read-only: the owner answers on Telegram.
+func (s *Server) approvals(w http.ResponseWriter, r *http.Request) {
+	as, err := s.Store.RecentApprovals(r.Context(), intParam(r, "limit", 20, 100))
+	if s.failed(w, err) {
+		return
+	}
+	people := map[string]string{}
+	if ps, err := s.Store.AllPeople(r.Context(), 500); err == nil {
+		for _, p := range ps {
+			people[p.Key] = p.Name
+		}
+	}
+	out := make([]map[string]any, len(as))
+	for i, a := range as {
+		v := map[string]any{"id": a.ID.String(), "class": a.Class, "person": a.Person, "name": people[a.Person], "what": a.What,
+			"text": a.Text, "kind": a.Kind, "status": a.Status, "asked_at": a.AskedAt, "sent": !a.SentAt.IsZero()}
+		if !a.DecidedAt.IsZero() {
+			v["decided_at"] = a.DecidedAt
+		}
+		out[i] = v
+	}
+	s.json(w, out)
+}
+
 type entryView struct {
 	ID        string          `json:"id"`
 	ParentID  string          `json:"parent_id,omitempty"`
@@ -395,6 +422,7 @@ type entryView struct {
 	Provider  string          `json:"provider"`
 	Answers   json.RawMessage `json:"answers"`
 	Action    string          `json:"action"`
+	Gate      string          `json:"gate"`
 	Reply     string          `json:"reply"`
 	LatencyMS int64           `json:"latency_ms"`
 	CostUSD   float64         `json:"cost_usd"`
@@ -410,7 +438,7 @@ func entryViews(entries []store.LogEntry) []entryView {
 	for i, e := range entries {
 		answers, _ := json.Marshal(e.Answers)
 		v := entryView{ID: e.ID.String(), At: e.At, Set: e.SetID, Tier: string(e.Tier), Provider: e.Provider,
-			Answers: answers, Action: e.Action, Reply: e.Reply, LatencyMS: e.Latency.Milliseconds(), CostUSD: e.CostUSD,
+			Answers: answers, Action: e.Action, Gate: string(e.Gate), Reply: e.Reply, LatencyMS: e.Latency.Milliseconds(), CostUSD: e.CostUSD,
 			Outcome: e.Outcome, Source: e.Source, Kind: e.Kind, Text: e.Text, Speaker: e.Speaker}
 		if e.ParentID != nil {
 			v.ParentID = e.ParentID.String()

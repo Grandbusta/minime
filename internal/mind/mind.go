@@ -30,6 +30,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"minime/internal/ability"
+	"minime/internal/action"
 	"minime/internal/decision"
 	"minime/internal/decision/questions"
 	"minime/internal/memory"
@@ -60,6 +61,15 @@ type Store interface {
 	FinishIntention(ctx context.Context, id ulid.ULID, status, result string, at time.Time) error
 	PostponeIntention(ctx context.Context, id ulid.ULID, due time.Time) error
 	OpenIntentions(ctx context.Context, subject, kind string) ([]memory.Intention, error)
+	AwaitIntention(ctx context.Context, id ulid.ULID) error
+	ResumeIntention(ctx context.Context, id ulid.ULID, notBefore time.Time) error
+	SaveApproval(ctx context.Context, a memory.Approval) error
+	Approval(ctx context.Context, id ulid.ULID) (memory.Approval, bool, error)
+	UnsentApprovals(ctx context.Context, limit int) ([]memory.Approval, error)
+	MarkApprovalSent(ctx context.Context, id ulid.ULID, message []byte, at time.Time) error
+	DecideApproval(ctx context.Context, id ulid.ULID, status string, at time.Time) (bool, error)
+	StaleApprovals(ctx context.Context, before time.Time, limit int) ([]memory.Approval, error)
+	SetWorkPublic(ctx context.Context, id ulid.ULID, public bool, by string) (bool, error)
 	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
 	SaveProject(ctx context.Context, p memory.Project) error
 	Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error)
@@ -128,7 +138,12 @@ type Config struct {
 	// Abilities are what it can do in its day beyond writing: read, write its
 	// journal (which its day needs). nil: none.
 	Abilities *ability.Set
-	Log       *slog.Logger
+	// Autonomy is what it may do on its own; the zero value allows everything.
+	Autonomy action.Policy
+	// Asker asks the owner what Autonomy says to ask first; nil: requests
+	// wait unsent and expire.
+	Asker Asker
+	Log   *slog.Logger
 }
 
 type Mind struct {
@@ -171,6 +186,10 @@ func (m *Mind) handle(ctx context.Context, p perception.Percept) {
 	}
 	if !isNew {
 		log.Debug("already handled, skipping", "external_id", p.ExternalID)
+		return
+	}
+	if p.Kind == perception.KindApproval {
+		m.answer(ctx, p) // the owner answering a request, not a message
 		return
 	}
 
@@ -556,14 +575,24 @@ func canPromise(p perception.Percept, person memory.Person) bool {
 }
 
 // promisesNote tells System 2 what it already promised the speaker and hasn't
-// sent yet, or that it can't promise them anything.
+// sent yet, or that it can't promise them anything, or that it must check
+// with its owner first (the autonomy gate).
 func (m *Mind) promisesNote(ctx context.Context, p perception.Percept, person memory.Person, n names) string {
 	if !canPromise(p, person) {
 		return fmt.Sprintf("\n\nYou don't know %s well yet: don't promise to make them anything; leave promises empty.", n.speaker)
 	}
+	var gate string
+	switch m.Autonomy.Check(action.Commit, p.Speaker) {
+	case action.Forbid:
+		return fmt.Sprintf("\n\nYou can't promise to make %s anything; leave promises empty.", n.speaker)
+	case action.Ask:
+		owner := orDefault(m.person(ctx, m.Autonomy.Owner).Name, "someone")
+		gate = fmt.Sprintf("\n\nBefore you promise to make anything for %s, you check with %s. If %s asks and you'd like to, "+
+			"don't say yes yet: say you'll check and get back to them, and still put it in promises.", n.speaker, owner, n.speaker)
+	}
 	open, err := m.Store.OpenIntentions(ctx, p.Speaker, memory.IntentionTask)
 	if err != nil || len(open) == 0 {
-		return ""
+		return gate
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n\nWhat you've promised %s and not sent yet (at most %d at a time). If they add to one, just say you'll work it in; "+
@@ -571,13 +600,14 @@ func (m *Mind) promisesNote(ctx context.Context, p perception.Percept, person me
 	for _, i := range open {
 		fmt.Fprintf(&b, "\n- by %s: %s", i.DueAt.In(m.Zone).Format("Mon 2 Jan 15:04"), i.Text)
 	}
-	return b.String()
+	return gate + b.String()
 }
 
 // savePromises keeps what System 2 promised to make for the speaker, as tasks
 // due when it said it would send them. One in the past, with a bad time, past
 // maxOpenPromises, or to a stranger is dropped; an ability it doesn't have is
-// left out.
+// left out. The autonomy gate may forbid promising (dropped) or say to ask
+// the owner first: the task then waits for their approval.
 func (m *Mind) savePromises(ctx context.Context, p perception.Percept, person memory.Person, ps []system2.Promise) {
 	if len(ps) == 0 {
 		return
@@ -585,6 +615,11 @@ func (m *Mind) savePromises(ctx context.Context, p perception.Percept, person me
 	log := m.Log.With("percept", p.ID.String(), "person", p.Speaker)
 	if !canPromise(p, person) {
 		log.Warn("dropped promises to a stranger", "promises", len(ps))
+		return
+	}
+	verdict := m.Autonomy.Check(action.Commit, p.Speaker)
+	if verdict == action.Forbid {
+		log.Warn("dropped promises: not allowed", "promises", len(ps))
 		return
 	}
 	open, err := m.Store.OpenIntentions(ctx, p.Speaker, memory.IntentionTask)
@@ -601,17 +636,27 @@ func (m *Mind) savePromises(ctx context.Context, p perception.Percept, person me
 		}
 		i := memory.Intention{ID: ulid.Make(), Subject: p.Speaker, Kind: memory.IntentionTask, PerceptID: p.ID, Text: pr.What,
 			DueAt: due.UTC(), Status: memory.IntentionPending, CreatedAt: time.Now().UTC()}
-		if ab, ok := m.Abilities.Get(pr.Ability); ok && ab.Describe() != "" {
+		if ab, ok := m.Abilities.Get(pr.Ability); ok && ab.Describe() != "" && m.allowed(ab) {
 			i.Ability = ab.Name()
 			if pr.Query != "" {
 				i.Args = map[string]string{"query": pr.Query}
 			}
+		}
+		if verdict == action.Ask {
+			i.Status = memory.IntentionAwaiting
 		}
 		if err := m.Store.SaveIntention(ctx, i); err != nil {
 			log.Error("save promise", "err", err)
 			continue
 		}
 		count++
+		if verdict == action.Ask {
+			what := fmt.Sprintf("%s, by %s", pr.What, due.Format("Mon 2 Jan 15:04"))
+			if err := m.ask(ctx, memory.Approval{Class: string(action.Commit), Person: p.Speaker, What: what, Ref: i.ID}); err != nil {
+				log.Error("asking the owner failed", "err", err)
+			}
+			continue
+		}
 		log.Info("promised", "due", due.Format(time.RFC3339), "what", pr.What, "ability", i.Ability)
 	}
 }

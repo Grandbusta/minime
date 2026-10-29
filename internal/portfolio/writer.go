@@ -24,6 +24,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"minime/internal/action"
 	"minime/internal/decision"
 	"minime/internal/decision/questions"
 	"minime/internal/memory"
@@ -60,6 +61,8 @@ type Store interface {
 	SaveDecision(ctx context.Context, d decision.Decision) error
 	UndecidedPublicWorks(ctx context.Context, limit int) ([]memory.Work, error)
 	SetWorkPublic(ctx context.Context, id ulid.ULID, public bool, by string) (bool, error)
+	AwaitWorkPublic(ctx context.Context, id ulid.ULID) error
+	SaveApproval(ctx context.Context, a memory.Approval) error
 }
 
 const (
@@ -82,9 +85,13 @@ type Writer struct {
 	// PublicWork is the public_work set: a one-question template ({work}
 	// marks the work). Zero value: no work is ever public.
 	PublicWork questions.Set
-	Prompt     mind.Prompt   // how System 2 writes the page
-	UpdateAt   time.Duration // time of day, from midnight UTC, e.g. 0 for 00:00
-	Log        *slog.Logger
+	// Autonomy says whether a work System 1 judged public goes on the page
+	// (publish): on its own, after the owner approves, or never. The zero
+	// value: on its own.
+	Autonomy action.Policy
+	Prompt   mind.Prompt   // how System 2 writes the page
+	UpdateAt time.Duration // time of day, from midnight UTC, e.g. 0 for 00:00
+	Log      *slog.Logger
 }
 
 func (w *Writer) Run(ctx context.Context) error {
@@ -201,7 +208,7 @@ func (w *Writer) decidePublicWorks(ctx context.Context) error {
 	d.Answers = map[string]decision.Answer{}
 	q := w.PublicWork.Questions[0]
 	q.Instructions = strings.NewReplacer("{work}", "`work`", "{agent}", w.Life.Name).Replace(q.Instructions)
-	public, asked := 0, 0
+	public, waiting, asked := 0, 0, 0
 	var failed error
 	for _, work := range works {
 		text := work.Text
@@ -224,17 +231,48 @@ func (w *Writer) decidePublicWorks(ctx context.Context) error {
 		d.Answers[work.ID.String()] = a
 		asked++
 		yes := !a.Refused && a.Probability >= w.PublicWork.Thresholds.Act
-		if _, err := w.Store.SetWorkPublic(ctx, work.ID, yes, memory.PublicBySystem1); err != nil {
-			return err
-		}
+		verdict := action.Auto
 		if yes {
-			public++
+			verdict = w.Autonomy.Check(action.Publish, "")
+		}
+		switch verdict {
+		case action.Ask:
+			if err := w.askToPublish(ctx, work); err != nil {
+				return err
+			}
+			waiting++
+		case action.Forbid:
+			if _, err := w.Store.SetWorkPublic(ctx, work.ID, false, memory.PublicByGate); err != nil {
+				return err
+			}
+		default:
+			if _, err := w.Store.SetWorkPublic(ctx, work.ID, yes, memory.PublicBySystem1); err != nil {
+				return err
+			}
+			if yes {
+				public++
+			}
 		}
 	}
 	if asked > 0 {
-		w.finish(ctx, d, start, fmt.Sprintf("%d of %d works may be public", public, asked))
+		detail := fmt.Sprintf("%d of %d works may be public", public, asked)
+		if waiting > 0 {
+			detail += fmt.Sprintf("; %d waiting for the owner's OK", waiting)
+		}
+		w.finish(ctx, d, start, detail)
 	}
 	return failed
+}
+
+// askToPublish puts a work System 1 judged public on hold, and saves a
+// request for the owner, which the running agent sends them.
+func (w *Writer) askToPublish(ctx context.Context, work memory.Work) error {
+	if err := w.Store.AwaitWorkPublic(ctx, work.ID); err != nil {
+		return err
+	}
+	return w.Store.SaveApproval(ctx, memory.Approval{ID: ulid.Make(), Class: string(action.Publish), Ref: work.ID,
+		What:   fmt.Sprintf("%s (%s)\n\n%s", work.Title, strings.ReplaceAll(work.Kind, "_", " "), excerpt(work.Text)),
+		Status: memory.ApprovalPending, AskedAt: time.Now().UTC()})
 }
 
 // write has System 2 write the page from the life story and the public facts,

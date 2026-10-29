@@ -122,3 +122,54 @@ func TestSplitLongMessages(t *testing.T) {
 		t.Errorf("no breaks: %d parts", len(got))
 	}
 }
+
+func TestSensorTurnsButtonTapsIntoAnswers(t *testing.T) {
+	s := NewSensor(nil, []int64{42}, 1, bus.New[perception.Percept](1), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	tap := func(from int64, data string) Update {
+		return Update{UpdateID: 1, CallbackQuery: &CallbackQuery{ID: "cb1", From: &User{ID: from, FirstName: "Busta"},
+			Message: &Message{MessageID: 5, Chat: Chat{ID: 7}}, Data: data}}
+	}
+	p, ok := s.percept(tap(42, "gate:01ABC:y"))
+	if !ok || p.Kind != perception.KindApproval || p.Text != "" || p.Speaker != "telegram:42" || p.ExternalID != "callback:cb1" {
+		t.Fatalf("percept = %+v, %v", p, ok)
+	}
+	var a perception.Answer
+	if err := json.Unmarshal(p.Payload, &a); err != nil || a.Approval != "01ABC" || !a.Approve {
+		t.Errorf("answer = %+v, %v", a, err)
+	}
+	if p, _ := s.percept(tap(42, "gate:01ABC:n")); !strings.Contains(string(p.Payload), `"approve":false`) {
+		t.Errorf("deny = %s", p.Payload)
+	}
+	for _, u := range []Update{tap(99, "gate:01ABC:y"), tap(42, "other:1"), tap(42, "gate:01ABC:maybe")} {
+		if _, ok := s.percept(u); ok {
+			t.Errorf("kept %+v", u.CallbackQuery)
+		}
+	}
+}
+
+func TestAskAndSettle(t *testing.T) {
+	var calls []map[string]any
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		body["method"] = r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		calls = append(calls, body)
+		io.WriteString(w, `{"ok":true,"result":{"message_id":77,"chat":{"id":7}}}`)
+	})
+	p := perception.Percept{Source: Source, Payload: json.RawMessage(`{"chat_id":7,"message_id":1,"user_id":42}`)}
+	where, err := c.Ask(context.Background(), p, "Can I?", "01ABC")
+	if err != nil || string(where) != `{"chat_id":7,"message_id":77}` {
+		t.Fatalf("ask = %s, %v", where, err)
+	}
+	kb, _ := json.Marshal(calls[0]["reply_markup"])
+	if calls[0]["method"] != "sendMessage" || !strings.Contains(string(kb), `"callback_data":"gate:01ABC:y"`) ||
+		!strings.Contains(string(kb), `"callback_data":"gate:01ABC:n"`) {
+		t.Errorf("sent %v", calls[0])
+	}
+	if err := c.Settle(context.Background(), where, "Can I?\n\n✅ You said yes."); err != nil {
+		t.Fatal(err)
+	}
+	if calls[1]["method"] != "editMessageText" || calls[1]["message_id"] != float64(77) || calls[1]["reply_markup"] != nil {
+		t.Errorf("settled %v", calls[1])
+	}
+}

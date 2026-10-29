@@ -590,6 +590,10 @@ func TestPublicWorks(t *testing.T) {
 		return w
 	}
 	lyrics := work("lyrics", "Lagos Rain", own.ID, 0)
+	waiting := work("lyrics", "Waiting", own.ID, 4)
+	if err := s.AwaitWorkPublic(ctx, waiting.ID); err != nil {
+		t.Fatal(err)
+	}
 	notes := work("notes", "On rhythm", ulid.ULID{}, 1)
 	journal := work("journal", "29 Oct", own.ID, 2)
 	forThem := work("writing", "NEPA Took the Light", promise.ID, 3)
@@ -602,7 +606,7 @@ func TestPublicWorks(t *testing.T) {
 	for _, w := range undecided {
 		ids[w.ID] = true
 	}
-	if !ids[lyrics.ID] || !ids[notes.ID] || ids[journal.ID] || ids[forThem.ID] {
+	if !ids[lyrics.ID] || !ids[notes.ID] || ids[journal.ID] || ids[forThem.ID] || ids[waiting.ID] {
 		t.Errorf("undecided = %v; want only its own works, not the journal or the promise", ids)
 	}
 
@@ -647,5 +651,68 @@ func TestPublicWorks(t *testing.T) {
 	}
 	if w, ok, _ := s.Work(ctx, notes.ID); !ok || w.Public == nil || *w.Public || w.PublicBy != memory.PublicByOwner {
 		t.Errorf("hidden work = %+v", w)
+	}
+}
+
+func TestApprovals(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	person := "test:" + ulid.Make().String()
+
+	promise := memory.Intention{ID: ulid.Make(), Subject: person, Kind: memory.IntentionTask, Text: "a verse",
+		DueAt: now.Add(time.Hour), Status: memory.IntentionAwaiting, CreatedAt: now}
+	if err := s.SaveIntention(ctx, promise); err != nil {
+		t.Fatal(err)
+	}
+	if due, err := s.DueIntentions(ctx, now.Add(2*time.Hour), 1000); err != nil || slices.ContainsFunc(due, func(i memory.Intention) bool { return i.ID == promise.ID }) {
+		t.Errorf("an awaiting intention is due: %v", err)
+	}
+	if err := s.ResumeIntention(ctx, promise.ID, now.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if is, _ := s.OpenIntentions(ctx, person, memory.IntentionTask); len(is) != 1 || !is[0].DueAt.Equal(now.Add(3*time.Hour)) {
+		t.Errorf("resumed = %+v", is)
+	}
+	if err := s.AwaitIntention(ctx, promise.ID); err != nil {
+		t.Fatal(err)
+	}
+	if is, _ := s.OpenIntentions(ctx, person, memory.IntentionTask); len(is) != 0 {
+		t.Errorf("awaiting again, but open: %+v", is)
+	}
+
+	old := memory.Approval{ID: ulid.Make(), Class: "commit", Person: person, What: "a verse by 20:00", Ref: promise.ID,
+		Status: memory.ApprovalPending, AskedAt: now.Add(-25 * time.Hour)}
+	fresh := memory.Approval{ID: ulid.Make(), Class: "reach_out", Person: person, What: "message them", Text: "Hi!", Kind: "reminder",
+		Status: memory.ApprovalPending, AskedAt: now}
+	for _, a := range []memory.Approval{old, fresh} {
+		if err := s.SaveApproval(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unsent, err := s.UnsentApprovals(ctx, 1000)
+	if err != nil || !slices.ContainsFunc(unsent, func(a memory.Approval) bool { return a.ID == fresh.ID && a.Text == "Hi!" }) {
+		t.Fatalf("unsent = %+v, %v", unsent, err)
+	}
+	if err := s.MarkApprovalSent(ctx, fresh.ID, []byte(`{"chat_id":1,"message_id":2}`), now); err != nil {
+		t.Fatal(err)
+	}
+	if a, ok, err := s.Approval(ctx, fresh.ID); err != nil || !ok || a.SentAt.IsZero() || string(a.Message) != `{"chat_id": 1, "message_id": 2}` {
+		t.Errorf("sent approval = %+v (%s), %v", a, a.Message, err)
+	}
+	stale, err := s.StaleApprovals(ctx, now.Add(-24*time.Hour), 1000)
+	if err != nil || !slices.ContainsFunc(stale, func(a memory.Approval) bool { return a.ID == old.ID && a.Ref == promise.ID }) ||
+		slices.ContainsFunc(stale, func(a memory.Approval) bool { return a.ID == fresh.ID }) {
+		t.Errorf("stale = %+v, %v", stale, err)
+	}
+	if ok, err := s.DecideApproval(ctx, fresh.ID, memory.ApprovalApproved, now); err != nil || !ok {
+		t.Fatalf("decide: %v, %v", ok, err)
+	}
+	if ok, _ := s.DecideApproval(ctx, fresh.ID, memory.ApprovalDenied, now); ok {
+		t.Error("decided twice")
+	}
+	recent, err := s.RecentApprovals(ctx, 1000)
+	if err != nil || len(recent) < 2 || recent[0].Status != memory.ApprovalPending {
+		t.Errorf("recent = %+v, %v", recent, err)
 	}
 }

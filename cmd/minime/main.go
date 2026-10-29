@@ -219,6 +219,10 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	if cfg.DailyLife.Enabled {
 		names = cfg.DailyLife.AbilityNames()
 	}
+	policy, err := cfg.Policy()
+	if err != nil {
+		return err
+	}
 	abilitySet, err := newAbilities(names, st)
 	if err != nil {
 		return err
@@ -249,6 +253,8 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		Working: mind.WorkingMemory{Turns: cfg.WorkingMemory.Turns, Window: cfg.WorkingMemory.Window},
 		Ticks:   ticks, Zone: zone, CheckIns: mind.CheckIns{Times: checkIns, Quiet: cfg.Initiative.Quiet}, Day: day,
 		Abilities: abilitySet,
+		Autonomy:  policy,
+		Asker:     tg,
 		Log:       log.With("component", "mind"),
 	})
 	sensor := telegram.NewSensor(tg, cfg.Telegram.OwnerIDs, cfg.Telegram.PollTimeoutSeconds, percepts,
@@ -259,6 +265,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		"life_area", lifeArea.Ref(), "person_circle", personCircle.Ref(), "fact_relevance", factRelevance.Ref(),
 		"open_threads", openThreads.Ref(), "timezone", zone.String(), "check_ins", cfg.Initiative.CheckIns,
 		"daily_life", cfg.DailyLife.Enabled, "abilities", abilitySet.Names(), "routine_lines", len(life.Routine), "makes", len(life.Makes),
+		"autonomy_owner", policy.Owner,
 		"system2", cfg.Reasoning.Provider.Provider+"/"+cfg.Reasoning.Model, "effort", cfg.Reasoning.Effort, "prompt", replyPrompt.Ref)
 	started := time.Now()
 	g, ctx := errgroup.WithContext(ctx)
@@ -399,6 +406,10 @@ func newProfileWriter(cfg *config.Config, life self.Life, st *store.Store, s1 sy
 	} else if err := checkFactTemplate(public); err != nil {
 		return nil, err
 	}
+	policy, err := cfg.Policy()
+	if err != nil {
+		return nil, err
+	}
 	publicWork, ok := sets["public_work"]
 	if !ok {
 		log.Warn("question set public_work not found; no work goes on the profile page", "dir", cfg.Decision.QuestionSets)
@@ -414,7 +425,7 @@ func newProfileWriter(cfg *config.Config, life self.Life, st *store.Store, s1 sy
 	if err != nil {
 		return nil, err
 	}
-	return &portfolio.Writer{Life: life, Store: st, System1: s1, System2: s2, Public: public, PublicWork: publicWork,
+	return &portfolio.Writer{Life: life, Store: st, System1: s1, System2: s2, Public: public, PublicWork: publicWork, Autonomy: policy,
 		Prompt: prompt, UpdateAt: at, Log: log}, nil
 }
 

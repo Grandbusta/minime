@@ -498,6 +498,22 @@ autonomy:
 
 - Every widening of autonomy is itself logged, so "we decide with time" leaves a trail.
 
+**Built (step 7):** `internal/action` holds the classes the agent has today (`remember`,
+`reply`, `read_web`, `reach_out`, `commit`, `publish`, and `spend` and `external_message`
+for later) and the policy: `auto`, `ask` or `forbid` per class, from `autonomy:` in the
+config. Anything only for the owner is `auto` unless forbidden; `remember` and `reply` are
+always `auto`, and `read_web` can't be `ask` (it runs mid-activity). `ask` saves an
+**approval** (`approvals` table): the exact message it would send (`reach_out`), the promise
+(`commit`; the intention is `awaiting`, and the reply prompt tells it to say it'll check
+first), or the work (`publish`; `public_by` is `awaiting`). The running agent sends each to
+the owner on Telegram with Approve and Deny buttons (inline keyboard; a tap comes back as a
+percept of kind `approval`, from the owner only), and carries on when answered: sends the
+message as approved, keeps the promise and tells them (or drops it kindly), publishes or
+not. Unanswered after `ask_expires` (24h) it is denied. Decisions record the gate
+(`asked`, `denied`), and the owner's answer is a decision of its own (`approved`,
+`denied`, `expired`). The policy is changed in the config for now; changing it from chat,
+with every widening logged, comes next.
+
 ### 4.5 Memory
 | Kind        | v1                                   | Later |
 |-------------|--------------------------------------|-------|
@@ -803,9 +819,10 @@ mini-me/
       own page; the owner can hide or show any with `minime work`.
    - Later: the same machinery takes jobs from other sources (chat, email, a job board); audio
      for its music is TBD.
-7. **Autonomy gate:**
-   - Action classes and config policy.
-   - "Ask the owner" flow with inline approve/deny.
+7. ✅ **Autonomy gate:** action classes and a config policy (auto, ask, forbid); asking the
+   owner on Telegram with inline Approve/Deny buttons, denied after 24h unanswered.
+   - Next: changing the policy from chat ("you can send reminders without asking"), each
+     widening logged.
 8. **Corrections & replay:** label decisions from chat, replay on change, tune thresholds.
 9. **Deploy:** Docker Compose on the VPS, metrics.
 10. **Money** (§4.10): a USDC wallet of its own, in four small steps, each on a testnet first:

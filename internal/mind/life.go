@@ -11,6 +11,7 @@ import (
 
 	"minime/internal/ability"
 	"minime/internal/ability/journal"
+	"minime/internal/action"
 	"minime/internal/decision"
 	"minime/internal/memory"
 	"minime/internal/perception"
@@ -159,7 +160,7 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 			fmt.Fprintf(&note, "\n- %s: %s", facts[i].At.In(m.Zone).Format("2 Jan"), facts[i].Text)
 		}
 	}
-	abilities := m.Abilities.Planned()
+	abilities := m.plannable()
 	if len(abilities) == 0 {
 		note.WriteString("\n\nToday you can only write; you can't read or look up anything new.")
 	} else {
@@ -232,7 +233,7 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 			known[p.ID.String()], project = true, p.ID
 		}
 		i := memory.Intention{Text: what, ProjectID: project, DueAt: due}
-		if ab, ok := m.Abilities.Get(strings.TrimSpace(a.Ability)); ok && ab.Describe() != "" {
+		if ab, ok := m.Abilities.Get(strings.TrimSpace(a.Ability)); ok && ab.Describe() != "" && m.allowed(ab) {
 			i.Ability = ab.Name()
 			if q := strings.TrimSpace(a.Query); q != "" {
 				i.Args = map[string]string{"query": q}
@@ -347,6 +348,12 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 		log.Warn("needs an ability it doesn't have; missed", "ability", i.Ability)
 		m.finish(ctx, i, memory.IntentionMissed, "can't "+i.Ability+" now", now)
 		m.finishLife(ctx, d, start, decision.OutcomeFailed, "no ability "+i.Ability)
+		return memory.Work{}, false
+	}
+	if ab != nil && !m.allowed(ab) {
+		log.Warn("ability not allowed; missed", "ability", ab.Name())
+		m.finish(ctx, i, memory.IntentionMissed, "not allowed to "+ab.Name(), now)
+		m.finishLife(ctx, d, start, decision.OutcomeFailed, ab.Name()+": not allowed")
 		return memory.Work{}, false
 	}
 	if ab != nil {
@@ -475,6 +482,23 @@ func (m *Mind) overBudget(ctx context.Context, now time.Time) bool {
 	return spent >= m.Day.BudgetUSD
 }
 
+// allowed reports whether the autonomy policy lets it use an ability: one
+// that reads the web needs read_web.
+func (m *Mind) allowed(a ability.Ability) bool {
+	return a.Risk() != ability.ReadsWeb || m.Autonomy.Check(action.ReadWeb, "") != action.Forbid
+}
+
+// plannable is the abilities it may plan with: offered by the set, and allowed.
+func (m *Mind) plannable() []ability.Ability {
+	var out []ability.Ability
+	for _, a := range m.Abilities.Planned() {
+		if m.allowed(a) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // makesList is what it makes, for a prompt: one "- kind: about" line each.
 func (m *Mind) makesList() string {
 	var lines []string
@@ -487,7 +511,7 @@ func (m *Mind) makesList() string {
 // abilitiesList is what it can do beyond writing, for a prompt.
 func (m *Mind) abilitiesList() string {
 	var lines []string
-	for _, a := range m.Abilities.Planned() {
+	for _, a := range m.plannable() {
 		lines = append(lines, "- "+a.Name()+": "+a.Describe())
 	}
 	if len(lines) == 0 {
