@@ -608,6 +608,46 @@ model's judgment alone.
   under the owner's name and the owner is accountable for what it does. Its profile and
   invoices keep saying plainly that it is an AI.
 
+### 4.11 Daily life (planned, roadmap step 6)
+The agent has a day of its own, like a person: it plans a little in the morning, does things
+through the day, keeps promises it made, and looks back at night. What it does is **real and
+text-first**: it reads real texts and writes real things. Its life story is invented, but
+everything it says it read or made exists, so its profile's Work section is honest.
+
+- **Morning plan** (e.g. 08:00 in its time zone): System 2 plans a few things for the day from
+  its interests, its ongoing projects, and what it promised people. Optional `routine` lines in
+  [self/life.yaml](../self/life.yaml) steer it ("Daniel makes music in the evenings"); it plans
+  the rest itself. The plan is saved as intentions with times.
+- **Intentions** (prospective memory): `reminders` becomes `intentions`, for `self` or a
+  person, of kind `remind`, `task` (something it promised) or `activity` (something of its
+  own), with status pending, doing, done, missed or cancelled, and optionally a project.
+- **Doing:** a due intention of its own enters the mind as a percept. System 1 decides whether
+  to do it now, postpone it, or drop it; System 2 does it, with only safe tools: reading and
+  writing its own memory, and fetching pages from an allow-list (Gutenberg, Wikipedia).
+  - Reading: a real book chapter by chapter, or an article; it keeps notes and its opinion.
+  - Writing: a journal, lyrics, beat ideas and arrangements, notes on what it learned.
+  - Making actual audio needs a music model: **TBD**.
+- **Projects:** what takes days (a book, a beat, learning a topic) keeps its progress, so
+  tomorrow continues from today.
+- **Remembering:** what it did becomes facts about itself ("Daniel finished chapter 3 of
+  Things Fall Apart"); what it made is kept as a work (title, kind, text, project). Both are
+  recalled in conversation, so "what have you been up to?" gets a true answer.
+- **Promises:** System 2 returns commitments it makes in chat ("I'll send you a verse by
+  Friday") as `task` intentions, split into steps when useful; when one is done, it delivers
+  it in that conversation.
+- **Evening journal:** a short look back, which also feeds the next morning's plan.
+- **On its profile:** "Lately" fills from its public facts; a new **Work** section shows
+  finished works that System 1 decides are public (like facts, `public_profile`).
+- **Web search: not needed yet.** Gutenberg (via the Gutendex API) and Wikipedia have their own
+  free search and text APIs, so a plain HTTP client covers step 6.2, and an allow-list keeps
+  out pages written to manipulate it. A search provider comes only when it must find things on
+  the open web (topics beyond Wikipedia, news, jobs), behind a switchable interface like the
+  models: OpenAI's built-in web search (same key as System 2), or an API such as TinyFish,
+  Brave or Tavily. Decide just before those features.
+- **Sharing:** only when it comes up in conversation; no extra unprompted messages.
+- **Limits:** a daily cost cap (expected under $0.01/day), and no action outside its memory and
+  the allow-listed pages; messages to people follow the existing initiative rules.
+
 ---
 
 ## 5. Technology
@@ -700,15 +740,15 @@ mini-me/
    - ✅ Reminders: asked for in chat, sent when due, in its own words.
    - ✅ Check-ins: at set times, about something still going on in your life, at most daily.
    - Later: listing and cancelling reminders, repeating ones.
-6. **A daily life:** it does things of its own each day (reads, works on a beat, learns
-   something), remembers them, and has work to show on its profile.
-   - **Its own commitments**, built here because this is where it first has things to do:
-     `reminders` becomes `intentions`, for `self` or a person, kind `remind` or `task`, with
-     status pending, doing, done, missed or cancelled. System 2 returns commitments it makes
-     ("I'll have it ready by Friday"), split into steps when useful ("start Thursday"). A due
-     intention of its own enters the mind as a percept; System 1 decides whether to do it now,
-     postpone, ask or drop it; finished work becomes a fact about itself (the profile's Work).
-   - The same machinery later takes jobs and tasks from other sources (chat, email, a job board).
+6. **A daily life** (§4.11): it does real, text-first things of its own each day.
+   1. Intentions and a day of its own: `reminders` → `intentions`; morning plan, writing
+      activities (journal, lyrics, ideas), evening journal; results as facts and works.
+   2. Reading and learning from real sources: an allow-listed page fetcher, reading progress
+      per book or topic.
+   3. Promises from chat: commitments become its own intentions and are delivered when done.
+   4. Work on its profile: a Work section from the works it decides are public.
+   - Later: the same machinery takes jobs from other sources (chat, email, a job board); audio
+     for its music is TBD.
 7. **Autonomy gate:**
    - Action classes and config policy.
    - "Ask the owner" flow with inline approve/deny.
