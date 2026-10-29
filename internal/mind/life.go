@@ -37,6 +37,7 @@ type Day struct {
 	ReviewDay      time.Weekday  // its weekly review: the day
 	ReviewAt       time.Duration // and the time, from midnight in its time zone
 	ReviewPrompt   Prompt        // how System 2 reviews the week; zero: no review
+	LearnPrompt    Prompt        // how System 2 plans to learn a skill for a goal; zero: no learning plans
 }
 
 const (
@@ -57,7 +58,7 @@ const (
 
 // lifeActions are the decisions its own day is made of, for the budget:
 // promises count, though they are kept even past it.
-var lifeActions = []string{"plan_day", "activity", "task", "weekly_review"}
+var lifeActions = []string{"plan_day", "activity", "task", "weekly_review", "plan_learning"}
 
 func (m *Mind) dayOn() bool { return m.Day.PlanPrompt.Text != "" && m.Day.ActivityPrompt.Text != "" }
 
@@ -113,11 +114,12 @@ func planFormat(abilities []ability.Ability) *system2.Format {
 		"properties": map[string]any{
 			"activities": map[string]any{"type": "array", "items": map[string]any{
 				"type": "object", "additionalProperties": false,
-				"required": []string{"at", "what", "project_id", "new_project_title", "project_kind", "ability", "query", "goal_id"},
+				"required": []string{"at", "what", "project_id", "new_project_title", "project_kind", "ability", "query", "goal_id", "resource_id"},
 				"properties": map[string]any{
 					"ability":           map[string]any{"type": "string", "enum": names},
 					"query":             map[string]any{"type": "string", "description": "what the ability is to look for; empty if none"},
 					"goal_id":           map[string]any{"type": "string", "description": "the goal this moves forward, or empty"},
+					"resource_id":       map[string]any{"type": "string", "description": "a learning plan's resource this studies, or empty"},
 					"at":                map[string]any{"type": "string", "description": "HH:MM, local time"},
 					"what":              map[string]any{"type": "string"},
 					"project_id":        map[string]any{"type": "string", "description": "an existing project's id, or empty"},
@@ -177,6 +179,7 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 		}
 	}
 	note.WriteString(m.growthNote(ctx, now))
+	note.WriteString(m.plansNote(ctx, false))
 	if j, ok, err := m.Store.LatestWork(ctx, "journal"); err == nil && ok {
 		fmt.Fprintf(&note, "\n\nYour last journal entry (%s):\n%s", j.CreatedAt.In(m.Zone).Format("Monday 2 Jan"), j.Text)
 	}
@@ -202,6 +205,7 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 			Ability         string `json:"ability"`
 			Query           string `json:"query"`
 			GoalID          string `json:"goal_id"`
+			ResourceID      string `json:"resource_id"`
 		} `json:"activities"`
 	}
 	if err := json.Unmarshal([]byte(resp.Text), &plan); err != nil {
@@ -257,6 +261,9 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 			if q := strings.TrimSpace(a.Query); q != "" {
 				i.Args = map[string]string{"query": q}
 			}
+		}
+		if r, ok := m.resourceFor(ctx, strings.TrimSpace(a.ResourceID)); ok {
+			i.Ability, i.Args = r.Ability, map[string]string{"query": r.Query, "resource": r.ID.String()} // studying it
 		}
 		if m.intend(ctx, i, now) {
 			line := due.Format("15:04") + " " + what
@@ -467,6 +474,7 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	m.finishLife(ctx, d, start, decision.OutcomeOK, fmt.Sprintf("made %s %q", w.Kind, title))
 	m.scoreWork(ctx, w, p.ID, &d.ID)
 	m.learnFromWork(ctx, w, out.Lessons)
+	m.studied(ctx, i, w, now)
 	if out.AskForReview && action == "activity" { // not what it made for someone else
 		m.askForReview(ctx, w, strings.TrimSpace(out.ReviewQuestion), now)
 	}

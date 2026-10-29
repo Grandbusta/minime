@@ -1139,11 +1139,11 @@ func (s *Store) Dreams(ctx context.Context, activeOnly bool) ([]memory.Dream, er
 
 // SaveGoal stores a goal, replacing what was known about it.
 func (s *Store) SaveGoal(ctx context.Context, g memory.Goal) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO goals (id, dream_id, text, done_when, due, status, progress, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	_, err := s.pool.Exec(ctx, `INSERT INTO goals (id, dream_id, text, done_when, due, status, progress, created_at, updated_at, skill)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (id) DO UPDATE SET text = EXCLUDED.text, done_when = EXCLUDED.done_when, due = EXCLUDED.due,
-			status = EXCLUDED.status, progress = EXCLUDED.progress, updated_at = EXCLUDED.updated_at`,
-		g.ID.String(), g.DreamID.String(), g.Text, g.DoneWhen, g.Due, g.Status, g.Progress, g.CreatedAt, g.UpdatedAt)
+			status = EXCLUDED.status, progress = EXCLUDED.progress, updated_at = EXCLUDED.updated_at, skill = EXCLUDED.skill`,
+		g.ID.String(), g.DreamID.String(), g.Text, g.DoneWhen, g.Due, g.Status, g.Progress, g.CreatedAt, g.UpdatedAt, g.Skill)
 	if err != nil {
 		return fmt.Errorf("save goal: %w", err)
 	}
@@ -1152,7 +1152,7 @@ func (s *Store) SaveGoal(ctx context.Context, g memory.Goal) error {
 
 // Goals returns its goals, oldest first: all of them, or only the active.
 func (s *Store) Goals(ctx context.Context, activeOnly bool) ([]memory.Goal, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, dream_id, text, done_when, due, status, progress, created_at, updated_at FROM goals
+	rows, err := s.pool.Query(ctx, `SELECT id, dream_id, text, done_when, due, status, progress, created_at, updated_at, skill FROM goals
 		WHERE NOT $1 OR status = $2 ORDER BY created_at, id`, activeOnly, memory.GoalActive)
 	if err != nil {
 		return nil, fmt.Errorf("query goals: %w", err)
@@ -1164,7 +1164,7 @@ func (s *Store) Goals(ctx context.Context, activeOnly bool) ([]memory.Goal, erro
 			g           memory.Goal
 			id, dreamID string
 		)
-		if err := rows.Scan(&id, &dreamID, &g.Text, &g.DoneWhen, &g.Due, &g.Status, &g.Progress, &g.CreatedAt, &g.UpdatedAt); err != nil {
+		if err := rows.Scan(&id, &dreamID, &g.Text, &g.DoneWhen, &g.Due, &g.Status, &g.Progress, &g.CreatedAt, &g.UpdatedAt, &g.Skill); err != nil {
 			return nil, err
 		}
 		if g.ID, err = ulid.Parse(id); err != nil {
@@ -1315,4 +1315,169 @@ func (s *Store) AskedForReview(ctx context.Context, since time.Time) (memory.Wor
 		return memory.Work{}, false, err
 	}
 	return ws[0], true, nil
+}
+
+// SavePlan stores a new learning plan with its stages.
+func (s *Store) SavePlan(ctx context.Context, p memory.LearningPlan) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("save plan: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `INSERT INTO learning_plans (id, goal_id, skill, stage, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`, p.ID.String(), p.GoalID.String(), p.Skill, p.Stage, p.Status, p.CreatedAt, p.UpdatedAt); err != nil {
+		return fmt.Errorf("save plan: %w", err)
+	}
+	for _, st := range p.Stages {
+		if _, err := tx.Exec(ctx, `INSERT INTO plan_stages (plan_id, n, learn, practice, done_when) VALUES ($1, $2, $3, $4, $5)`,
+			p.ID.String(), st.N, st.Learn, st.Practice, st.DoneWhen); err != nil {
+			return fmt.Errorf("save plan stage: %w", err)
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// Plans returns its learning plans with their stages, oldest first: all of
+// them, or only the active.
+func (s *Store) Plans(ctx context.Context, activeOnly bool) ([]memory.LearningPlan, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, goal_id, skill, stage, status, created_at, updated_at FROM learning_plans
+		WHERE NOT $1 OR status = $2 ORDER BY created_at, id`, activeOnly, memory.PlanActive)
+	if err != nil {
+		return nil, fmt.Errorf("query plans: %w", err)
+	}
+	var out []memory.LearningPlan
+	for rows.Next() {
+		var (
+			p          memory.LearningPlan
+			id, goalID string
+		)
+		if err := rows.Scan(&id, &goalID, &p.Skill, &p.Stage, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if p.ID, err = ulid.Parse(id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if p.GoalID, err = ulid.Parse(goalID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		srows, err := s.pool.Query(ctx, `SELECT n, learn, practice, done_when, done_at FROM plan_stages WHERE plan_id = $1 ORDER BY n`,
+			out[i].ID.String())
+		if err != nil {
+			return nil, fmt.Errorf("query plan stages: %w", err)
+		}
+		for srows.Next() {
+			var (
+				st   memory.Stage
+				done *time.Time
+			)
+			if err := srows.Scan(&st.N, &st.Learn, &st.Practice, &st.DoneWhen, &done); err != nil {
+				srows.Close()
+				return nil, err
+			}
+			if done != nil {
+				st.DoneAt = *done
+			}
+			out[i].Stages = append(out[i].Stages, st)
+		}
+		srows.Close()
+	}
+	return out, nil
+}
+
+// AdvancePlan finishes a plan's current stage and moves to the next, or
+// marks the plan done after its last.
+func (s *Store) AdvancePlan(ctx context.Context, plan ulid.ULID, at time.Time) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE plan_stages SET done_at = $2
+		WHERE plan_id = $1 AND n = (SELECT stage FROM learning_plans WHERE id = $1)`, plan.String(), at); err != nil {
+		return fmt.Errorf("advance plan: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE learning_plans p SET stage = p.stage + 1, updated_at = $2,
+			status = CASE WHEN p.stage + 1 >= (SELECT count(*) FROM plan_stages WHERE plan_id = p.id) THEN $3 ELSE p.status END
+		WHERE p.id = $1`, plan.String(), at, memory.PlanDone); err != nil {
+		return fmt.Errorf("advance plan: %w", err)
+	}
+	return nil
+}
+
+// EndPlan marks a plan done or dropped, e.g. when its goal is.
+func (s *Store) EndPlan(ctx context.Context, plan ulid.ULID, status string, at time.Time) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE learning_plans SET status = $2, updated_at = $3 WHERE id = $1`, plan.String(), status, at); err != nil {
+		return fmt.Errorf("end plan: %w", err)
+	}
+	return nil
+}
+
+// SaveResource stores something to study for a stage.
+func (s *Store) SaveResource(ctx context.Context, r memory.Resource) error {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO resources (id, plan_id, stage, ability, query, why, status, added_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, r.ID.String(), r.PlanID.String(), r.Stage, r.Ability, r.Query, r.Why, r.Status, r.AddedAt); err != nil {
+		return fmt.Errorf("save resource: %w", err)
+	}
+	return nil
+}
+
+// Resources returns a plan's resources, by stage and when they were added.
+func (s *Store) Resources(ctx context.Context, plan ulid.ULID) ([]memory.Resource, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, plan_id, stage, ability, query, why, status, title, work_id, added_at, done_at FROM resources
+		WHERE plan_id = $1 ORDER BY stage, added_at, id`, plan.String())
+	if err != nil {
+		return nil, fmt.Errorf("query resources: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Resource
+	for rows.Next() {
+		var (
+			r          memory.Resource
+			id, planID string
+			workID     *string
+			done       *time.Time
+		)
+		if err := rows.Scan(&id, &planID, &r.Stage, &r.Ability, &r.Query, &r.Why, &r.Status, &r.Title, &workID, &r.AddedAt, &done); err != nil {
+			return nil, err
+		}
+		if r.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if r.PlanID, err = ulid.Parse(planID); err != nil {
+			return nil, err
+		}
+		if r.WorkID, err = parseNullULID(workID); err != nil {
+			return nil, err
+		}
+		if done != nil {
+			r.DoneAt = *done
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// FinishResource records that it studied a resource: what it was, and its notes.
+func (s *Store) FinishResource(ctx context.Context, id, work ulid.ULID, title string, at time.Time) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE resources SET status = $2, title = $3, work_id = $4, done_at = $5 WHERE id = $1`,
+		id.String(), memory.ResourceDone, title, nullULID(work), at); err != nil {
+		return fmt.Errorf("finish resource: %w", err)
+	}
+	return nil
+}
+
+// ReadingProject returns the active project that follows a source (a book
+// it's reading), and whether there is one.
+func (s *Store) ReadingProject(ctx context.Context, source ulid.ULID) (memory.Project, bool, error) {
+	ps, err := s.queryProjects(ctx, projectSelect+` WHERE p.source_id = $1 AND p.status = $2 ORDER BY p.updated_at DESC LIMIT 1`,
+		source.String(), memory.ProjectActive)
+	if err != nil || len(ps) == 0 {
+		return memory.Project{}, false, err
+	}
+	return ps[0], true, nil
 }

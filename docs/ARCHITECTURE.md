@@ -749,8 +749,14 @@ Who the agent wants to become, and how good it is getting.
   absorbed ones and adds what the week taught. After making something it may ask its owner
   to review it (`ask_for_review`, at most once a day, percept kind `review_request`); the
   owner's feedback and lessons within 48 hours are tied to that work.
-- **Next in the learning loop:** learning plans per skill goal (stages, resources, practice
-  projects), then the open web (`internal/search`, OpenAI web search first, switchable to
+- **Learning plans** (stage 2, migration 00012): a goal can name the skill it grows
+  (`goals.skill`, set by the review); each such goal gets a plan drafted by System 2
+  (`prompts/learn.md`): 3 to 5 stages (learn, practice, done when) with up to 3 resources
+  each, readable with an ability it has. The morning plan sees the current stage and its
+  resources and can name one (`resource_id`), which becomes an activity with that ability
+  and is marked studied when done. The weekly review marks stages done, adds resources, and
+  ends a plan with its goal.
+- **Next in the learning loop:** the open web (`internal/search`, OpenAI web search first, switchable to
   TinyFish; `web_search` and `read_page` abilities, fenced and capped; comparison notes).
 - **Later (phase B):** skill packs (a skill's crafts, tools and guidance), and a wishlist of
   tools it lacks; then new tools (web search, code, audio), each an ability behind the gate.
@@ -860,8 +866,8 @@ mini-me/
       own page; the owner can hide or show any with `minime work`.
    5. ✅ Growth, phase A (§4.12): dreams, goals and skills; skills scored from works and the
       owner's feedback; a weekly review; plans that work toward goals.
-   6. Learning loop: ✅ lessons and asking the owner for review; next, learning plans, then
-      the open web.
+   6. Learning loop: ✅ lessons and asking the owner for review; ✅ learning plans; next, the
+      open web.
    - Later: the same machinery takes jobs from other sources (chat, email, a job board); audio
      for its music is TBD.
 7. ✅ **Autonomy gate:** action classes and a config policy (auto, ask, forbid); asking the

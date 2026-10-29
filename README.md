@@ -309,6 +309,13 @@ reading and learning 5). After the first start they're its own:
   has absorbed. When it would like your eyes on something it just made, it sends it to you
   with a question ("Is the hook too wordy?"), at most once a day; your answer counts as
   feedback on that work, and its advice becomes lessons.
+- **It plans how to learn.** A goal about a skill ("write a hook people shout back", for
+  lyric writing) gets a learning plan, as a self-taught learner would make: three to five
+  stages from its level now to the goal, each with what to learn, a practice piece a little
+  beyond it, a "done when", and resources to study (books and articles it can read). Its
+  days follow the current stage, mixing studying and practising, and its Sunday review moves
+  it to the next stage once what it made meets the stage's "done when", and adds what to
+  study next. The Growth view shows each plan, its current stage and its resources.
 
 The console's Growth view shows its dreams, goals with their projects, skills with their
 recent scores, and the last review. From the terminal:
@@ -316,6 +323,7 @@ recent scores, and the last review. From the terminal:
 ```bash
 set -a; . ./.env; set +a; go run ./cmd/minime growth   # dreams, goals, skills
 set -a; . ./.env; set +a; go run ./cmd/minime review   # run the weekly review now
+set -a; . ./.env; set +a; go run ./cmd/minime learn    # draft a learning plan for each skill goal without one
 ```
 
 ### Corrections and replay

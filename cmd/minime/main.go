@@ -160,6 +160,20 @@ func run(args []string) error {
 		}
 		defer st.Close()
 		return printGrowth(ctx, st, zone, os.Stdout)
+	case "learn":
+		if err := cfg.ValidateAgent(); err != nil {
+			return err
+		}
+		life, err := self.Load(cfg.Self.Life)
+		if err != nil {
+			return err
+		}
+		st, err := store.Open(ctx, cfg.Database.URL)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		return runLearn(ctx, cfg, life, st, log)
 	case "replay":
 		st, err := store.Open(ctx, cfg.Database.URL)
 		if err != nil {
@@ -175,7 +189,7 @@ func run(args []string) error {
 		defer st.Close()
 		return works(ctx, st, fs.Args(), *limit, os.Stdout)
 	default:
-		return fmt.Errorf("unknown command %q (want run, decisions, profile, day, work, growth, review or replay)", cmd)
+		return fmt.Errorf("unknown command %q (want run, decisions, profile, day, work, growth, review, learn or replay)", cmd)
 	}
 }
 
@@ -396,7 +410,8 @@ func newDay(cfg *config.Config) (mind.Day, error) {
 	for _, p := range []struct {
 		to   *mind.Prompt
 		path string
-	}{{&day.PlanPrompt, dl.PlanPrompt}, {&day.ActivityPrompt, dl.ActivityPrompt}, {&day.ReviewPrompt, dl.ReviewPrompt}} {
+	}{{&day.PlanPrompt, dl.PlanPrompt}, {&day.ActivityPrompt, dl.ActivityPrompt}, {&day.ReviewPrompt, dl.ReviewPrompt},
+		{&day.LearnPrompt, dl.LearnPrompt}} {
 		if *p.to, err = loadPrompt(p.path); err != nil {
 			return day, err
 		}
@@ -405,34 +420,59 @@ func newDay(cfg *config.Config) (mind.Day, error) {
 	return day, nil
 }
 
-// runReview runs the weekly review now. What it wants to change about its
-// dreams is saved for the owner's approval; the running agent asks them.
-func runReview(ctx context.Context, cfg *config.Config, life self.Life, st *store.Store, log *slog.Logger) error {
+// growthMind is the mind the review and learn commands run: enough to
+// review its week and plan its learning, without talking to anyone. What it
+// wants to change about its dreams is saved for the owner's approval; the
+// running agent asks them.
+func growthMind(cfg *config.Config, life self.Life, st *store.Store, log *slog.Logger) (*mind.Mind, error) {
 	s2, err := newReasoner(cfg.Reasoning, cfg.Pricing, log)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	zone, err := cfg.Initiative.Zone()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	day, err := newDay(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if day.ReviewPrompt.Text == "" {
-		return errors.New("daily_life is off: no weekly review")
+		return nil, errors.New("daily_life is off: no growth")
 	}
 	policy, err := cfg.Policy()
 	if err != nil {
+		return nil, err
+	}
+	abilities, err := newAbilities(cfg.DailyLife.AbilityNames(), st) // so it knows what it can study with
+	if err != nil {
+		return nil, err
+	}
+	return mind.New(mind.Config{Life: life, Store: st, System2: s2, Zone: zone, Day: day, Autonomy: policy, Abilities: abilities,
+		Log: log.With("component", "mind")}), nil
+}
+
+// runReview runs the weekly review now.
+func runReview(ctx context.Context, cfg *config.Config, life self.Life, st *store.Store, log *slog.Logger) error {
+	m, err := growthMind(cfg, life, st, log)
+	if err != nil {
 		return err
 	}
-	m := mind.New(mind.Config{Life: life, Store: st, System2: s2, Zone: zone, Day: day, Autonomy: policy,
-		Log: log.With("component", "mind")})
 	if err := m.Review(ctx, time.Now()); err != nil {
 		return err
 	}
 	fmt.Println("Reviewed the week. Run `minime growth`, or open the console's Growth view, to see where it stands.")
+	return nil
+}
+
+// runLearn drafts a learning plan now for each skill goal that has none.
+func runLearn(ctx context.Context, cfg *config.Config, life self.Life, st *store.Store, log *slog.Logger) error {
+	m, err := growthMind(cfg, life, st, log)
+	if err != nil {
+		return err
+	}
+	m.EnsurePlans(ctx, time.Now())
+	fmt.Println("Every skill goal has a learning plan. See them in the console's Growth view.")
 	return nil
 }
 

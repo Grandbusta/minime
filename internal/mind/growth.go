@@ -248,8 +248,8 @@ func (m *Mind) growthNote(ctx context.Context, now time.Time) string {
 	if goals, err := m.Store.Goals(ctx, true); err == nil && len(goals) > 0 {
 		b.WriteString("\n\nYour goals now:")
 		for _, g := range goals {
-			fmt.Fprintf(&b, "\n- [goal %s] %s (done when: %s; due %s). Where it stands: %s", g.ID, g.Text, g.DoneWhen,
-				g.Due.In(m.Zone).Format("Mon 2 Jan"), orDefault(g.Progress, "just started"))
+			fmt.Fprintf(&b, "\n- [goal %s] %s (done when: %s; due %s; skill: %s). Where it stands: %s", g.ID, g.Text, g.DoneWhen,
+				g.Due.In(m.Zone).Format("Mon 2 Jan"), orDefault(g.Skill, "none named yet"), orDefault(g.Progress, "just started"))
 		}
 	} else if err == nil {
 		b.WriteString("\n\nYou have no goals yet.")

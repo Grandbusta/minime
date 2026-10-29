@@ -38,7 +38,19 @@ func (f *fakeLibrary) FindArticle(_ context.Context, q string) (library.Article,
 	return library.Article{Title: "Polyrhythm", URL: "https://wiki/Polyrhythm", Text: "Polyrhythm is two rhythms at once."}, nil
 }
 
-type fakeStore struct{ sources map[ulid.ULID]memory.Source }
+type fakeStore struct {
+	sources  map[ulid.ULID]memory.Source
+	projects []memory.Project // active ones following a source
+}
+
+func (s *fakeStore) ReadingProject(_ context.Context, source ulid.ULID) (memory.Project, bool, error) {
+	for _, p := range s.projects {
+		if p.SourceID == source {
+			return p, true, nil
+		}
+	}
+	return memory.Project{}, false, nil
+}
 
 func (s *fakeStore) SaveSource(_ context.Context, src memory.Source) (ulid.ULID, error) {
 	for id, have := range s.sources {
@@ -142,5 +154,25 @@ func TestNothingToRead(t *testing.T) {
 	}
 	if len(st.sources) != 0 {
 		t.Errorf("saved %d sources", len(st.sources))
+	}
+}
+
+func TestStartingABookItsAlreadyReadingCarriesOn(t *testing.T) {
+	para := strings.Repeat("word ", PassageSize/12)
+	lib := &fakeLibrary{text: para + "\n\n" + para + "\n\n" + para + " The end."}
+	st := &fakeStore{sources: map[ulid.ULID]memory.Source{}}
+	b := Book{Library: lib, Store: st}
+	first, err := b.Prepare(context.Background(), act("Pride and Prejudice", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.projects = []memory.Project{*first.Project} // it kept reading it
+
+	again, err := b.Prepare(context.Background(), act("Pride and Prejudice Austen", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Project.ID != first.Project.ID || !strings.Contains(again.Note, "% of the way through") || strings.Contains(again.Note, ", 0% of the way") {
+		t.Errorf("started it over: project %s vs %s\n%.200s", again.Project.ID, first.Project.ID, again.Note)
 	}
 }

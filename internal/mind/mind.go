@@ -89,6 +89,13 @@ type Store interface {
 	RetireLesson(ctx context.Context, id ulid.ULID, at time.Time) error
 	MarkReviewAsked(ctx context.Context, work ulid.ULID, at time.Time) error
 	AskedForReview(ctx context.Context, since time.Time) (memory.Work, bool, error)
+	SavePlan(ctx context.Context, p memory.LearningPlan) error
+	Plans(ctx context.Context, activeOnly bool) ([]memory.LearningPlan, error)
+	AdvancePlan(ctx context.Context, plan ulid.ULID, at time.Time) error
+	EndPlan(ctx context.Context, plan ulid.ULID, status string, at time.Time) error
+	SaveResource(ctx context.Context, r memory.Resource) error
+	Resources(ctx context.Context, plan ulid.ULID) ([]memory.Resource, error)
+	FinishResource(ctx context.Context, id, work ulid.ULID, title string, at time.Time) error
 	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
 	SaveProject(ctx context.Context, p memory.Project) error
 	Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error)

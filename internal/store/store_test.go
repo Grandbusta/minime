@@ -553,6 +553,12 @@ func TestSourcesAndReadingProgress(t *testing.T) {
 		got.Source.Title != "Pride and Prejudice" || got.Source.Chars != len(src.Text) {
 		t.Errorf("project = %+v (%+v), %v", got, got.Source, err)
 	}
+	if r, ok, err := s.ReadingProject(ctx, src.ID); err != nil || !ok || r.ID != p.ID || r.Position != 12 {
+		t.Errorf("reading project = %+v, %v, %v", r, ok, err)
+	}
+	if _, ok, _ := s.ReadingProject(ctx, ulid.Make()); ok {
+		t.Error("found a project for a source nobody reads")
+	}
 
 	i := memory.Intention{ID: ulid.Make(), Subject: memory.SubjectSelf, Kind: memory.IntentionActivity, Text: "learn",
 		Ability: "read_article", Args: map[string]string{"query": "polyrhythm"}, DueAt: now.AddDate(0, 0, -50), Status: memory.IntentionPending, CreatedAt: now}
@@ -896,5 +902,72 @@ func TestLessons(t *testing.T) {
 	}
 	if got, ok, err := s.AskedForReview(ctx, now.Add(30*time.Minute)); err != nil || !ok || got.ID != w.ID {
 		t.Errorf("asked for review = %+v, %v, %v", got, ok, err)
+	}
+}
+
+func TestLearningPlans(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	dream := memory.Dream{ID: ulid.Make(), Text: "write songs", Status: memory.DreamActive, Source: memory.DreamFromLife, Since: now}
+	if err := s.SaveDream(ctx, dream); err != nil {
+		t.Fatal(err)
+	}
+	goal := memory.Goal{ID: ulid.Make(), DreamID: dream.ID, Text: "hooks", Skill: "lyric writing", Due: now.AddDate(0, 1, 0),
+		Status: memory.GoalActive, CreatedAt: now, UpdatedAt: now}
+	if err := s.SaveGoal(ctx, goal); err != nil {
+		t.Fatal(err)
+	}
+	if gs, _ := s.Goals(ctx, true); !slices.ContainsFunc(gs, func(g memory.Goal) bool { return g.ID == goal.ID && g.Skill == "lyric writing" }) {
+		t.Errorf("goals = %+v", gs)
+	}
+	plan := memory.LearningPlan{ID: ulid.Make(), GoalID: goal.ID, Skill: "lyric writing", Status: memory.PlanActive, CreatedAt: now, UpdatedAt: now,
+		Stages: []memory.Stage{{N: 0, Learn: "hooks", Practice: "a hook", DoneWhen: "two good ones"}, {N: 1, Learn: "verses", Practice: "a verse"}}}
+	if err := s.SavePlan(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	r := memory.Resource{ID: ulid.Make(), PlanID: plan.ID, Stage: 0, Ability: "read_article", Query: "hook (music)", Why: "basics",
+		Status: memory.ResourceTodo, AddedAt: now}
+	if err := s.SaveResource(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	w := memory.Work{ID: ulid.Make(), Kind: "reading_notes", Title: "Hooks", Text: "...", CreatedAt: now}
+	if err := s.SaveWork(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishResource(ctx, r.ID, w.ID, "Hook (music)", now); err != nil {
+		t.Fatal(err)
+	}
+	if rs, err := s.Resources(ctx, plan.ID); err != nil || len(rs) != 1 || rs[0].Status != memory.ResourceDone || rs[0].WorkID != w.ID {
+		t.Errorf("resources = %+v, %v", rs, err)
+	}
+
+	mine := func() memory.LearningPlan {
+		ps, err := s.Plans(ctx, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range ps {
+			if p.ID == plan.ID {
+				return p
+			}
+		}
+		t.Fatal("plan not found")
+		return memory.LearningPlan{}
+	}
+	if p := mine(); len(p.Stages) != 2 || p.Stages[0].DoneWhen != "two good ones" || p.Stage != 0 {
+		t.Errorf("plan = %+v", p)
+	}
+	if err := s.AdvancePlan(ctx, plan.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if p := mine(); p.Stage != 1 || p.Stages[0].DoneAt.IsZero() || p.Status != memory.PlanActive {
+		t.Errorf("after one stage = %+v", p)
+	}
+	if err := s.AdvancePlan(ctx, plan.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if p := mine(); p.Status != memory.PlanDone {
+		t.Errorf("after the last stage = %+v", p)
 	}
 }

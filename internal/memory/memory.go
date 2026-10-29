@@ -217,9 +217,58 @@ type Goal struct {
 	Due       time.Time //
 	Status    string    // GoalActive, GoalDone or GoalDropped
 	Progress  string    // where it stands, from the last review
+	Skill     string    // the skill it grows, if it's about one; it then has a learning plan
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
+
+// LearningPlan is how it means to grow a skill for a goal: stages it works
+// through, like a self-taught learner.
+type LearningPlan struct {
+	ID        ulid.ULID
+	GoalID    ulid.ULID
+	Skill     string
+	Stage     int    // the current stage, from 0
+	Status    string // PlanActive, PlanDone or PlanDropped
+	Stages    []Stage
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+const (
+	PlanActive  = "active"
+	PlanDone    = "done"
+	PlanDropped = "dropped"
+)
+
+// Stage is one step of a learning plan.
+type Stage struct {
+	N        int
+	Learn    string    // what to learn
+	Practice string    // a piece to make that practises it
+	DoneWhen string    // how it'll know it's done
+	DoneAt   time.Time // zero until done
+}
+
+// Resource is something to study for a stage of a learning plan.
+type Resource struct {
+	ID      ulid.ULID
+	PlanID  ulid.ULID
+	Stage   int
+	Ability string // how it's read, e.g. "read_article"
+	Query   string // what to look for
+	Why     string
+	Status  string    // ResourceTodo or ResourceDone
+	Title   string    // what it turned out to be; "" until read
+	WorkID  ulid.ULID // its notes on it; zero until read
+	AddedAt time.Time
+	DoneAt  time.Time
+}
+
+const (
+	ResourceTodo = "todo"
+	ResourceDone = "done"
+)
 
 const (
 	GoalActive  = "active"

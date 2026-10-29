@@ -95,7 +95,7 @@ func (f *fakeStore) Dreams(context.Context, bool) ([]memory.Dream, error) {
 	return []memory.Dream{{ID: testDream, Text: "Tobi wants to be a producer", Status: memory.DreamActive, Source: memory.DreamFromLife}}, nil
 }
 func (f *fakeStore) Goals(context.Context, bool) ([]memory.Goal, error) {
-	return []memory.Goal{{ID: ulid.Make(), DreamID: testDream, Text: "Five beat ideas", Status: memory.GoalActive}}, nil
+	return []memory.Goal{{ID: testGoal, DreamID: testDream, Text: "Five beat ideas", Status: memory.GoalActive}}, nil
 }
 func (f *fakeStore) Skills(context.Context) ([]memory.Skill, error) {
 	return []memory.Skill{{Name: "music production", Level: 4.6, ShownBy: []string{"beat_idea"}}}, nil
@@ -106,6 +106,16 @@ func (f *fakeStore) RecentEvidence(context.Context, string, int) ([]memory.Evide
 func (f *fakeStore) Lessons(context.Context, string, int) ([]memory.Lesson, error) {
 	return []memory.Lesson{{Skill: "music production", Text: "Leave space after the drop", Source: memory.LessonFromOwner}}, nil
 }
+func (f *fakeStore) Plans(context.Context, bool) ([]memory.LearningPlan, error) {
+	return []memory.LearningPlan{{ID: testPlan, GoalID: testGoal, Skill: "music production", Stage: 1, Status: memory.PlanActive,
+		Stages: []memory.Stage{{N: 0, Learn: "drums", Practice: "a beat"}, {N: 1, Learn: "melody", Practice: "a hook"}}}}, nil
+}
+func (f *fakeStore) Resources(context.Context, ulid.ULID) ([]memory.Resource, error) {
+	return []memory.Resource{{Stage: 1, Ability: "read_article", Query: "melody", Status: memory.ResourceTodo}}, nil
+}
+
+var testPlan, testGoal = ulid.Make(), ulid.Make()
+
 func (f *fakeStore) LatestWork(context.Context, string) (memory.Work, bool, error) {
 	return memory.Work{Kind: "review", Title: "A busy week", Text: "..."}, true, nil
 }
@@ -237,6 +247,10 @@ func TestPageAndAPI(t *testing.T) {
 		Review map[string]any `json:"review"`
 	}
 	getJSON(t, srv.URL+"/api/growth", &growth)
+	plan, _ := growth.Dreams[0].Goals[0]["plan"].(map[string]any)
+	if plan == nil || plan["stage"] != float64(1) || len(plan["stages"].([]any)) != 2 {
+		t.Errorf("plan = %+v", plan)
+	}
 	if len(growth.Dreams) != 1 || len(growth.Dreams[0].Goals) != 1 || growth.Skills[0].Level != 4.6 ||
 		growth.Skills[0].Evidence[0]["score"] != 5.9 || growth.Skills[0].Lessons[0]["source"] != "owner" || growth.Review["title"] != "A busy week" {
 		t.Errorf("growth = %+v", growth)

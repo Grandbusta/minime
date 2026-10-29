@@ -75,6 +75,7 @@ daily_life:
   plan_prompt: prompts/plan.md
   activity_prompt: prompts/activity.md
   review_prompt: prompts/review.md
+  learn_prompt: prompts/learn.md
 
 # What it may do on its own (the autonomy gate). Each kind of action is auto
 # (on its own), ask (it asks the owner first, on Telegram, with Approve and

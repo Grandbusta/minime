@@ -56,6 +56,8 @@ type Store interface {
 	RecentEvidence(ctx context.Context, skill string, limit int) ([]memory.Evidence, error)
 	LatestWork(ctx context.Context, kind string) (memory.Work, bool, error)
 	Lessons(ctx context.Context, skill string, limit int) ([]memory.Lesson, error)
+	Plans(ctx context.Context, activeOnly bool) ([]memory.LearningPlan, error)
+	Resources(ctx context.Context, plan ulid.ULID) ([]memory.Resource, error)
 }
 
 // Info is what the console says about the running agent.
@@ -492,6 +494,29 @@ func (s *Server) growth(w http.ResponseWriter, r *http.Request) {
 	if s.failed(w, err) {
 		return
 	}
+	plans, err := s.Store.Plans(ctx, false)
+	if s.failed(w, err) {
+		return
+	}
+	planFor := map[ulid.ULID]map[string]any{}
+	for _, p := range plans {
+		rs, err := s.Store.Resources(ctx, p.ID)
+		if s.failed(w, err) {
+			return
+		}
+		stages := make([]map[string]any, len(p.Stages))
+		for i, st := range p.Stages {
+			var res []map[string]any
+			for _, r := range rs {
+				if r.Stage == st.N {
+					res = append(res, map[string]any{"ability": r.Ability, "query": r.Query, "why": r.Why, "status": r.Status, "title": r.Title})
+				}
+			}
+			stages[i] = map[string]any{"learn": st.Learn, "practice": st.Practice, "done_when": st.DoneWhen, "done": !st.DoneAt.IsZero(),
+				"resources": nonNilMaps(res)}
+		}
+		planFor[p.GoalID] = map[string]any{"id": p.ID.String(), "skill": p.Skill, "stage": p.Stage, "status": p.Status, "stages": stages}
+	}
 	dv := make([]map[string]any, 0, len(dreams))
 	for _, d := range dreams {
 		var gv []map[string]any
@@ -506,7 +531,8 @@ func (s *Server) growth(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			gv = append(gv, map[string]any{"id": g.ID.String(), "text": g.Text, "done_when": g.DoneWhen, "due": g.Due,
-				"status": g.Status, "progress": g.Progress, "created_at": g.CreatedAt, "projects": nonNilMaps(pv)})
+				"status": g.Status, "progress": g.Progress, "created_at": g.CreatedAt, "projects": nonNilMaps(pv), "skill": g.Skill,
+				"plan": planFor[g.ID]})
 		}
 		v := map[string]any{"id": d.ID.String(), "text": d.Text, "status": d.Status, "source": d.Source, "since": d.Since,
 			"goals": nonNilMaps(gv)}

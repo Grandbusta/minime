@@ -35,21 +35,23 @@ const (
 
 var reviewFormat = &system2.Format{Name: "weekly_review", Schema: map[string]any{
 	"type": "object", "additionalProperties": false,
-	"required": []string{"title", "text", "goals", "new_goals", "projects", "dreams", "retire_lessons", "new_lessons"},
+	"required": []string{"title", "text", "goals", "new_goals", "projects", "dreams", "retire_lessons", "new_lessons", "plans", "new_resources"},
 	"properties": map[string]any{
 		"title": map[string]any{"type": "string"},
 		"text":  map[string]any{"type": "string"},
 		"goals": map[string]any{"type": "array", "items": map[string]any{
-			"type": "object", "additionalProperties": false, "required": []string{"goal_id", "progress", "status"},
+			"type": "object", "additionalProperties": false, "required": []string{"goal_id", "progress", "status", "skill"},
 			"properties": map[string]any{
 				"goal_id":  map[string]any{"type": "string"},
+				"skill":    map[string]any{"type": "string", "description": "the skill it grows, if it's about one and doesn't say yet; else empty"},
 				"progress": map[string]any{"type": "string"},
 				"status":   map[string]any{"type": "string", "enum": []string{memory.GoalActive, memory.GoalDone, memory.GoalDropped}},
 			},
 		}},
 		"new_goals": map[string]any{"type": "array", "items": map[string]any{
-			"type": "object", "additionalProperties": false, "required": []string{"dream_id", "text", "done_when", "due", "project_ids"},
+			"type": "object", "additionalProperties": false, "required": []string{"dream_id", "text", "done_when", "due", "project_ids", "skill"},
 			"properties": map[string]any{
+				"skill":       map[string]any{"type": "string", "description": "the skill it grows, if it's about one; else empty"},
 				"dream_id":    map[string]any{"type": "string"},
 				"project_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "projects that serve it"},
 				"text":        map[string]any{"type": "string"},
@@ -62,6 +64,22 @@ var reviewFormat = &system2.Format{Name: "weekly_review", Schema: map[string]any
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string"},
 				"goal_id":    map[string]any{"type": "string"},
+			},
+		}},
+		"plans": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"plan_id", "stage_done"},
+			"properties": map[string]any{
+				"plan_id":    map[string]any{"type": "string"},
+				"stage_done": map[string]any{"type": "boolean", "description": "its current stage's done-when is met by what you made"},
+			},
+		}},
+		"new_resources": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"plan_id", "ability", "query", "why"},
+			"properties": map[string]any{
+				"plan_id": map[string]any{"type": "string"},
+				"ability": map[string]any{"type": "string"},
+				"query":   map[string]any{"type": "string"},
+				"why":     map[string]any{"type": "string"},
 			},
 		}},
 		"retire_lessons": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
@@ -134,6 +152,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 	var note strings.Builder
 	note.WriteString(m.now(now) + " It's time for your weekly review.")
 	note.WriteString(m.growthNote(ctx, now))
+	note.WriteString(m.plansNote(ctx, true))
 	if len(projects) > 0 {
 		note.WriteString("\n\nWhat you're in the middle of:")
 		for _, p := range projects {
@@ -166,6 +185,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 			fmt.Fprintf(&note, "\n- [lesson %s] %s, from %s: %s", l.ID, l.Skill, lessonSource(l.Source), l.Text)
 		}
 	}
+	fmt.Fprintf(&note, "\n\nWhat you can study with (for new resources):\n%s", m.readingList())
 	fmt.Fprintf(&note, "\n\nYou can have at most %d goals at a time, and %d dreams.", maxActiveGoals, maxActiveDreams)
 
 	resp, err := m.System2.Reason(ctx, system2.Request{
@@ -185,6 +205,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 			GoalID   string `json:"goal_id"`
 			Progress string `json:"progress"`
 			Status   string `json:"status"`
+			Skill    string `json:"skill"`
 		} `json:"goals"`
 		NewGoals []struct {
 			DreamID  string   `json:"dream_id"`
@@ -192,7 +213,18 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 			DoneWhen string   `json:"done_when"`
 			Due      string   `json:"due"`
 			Projects []string `json:"project_ids"`
+			Skill    string   `json:"skill"`
 		} `json:"new_goals"`
+		Plans []struct {
+			PlanID    string `json:"plan_id"`
+			StageDone bool   `json:"stage_done"`
+		} `json:"plans"`
+		NewResources []struct {
+			PlanID  string `json:"plan_id"`
+			Ability string `json:"ability"`
+			Query   string `json:"query"`
+			Why     string `json:"why"`
+		} `json:"new_resources"`
 		Projects []struct {
 			ProjectID string `json:"project_id"`
 			GoalID    string `json:"goal_id"`
@@ -225,6 +257,9 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 			continue
 		}
 		g.Progress, g.UpdatedAt = orDefault(u.Progress, g.Progress), now.UTC()
+		if g.Skill == "" {
+			g.Skill = m.skillNamed(ctx, u.Skill)
+		}
 		if u.Status == memory.GoalDone || u.Status == memory.GoalDropped {
 			g.Status = u.Status
 			delete(activeGoals, g.ID.String())
@@ -246,7 +281,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 			m.Log.Warn("dropped a new goal", "text", ng.Text, "due", ng.Due, "dream", ng.DreamID, "err", err)
 			continue
 		}
-		g := memory.Goal{ID: ulid.Make(), DreamID: ulid.MustParse(strings.TrimSpace(ng.DreamID)), Text: text,
+		g := memory.Goal{ID: ulid.Make(), DreamID: ulid.MustParse(strings.TrimSpace(ng.DreamID)), Text: text, Skill: m.skillNamed(ctx, ng.Skill),
 			DoneWhen: strings.TrimSpace(ng.DoneWhen), Due: due.Add(23*time.Hour + 59*time.Minute).UTC(), Status: memory.GoalActive,
 			CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
 		if err := m.Store.SaveGoal(ctx, g); err != nil {
@@ -277,6 +312,47 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 			m.Log.Error("save project", "err", err)
 		}
 	}
+	// Learning plans: move on a stage whose done-when is met; add what to study.
+	if plans, err := m.Store.Plans(ctx, true); err == nil {
+		byPlan := map[string]memory.LearningPlan{}
+		for _, p := range plans {
+			byPlan[p.ID.String()] = p
+		}
+		for _, u := range out.Plans {
+			if p, ok := byPlan[strings.TrimSpace(u.PlanID)]; ok && u.StageDone {
+				if err := m.Store.AdvancePlan(ctx, p.ID, now.UTC()); err == nil {
+					changes = append(changes, fmt.Sprintf("%s: stage %d of %d done", p.Skill, p.Stage+1, len(p.Stages)))
+					p.Stage++
+					byPlan[p.ID.String()] = p
+				}
+			}
+		}
+		for _, nr := range out.NewResources {
+			p, ok := byPlan[strings.TrimSpace(nr.PlanID)]
+			if !ok || p.Stage >= len(p.Stages) {
+				continue
+			}
+			if r, ok := m.resource(p.ID, p.Stage, nr.Ability, nr.Query, nr.Why, now); ok {
+				if err := m.Store.SaveResource(ctx, r); err == nil {
+					changes = append(changes, "to study: "+r.Query)
+				}
+			}
+		}
+		for _, p := range plans { // a plan ends with its goal
+			if _, still := activeGoals[p.GoalID.String()]; !still {
+				status := memory.PlanDone
+				for _, u := range out.Goals {
+					if strings.TrimSpace(u.GoalID) == p.GoalID.String() && u.Status == memory.GoalDropped {
+						status = memory.PlanDropped
+					}
+				}
+				if err := m.Store.EndPlan(ctx, p.ID, status, now.UTC()); err != nil {
+					m.Log.Error("end plan", "err", err)
+				}
+			}
+		}
+	}
+
 	// Lessons: retire what it has absorbed, keep what the week taught it.
 	if ls, err := m.Store.Lessons(ctx, "", 100); err == nil {
 		active := map[string]bool{}
@@ -320,6 +396,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 	}
 	m.finishLife(ctx, d, start, decision.OutcomeOK, detail)
 	m.Log.Info("weekly review", "changes", len(changes), "cost_usd", d.CostUSD)
+	m.EnsurePlans(ctx, now) // a learning plan for each new skill goal
 	return nil
 }
 

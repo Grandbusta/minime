@@ -51,6 +51,8 @@ type fakeStore struct {
 	evidence       []memory.Evidence // oldest first
 	lessons        []memory.Lesson
 	reviewAsked    map[ulid.ULID]time.Time
+	plans          []memory.LearningPlan
+	resources      []memory.Resource
 	public         map[ulid.ULID]string // works set public: "true by owner", ...
 }
 
@@ -202,6 +204,66 @@ func (s *fakeStore) AskedForReview(_ context.Context, since time.Time) (memory.W
 		}
 	}
 	return best, !at.IsZero(), nil
+}
+
+func (s *fakeStore) SavePlan(_ context.Context, p memory.LearningPlan) error {
+	s.plans = append(s.plans, p)
+	return nil
+}
+
+func (s *fakeStore) Plans(_ context.Context, activeOnly bool) ([]memory.LearningPlan, error) {
+	var out []memory.LearningPlan
+	for _, p := range s.plans {
+		if !activeOnly || p.Status == memory.PlanActive {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) AdvancePlan(_ context.Context, plan ulid.ULID, at time.Time) error {
+	for n := range s.plans {
+		if p := &s.plans[n]; p.ID == plan {
+			p.Stages[p.Stage].DoneAt = at
+			if p.Stage++; p.Stage >= len(p.Stages) {
+				p.Status = memory.PlanDone
+			}
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) EndPlan(_ context.Context, plan ulid.ULID, status string, _ time.Time) error {
+	for n := range s.plans {
+		if s.plans[n].ID == plan {
+			s.plans[n].Status = status
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) SaveResource(_ context.Context, r memory.Resource) error {
+	s.resources = append(s.resources, r)
+	return nil
+}
+
+func (s *fakeStore) Resources(_ context.Context, plan ulid.ULID) ([]memory.Resource, error) {
+	var out []memory.Resource
+	for _, r := range s.resources {
+		if r.PlanID == plan {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) FinishResource(_ context.Context, id, work ulid.ULID, title string, at time.Time) error {
+	for n := range s.resources {
+		if r := &s.resources[n]; r.ID == id {
+			r.Status, r.WorkID, r.Title, r.DoneAt = memory.ResourceDone, work, title, at
+		}
+	}
+	return nil
 }
 
 func (s *fakeStore) AwaitIntention(_ context.Context, id ulid.ULID) error {

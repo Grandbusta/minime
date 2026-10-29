@@ -1,0 +1,287 @@
+package mind
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/oklog/ulid/v2"
+
+	"minime/internal/decision"
+	"minime/internal/memory"
+	"minime/internal/providers/system2"
+)
+
+// Learning plans: when a goal is about growing a skill, it plans how to learn
+// it, the way a self-taught person does: a few stages, each with what to
+// learn, a practice piece slightly beyond it, a "done when", and resources to
+// study. Its days follow the current stage (study a resource, practise,
+// reflect), and its weekly review moves it on to the next stage when the
+// "done when" is met by what it actually made.
+
+const (
+	minStages         = 3
+	maxStages         = 5
+	resourcesPerStage = 3
+)
+
+var learnFormat = &system2.Format{Name: "learning_plan", Schema: map[string]any{
+	"type": "object", "additionalProperties": false, "required": []string{"stages"},
+	"properties": map[string]any{
+		"stages": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"learn", "practice", "done_when", "resources"},
+			"properties": map[string]any{
+				"learn":     map[string]any{"type": "string"},
+				"practice":  map[string]any{"type": "string"},
+				"done_when": map[string]any{"type": "string"},
+				"resources": map[string]any{"type": "array", "items": map[string]any{
+					"type": "object", "additionalProperties": false, "required": []string{"ability", "query", "why"},
+					"properties": map[string]any{
+						"ability": map[string]any{"type": "string"},
+						"query":   map[string]any{"type": "string"},
+						"why":     map[string]any{"type": "string"},
+					},
+				}},
+			},
+		}},
+	},
+}}
+
+// EnsurePlans drafts a learning plan for each active skill goal that has
+// none: the review does it, and `minime learn` on demand.
+func (m *Mind) EnsurePlans(ctx context.Context, now time.Time) {
+	if m.Day.LearnPrompt.Text == "" {
+		return
+	}
+	goals, err := m.Store.Goals(ctx, true)
+	if err != nil {
+		return
+	}
+	plans, err := m.Store.Plans(ctx, false)
+	if err != nil {
+		return
+	}
+	has := map[ulid.ULID]bool{}
+	for _, p := range plans {
+		has[p.GoalID] = true
+	}
+	for _, g := range goals {
+		if g.Skill != "" && !has[g.ID] {
+			if err := m.draftPlan(ctx, g, now); err != nil {
+				m.Log.Warn("drafting a learning plan failed; tried again next review", "goal", g.Text, "err", err)
+			}
+		}
+	}
+}
+
+// draftPlan has System 2 plan how to grow a goal's skill.
+func (m *Mind) draftPlan(ctx context.Context, g memory.Goal, now time.Time) error {
+	start := time.Now()
+	d := &decision.Decision{ID: ulid.Make(), At: start.UTC(), Tier: decision.TierSystem2, SetID: m.Day.LearnPrompt.Ref,
+		Action: "plan_learning", Gate: decision.GateAuto}
+	var note strings.Builder
+	note.WriteString(m.now(now))
+	fmt.Fprintf(&note, "\n\nYour goal: %s (done when: %s; due %s). It grows your skill: %s.", g.Text, g.DoneWhen,
+		g.Due.In(m.Zone).Format("Mon 2 Jan"), g.Skill)
+	if skills, err := m.Store.Skills(ctx); err == nil {
+		for _, sk := range skills {
+			if sk.Name == g.Skill {
+				fmt.Fprintf(&note, " You're at %.1f out of 10 in it now.", sk.Level)
+			}
+		}
+	}
+	if ls, err := m.Store.Lessons(ctx, g.Skill, 10); err == nil && len(ls) > 0 {
+		note.WriteString("\n\nWhat you've learned about it so far:")
+		for _, l := range ls {
+			fmt.Fprintf(&note, "\n- %s", l.Text)
+		}
+	}
+	fmt.Fprintf(&note, "\n\nWhat you can study with (resources must use one of these):\n%s", m.readingList())
+	resp, err := m.System2.Reason(ctx, system2.Request{
+		Instructions: m.lifeInstructions(m.Day.LearnPrompt),
+		Note:         note.String(),
+		Format:       learnFormat,
+	})
+	if err != nil {
+		m.finishLife(ctx, d, start, decision.OutcomeFailed, err.Error())
+		return err
+	}
+	d.Provider, d.CostUSD = resp.Provider, resp.CostUSD
+	var out struct {
+		Stages []struct {
+			Learn     string `json:"learn"`
+			Practice  string `json:"practice"`
+			DoneWhen  string `json:"done_when"`
+			Resources []struct {
+				Ability string `json:"ability"`
+				Query   string `json:"query"`
+				Why     string `json:"why"`
+			} `json:"resources"`
+		} `json:"stages"`
+	}
+	if err := json.Unmarshal([]byte(resp.Text), &out); err != nil {
+		m.finishLife(ctx, d, start, decision.OutcomeFailed, "no plan in the answer: "+err.Error())
+		return err
+	}
+	p := memory.LearningPlan{ID: ulid.Make(), GoalID: g.ID, Skill: g.Skill, Status: memory.PlanActive, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
+	var resources []memory.Resource
+	for _, st := range out.Stages {
+		learn, practice := strings.TrimSpace(st.Learn), strings.TrimSpace(st.Practice)
+		if learn == "" || practice == "" || len(p.Stages) >= maxStages {
+			continue
+		}
+		n := len(p.Stages)
+		p.Stages = append(p.Stages, memory.Stage{N: n, Learn: learn, Practice: practice, DoneWhen: strings.TrimSpace(st.DoneWhen)})
+		for _, r := range st.Resources {
+			if res, ok := m.resource(p.ID, n, r.Ability, r.Query, r.Why, now); ok && countStage(resources, n) < resourcesPerStage {
+				resources = append(resources, res)
+			}
+		}
+	}
+	if len(p.Stages) < minStages {
+		m.finishLife(ctx, d, start, decision.OutcomeFailed, fmt.Sprintf("a plan needs %d to %d stages, got %d", minStages, maxStages, len(p.Stages)))
+		return fmt.Errorf("plan has %d stages", len(p.Stages))
+	}
+	if err := m.Store.SavePlan(ctx, p); err != nil {
+		return err
+	}
+	for _, r := range resources {
+		if err := m.Store.SaveResource(ctx, r); err != nil {
+			m.Log.Error("save resource", "err", err)
+		}
+	}
+	var lines []string
+	for _, st := range p.Stages {
+		lines = append(lines, fmt.Sprintf("%d. %s (practice: %s)", st.N+1, st.Learn, st.Practice))
+	}
+	d.Reply = "Learning plan for " + g.Skill + ":\n" + strings.Join(lines, "\n")
+	m.finishLife(ctx, d, start, decision.OutcomeOK, fmt.Sprintf("planned how to learn %s: %d stages, %d resources", g.Skill, len(p.Stages), len(resources)))
+	m.Log.Info("planned how to learn", "skill", g.Skill, "goal", g.Text, "stages", len(p.Stages), "resources", len(resources))
+	return nil
+}
+
+// resource is something to study, if it can be read with an ability it has.
+func (m *Mind) resource(plan ulid.ULID, stage int, ability, query, why string, now time.Time) (memory.Resource, bool) {
+	ability, query = strings.TrimSpace(ability), strings.TrimSpace(query)
+	ab, ok := m.Abilities.Get(ability)
+	if !ok || query == "" || ab.Describe() == "" || !m.allowed(ab) {
+		return memory.Resource{}, false
+	}
+	return memory.Resource{ID: ulid.Make(), PlanID: plan, Stage: stage, Ability: ab.Name(), Query: query, Why: strings.TrimSpace(why),
+		Status: memory.ResourceTodo, AddedAt: now.UTC()}, true
+}
+
+func countStage(rs []memory.Resource, stage int) int {
+	n := 0
+	for _, r := range rs {
+		if r.Stage == stage {
+			n++
+		}
+	}
+	return n
+}
+
+// readingList is the abilities it can study with, for a prompt.
+func (m *Mind) readingList() string {
+	var lines []string
+	for _, a := range m.plannable() {
+		lines = append(lines, "- "+a.Name()+": "+a.Describe())
+	}
+	if len(lines) == 0 {
+		return "- (none: you can only practise, and learn from feedback)"
+	}
+	return strings.Join(lines, "\n")
+}
+
+// plansNote is where it is in each learning plan, for the morning plan or a
+// review: the current stage, and what's left to study for it.
+func (m *Mind) plansNote(ctx context.Context, forReview bool) string {
+	plans, err := m.Store.Plans(ctx, true)
+	if err != nil || len(plans) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\nYour learning plans:")
+	for _, p := range plans {
+		if p.Stage >= len(p.Stages) {
+			continue
+		}
+		st := p.Stages[p.Stage]
+		fmt.Fprintf(&b, "\n- [plan %s] %s (goal %s), stage %d of %d: learn %s. Practise: %s. Done when: %s.", p.ID, p.Skill, p.GoalID,
+			p.Stage+1, len(p.Stages), st.Learn, st.Practice, orDefault(st.DoneWhen, "you're confident"))
+		rs, err := m.Store.Resources(ctx, p.ID)
+		if err != nil {
+			continue
+		}
+		for _, r := range rs {
+			if r.Stage != p.Stage {
+				continue
+			}
+			if r.Status == memory.ResourceDone {
+				fmt.Fprintf(&b, "\n  - studied: %s", orDefault(r.Title, r.Query))
+				continue
+			}
+			fmt.Fprintf(&b, "\n  - to study: [resource %s] %s %q (%s)", r.ID, r.Ability, r.Query, orDefault(r.Why, "for this stage"))
+		}
+		if forReview && p.Stage+1 < len(p.Stages) {
+			fmt.Fprintf(&b, "\n  Next stage: %s.", p.Stages[p.Stage+1].Learn)
+		}
+	}
+	return b.String()
+}
+
+// studied marks a resource done once it has studied it: the activity that
+// read it names it (in its args), and made notes.
+func (m *Mind) studied(ctx context.Context, i memory.Intention, w memory.Work, now time.Time) {
+	raw := i.Args["resource"]
+	if raw == "" {
+		return
+	}
+	id, err := ulid.Parse(raw)
+	if err != nil {
+		return
+	}
+	if err := m.Store.FinishResource(ctx, id, w.ID, w.Title, now.UTC()); err != nil {
+		m.Log.Error("finish resource", "err", err)
+	}
+}
+
+// resourceFor is a to-study resource of an active plan's current stage, by id.
+func (m *Mind) resourceFor(ctx context.Context, id string) (memory.Resource, bool) {
+	plans, err := m.Store.Plans(ctx, true)
+	if err != nil {
+		return memory.Resource{}, false
+	}
+	for _, p := range plans {
+		rs, err := m.Store.Resources(ctx, p.ID)
+		if err != nil {
+			continue
+		}
+		for _, r := range rs {
+			if r.ID.String() == id && r.Status == memory.ResourceTodo {
+				return r, true
+			}
+		}
+	}
+	return memory.Resource{}, false
+}
+
+// skillNamed is the name of the skill it has that name means (any case); "" if none.
+func (m *Mind) skillNamed(ctx context.Context, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	skills, err := m.Store.Skills(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, sk := range skills {
+		if strings.EqualFold(sk.Name, name) {
+			return sk.Name
+		}
+	}
+	return ""
+}

@@ -39,6 +39,8 @@ type Store interface {
 	// SaveSource stores a source and returns its ID: the existing one if its URL was fetched before.
 	SaveSource(ctx context.Context, src memory.Source) (ulid.ULID, error)
 	SourceText(ctx context.Context, id ulid.ULID) (string, error)
+	// ReadingProject returns the active project that follows a source, if any.
+	ReadingProject(ctx context.Context, source ulid.ULID) (memory.Project, bool, error)
 }
 
 // Book reads a book: it starts one the plan names, or carries on the book a
@@ -81,15 +83,23 @@ func (b Book) Prepare(ctx context.Context, a ability.Act) (ability.Material, err
 		if err != nil {
 			return ability.Material{}, err
 		}
-		if project == nil {
+		reading, ok, err := b.Store.ReadingProject(ctx, id)
+		switch {
+		case err != nil:
+			return ability.Material{}, err
+		case ok:
+			project = &reading // a book it's already reading: carry on where it got to
+		case project == nil:
 			project = &memory.Project{ID: ulid.Make(), Title: book.Title, Kind: "reading", Status: memory.ProjectActive,
 				CreatedAt: a.Now.UTC(), UpdatedAt: a.Now.UTC()}
-		} else {
+		default:
 			p := *project
 			project = &p
 		}
-		r := src.Reading
-		project.SourceID, project.Position, project.Source = id, 0, &r
+		if !ok {
+			r := src.Reading
+			project.SourceID, project.Position, project.Source = id, 0, &r
+		}
 	} else {
 		p := *project
 		project = &p

@@ -28,7 +28,7 @@ const ago = (ms) => {
 
 // family groups a decision for colour: fast, slow, reflex, or its own life.
 function family(e) {
-  if (["plan_day", "activity", "task", "weekly_review", "score_skill"].includes(e.action) || e.source === "life") return "life";
+  if (["plan_day", "activity", "task", "weekly_review", "score_skill", "plan_learning"].includes(e.action) || e.source === "life") return "life";
   return e.tier || "reflex";
 }
 const setName = (set) => (set || "").split(",")[0].split("@")[0];
@@ -40,7 +40,7 @@ const ACTIONS = {
   escalate: "unsure → System 2", reply: "replied", recall: "recalled facts", recall_all: "recalled everything",
   recall_open: "looked for open threads", check_in: "check-in", no_check_in: "nothing to check in on",
   plan_day: "planned the day", activity: "did something", task: "made what it promised", deliver: "sent what it promised", decide_public: "chose what's public", decide_public_works: "chose public works", approved: "you said yes", denied: "you said no", expired: "no answer: not done",
-  send: "sent what you approved", follow_up: "followed up", score_skill: "scored its work", lesson: "learned a lesson", ask_review: "asked for your review", weekly_review: "reviewed its week",
+  send: "sent what you approved", follow_up: "followed up", score_skill: "scored its work", lesson: "learned a lesson", ask_review: "asked for your review", weekly_review: "reviewed its week", plan_learning: "planned how to learn",
   skill_feedback: "took your feedback", permission: "permission changed", correct_fact: "corrected a fact", forget_fact: "forgot a fact",
   label: "labelled a misread",
   write_profile: "wrote the profile page", error: "error",
@@ -71,6 +71,7 @@ function pathFor(e) {
   if (a === "ask_review") return ["life", "system2", "senses"];
   if (a === "lesson") return ["senses", "router", "life"];
   if (a === "weekly_review") return ["clock", "life", "system2", "intentions"];
+  if (a === "plan_learning") return ["life", "system2", "intentions"];
   if (a === "skill_feedback") return ["senses", "router", "life"];
   if (["approved", "denied", "expired"].includes(a)) return ["senses", "router", "intentions"];
   if (a === "send") return ["intentions", "router", "senses"];
@@ -898,6 +899,16 @@ async function openWork(id) {
 
 /* ---------- growth ---------- */
 
+// planHTML is a goal's learning plan: its stages, the current one open with
+// what it practises and studies.
+function planHTML(p) {
+  return `<div class="lplan"><div class="lplan-h">LEARNING PLAN · ${esc(p.skill)} · ${p.status === "active" ? "stage " + (p.stage + 1) + " of " + p.stages.length : esc(p.status)}</div>
+    <ol>${p.stages.map((s, i) => `<li class="${s.done ? "done" : i === p.stage && p.status === "active" ? "now" : ""}"><b>${esc(s.learn)}</b>
+      ${i === p.stage && p.status === "active" ? `<div class="lp-d">practise: ${esc(s.practice)}<br>done when: ${esc(s.done_when || "–")}</div>
+        ${s.resources.length ? `<ul>${s.resources.map((r) => `<li class="${r.status}">${r.status === "done" ? "✓" : "○"} ${esc(r.title || r.query)} <em>${esc(r.ability.replace(/_/g, " "))}</em></li>`).join("")}</ul>` : ""}` : ""}
+    </li>`).join("")}</ol></div>`;
+}
+
 async function loadGrowth() {
   const g = await api("/api/growth");
   const dreams = [...g.dreams].sort((a, b) => (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1));
@@ -908,7 +919,8 @@ async function loadGrowth() {
           <span class="when">due ${fmtTime(x.due, true)}</span></div>
         <p>${esc(x.text)}</p><p class="when">done when: ${esc(x.done_when || "–")}</p>
         ${x.progress ? `<p>${esc(x.progress)}</p>` : ""}
-        ${x.projects.length ? `<div class="pj-chips">${x.projects.map((p) => `<span>${esc(p.title)}</span>`).join("")}</div>` : ""}</div>`).join("")
+        ${x.projects.length ? `<div class="pj-chips">${x.projects.map((p) => `<span>${esc(p.title)}</span>`).join("")}</div>` : ""}
+        ${x.plan ? planHTML(x.plan) : ""}</div>`).join("")
         : `<div class="goal"><p class="when">no goals yet: it sets them in its Sunday review</p></div>`}
     </div>`).join("") : `<div class="empty">no dreams yet: add some to self/life.yaml</div>`;
   $("#skills").innerHTML = g.skills.length ? g.skills.map((s) => {

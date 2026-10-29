@@ -281,6 +281,17 @@ b { font-weight: 600; }
 .goal .when { font-size: 12px; color: var(--muted); }
 .goal .pj-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .goal .pj-chips span { font: 10px var(--mono); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--soft); }
+.lplan { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.lplan-h { font: 9px var(--mono); letter-spacing: .12em; color: var(--muted); margin-bottom: 6px; }
+.lplan ol { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; color: var(--dim); }
+.lplan li.done { color: var(--muted); text-decoration: line-through; }
+.lplan li.now { color: var(--ink); }
+.lplan li.now b { color: var(--accent); }
+.lplan b { font-weight: 500; }
+.lp-d { margin-top: 3px; color: var(--soft); font-size: 12px; }
+.lplan ul { margin: 4px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--soft); }
+.lplan ul li.done { color: var(--accent); text-decoration: none; }
+.lplan ul em { font-style: normal; font: 9px var(--mono); color: var(--muted); }
 .skills { display: grid; gap: 14px; }
 .skill-top { display: flex; justify-content: space-between; font: 12px var(--mono); color: var(--soft); }
 .skill-top b { color: var(--accent); font-size: 14px; }
