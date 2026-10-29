@@ -524,7 +524,12 @@ func (s *Store) SourceText(ctx context.Context, id ulid.ULID) (string, error) {
 	return text, nil
 }
 
-const workColumns = `id, intention_id, project_id, kind, title, text, created_at`
+const workColumns = `id, intention_id, project_id, kind, title, text, created_at, public, coalesce(public_by, '')`
+
+// shareableWork is the condition for a work (aliased w) that may ever be
+// public: not its journal, and made for itself, not for someone (a promise).
+const shareableWork = `w.kind <> 'journal' AND (w.intention_id IS NULL OR EXISTS (
+	SELECT 1 FROM intentions i WHERE i.id = w.intention_id AND i.subject = '` + memory.SubjectSelf + `'))`
 
 // SaveWork stores something the agent made.
 func (s *Store) SaveWork(ctx context.Context, w memory.Work) error {
@@ -550,6 +555,44 @@ func (s *Store) ProjectWorks(ctx context.Context, project ulid.ULID, limit int) 
 		WHERE project_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2`, project.String(), limit)
 	slices.Reverse(ws)
 	return ws, err
+}
+
+// UndecidedPublicWorks returns up to limit works that may be public but
+// haven't been decided on yet, oldest first.
+func (s *Store) UndecidedPublicWorks(ctx context.Context, limit int) ([]memory.Work, error) {
+	return s.queryWorks(ctx, `SELECT `+workColumns+` FROM works w
+		WHERE w.public IS NULL AND `+shareableWork+` ORDER BY w.created_at, w.id LIMIT $1`, limit)
+}
+
+// SetWorkPublic records whether a work may go on the public page, and who
+// decided. The daily check (PublicBySystem1) never overrides its owner, and
+// a work that may never be public can't be made public. It reports whether
+// the work was changed.
+func (s *Store) SetWorkPublic(ctx context.Context, id ulid.ULID, public bool, by string) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE works w SET public = $2, public_by = $3
+		WHERE w.id = $1 AND (NOT $2 OR `+shareableWork+`)
+		  AND ($3 = '`+memory.PublicByOwner+`' OR w.public_by IS DISTINCT FROM '`+memory.PublicByOwner+`')`,
+		id.String(), public, by)
+	if err != nil {
+		return false, fmt.Errorf("set work public: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// PublicWorks returns up to limit of the newest works that are public.
+func (s *Store) PublicWorks(ctx context.Context, limit int) ([]memory.Work, error) {
+	return s.queryWorks(ctx, `SELECT `+workColumns+` FROM works w
+		WHERE w.public AND `+shareableWork+` ORDER BY w.created_at DESC, w.id DESC LIMIT $1`, limit)
+}
+
+// PublicWork returns the work with id if it is public, and whether it is.
+func (s *Store) PublicWork(ctx context.Context, id ulid.ULID) (memory.Work, bool, error) {
+	ws, err := s.queryWorks(ctx, `SELECT `+workColumns+` FROM works w
+		WHERE w.id = $1 AND w.public AND `+shareableWork, id.String())
+	if err != nil || len(ws) == 0 {
+		return memory.Work{}, false, err
+	}
+	return ws[0], true, nil
 }
 
 // IntentionWork returns the work made for an intention, and whether there is one.
@@ -585,7 +628,7 @@ func (s *Store) queryWorks(ctx context.Context, sql string, args ...any) ([]memo
 			id                     string
 			intentionID, projectID *string
 		)
-		if err := rows.Scan(&id, &intentionID, &projectID, &w.Kind, &w.Title, &w.Text, &w.CreatedAt); err != nil {
+		if err := rows.Scan(&id, &intentionID, &projectID, &w.Kind, &w.Title, &w.Text, &w.CreatedAt, &w.Public, &w.PublicBy); err != nil {
 			return nil, err
 		}
 		if w.ID, err = ulid.Parse(id); err != nil {

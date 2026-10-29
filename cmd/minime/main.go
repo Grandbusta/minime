@@ -12,6 +12,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"os"
@@ -25,6 +26,7 @@ import (
 
 	_ "time/tzdata" // time zones work without the system's database, e.g. in a slim container
 
+	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/errgroup"
 
 	"minime/internal/ability"
@@ -132,8 +134,15 @@ func run(args []string) error {
 		}
 		defer st.Close()
 		return printDay(ctx, st, zone, *date)
+	case "work":
+		st, err := store.Open(ctx, cfg.Database.URL)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		return works(ctx, st, fs.Args(), *limit, os.Stdout)
 	default:
-		return fmt.Errorf("unknown command %q (want run, decisions, profile or day)", cmd)
+		return fmt.Errorf("unknown command %q (want run, decisions, profile, day or work)", cmd)
 	}
 }
 
@@ -330,6 +339,57 @@ func updateProfile(ctx context.Context, cfg *config.Config, life self.Life, st *
 	return nil
 }
 
+// worksStore is what the work command needs.
+type worksStore interface {
+	RecentWorks(ctx context.Context, limit int) ([]memory.Work, error)
+	SetWorkPublic(ctx context.Context, id ulid.ULID, public bool, by string) (bool, error)
+}
+
+// works lists the newest works and whether each is on the profile page
+// (no args), or puts one on it or takes it off ("show <id>", "hide <id>"),
+// as the owner: the daily check never overrides that.
+func works(ctx context.Context, st worksStore, args []string, n int, out io.Writer) error {
+	if len(args) == 0 {
+		ws, err := st.RecentWorks(ctx, n)
+		if err != nil {
+			return err
+		}
+		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "ID\tMADE\tKIND\tPUBLIC\tTITLE")
+		for _, wk := range ws {
+			public := "undecided"
+			if wk.Public != nil {
+				public = map[bool]string{true: "yes", false: "no"}[*wk.Public] + " (" + wk.PublicBy + ")"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", wk.ID, wk.CreatedAt.Local().Format("2 Jan 15:04"), wk.Kind, public, wk.Title)
+		}
+		return w.Flush()
+	}
+	if len(args) != 2 || (args[0] != "show" && args[0] != "hide") {
+		return errors.New("usage: minime work [show|hide <id>]")
+	}
+	id, err := ulid.Parse(args[1])
+	if err != nil {
+		return fmt.Errorf("%q is not a work ID", args[1])
+	}
+	show := args[0] == "show"
+	changed, err := st.SetWorkPublic(ctx, id, show, memory.PublicByOwner)
+	if err != nil {
+		return err
+	}
+	switch {
+	case !changed && show:
+		return fmt.Errorf("work %s can't be shown: there's no such work, or it's the journal or something made for someone", id)
+	case !changed:
+		return fmt.Errorf("no work %s", id)
+	case show:
+		fmt.Fprintln(out, "It's on the profile page now.")
+	default:
+		fmt.Fprintln(out, "It's off the profile page, and stays off.")
+	}
+	return nil
+}
+
 // newProfileWriter builds what keeps the agent's profile page up to date.
 func newProfileWriter(cfg *config.Config, life self.Life, st *store.Store, s1 system1.DecisionModel,
 	s2 system2.Reasoner, sets map[string]questions.Set, log *slog.Logger) (*portfolio.Writer, error) {
@@ -339,6 +399,13 @@ func newProfileWriter(cfg *config.Config, life self.Life, st *store.Store, s1 sy
 	} else if err := checkFactTemplate(public); err != nil {
 		return nil, err
 	}
+	publicWork, ok := sets["public_work"]
+	if !ok {
+		log.Warn("question set public_work not found; no work goes on the profile page", "dir", cfg.Decision.QuestionSets)
+	} else if len(publicWork.Questions) != 1 || publicWork.Questions[0].Type != decision.QuestionPredicate ||
+		!strings.Contains(publicWork.Questions[0].Instructions, "{work}") {
+		return nil, fmt.Errorf("question set %s must be exactly one predicate whose instructions contain {work}", publicWork.Ref())
+	}
 	prompt, err := loadPrompt(cfg.Portfolio.Prompt)
 	if err != nil {
 		return nil, err
@@ -347,7 +414,7 @@ func newProfileWriter(cfg *config.Config, life self.Life, st *store.Store, s1 sy
 	if err != nil {
 		return nil, err
 	}
-	return &portfolio.Writer{Life: life, Store: st, System1: s1, System2: s2, Public: public,
+	return &portfolio.Writer{Life: life, Store: st, System1: s1, System2: s2, Public: public, PublicWork: publicWork,
 		Prompt: prompt, UpdateAt: at, Log: log}, nil
 }
 

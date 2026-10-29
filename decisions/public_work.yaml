@@ -1,0 +1,25 @@
+# Which of the agent's works (things it made: lyrics, beat ideas, notes on
+# what it read) may go on its public profile page? One yes/no question per
+# work: `{work}` is replaced by a path to the work in the state (`work`),
+# which has its title, kind and text. Its journal and what it made for
+# someone (a promise) are never asked about; they are never public.
+#
+# Each work is asked in its own call. Asked together like facts, a harmless
+# work right after a private one was dragged down with it (a beat idea 0.12,
+# notes on hooks 0.01; reversed, 0.95 and 0.84). Asked alone, a replay of 9
+# works (6 real, a diary-like entry, lyrics naming a real person, a beat
+# idea) got every one right, twice: harmless 0.88 to 0.96, private 0.01 to
+# 0.04. A wrong no only keeps a work off the page; a wrong yes publishes it,
+# hence the high threshold.
+id: public_work
+version: 1
+primary: public
+
+questions:
+  - name: public
+    type: predicate
+    instructions: "Would {agent} be comfortable with strangers reading {work} on a public portfolio? Yes for creative work and notes: lyrics, beat ideas, notes on music, books or things learned, short pieces. No if it is diary-like (private feelings, family or money troubles), sensitive, or names or describes a real private person so they could be recognised."
+
+thresholds:
+  act: 0.75 # at or above: the work may appear on the page
+  ask: 0.75 # unused

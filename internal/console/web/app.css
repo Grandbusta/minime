@@ -150,6 +150,36 @@ b { font-weight: 600; }
 .sw { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
 .sw.s1 { background: var(--s1); box-shadow: 0 0 6px var(--s1); } .sw.s2 { background: var(--s2); box-shadow: 0 0 6px var(--s2); }
 .sw.rx { background: var(--rx); } .sw.lf { background: var(--lf); box-shadow: 0 0 6px var(--lf); }
+/* replaying a decision chain over the brain */
+.replay { position: absolute; left: 12px; bottom: 10px; width: min(260px, calc(100% - 24px)); z-index: 3; padding: 10px 12px;
+  border: 1px solid rgba(124,255,107,.35); border-radius: 14px; background: rgba(4,8,9,.82); backdrop-filter: blur(10px);
+  box-shadow: 0 0 30px rgba(124,255,107,.12); font: 11px var(--mono); }
+.replay[hidden] { display: none; }
+.replay-h { display: flex; align-items: center; gap: 8px; color: var(--muted); letter-spacing: .08em; }
+.replay-h b { color: var(--accent); letter-spacing: .2em; }
+.replay-h button { margin-left: auto; color: var(--muted); font-size: 12px; }
+.replay-h button:hover { color: var(--ink); }
+.rec { width: 8px; height: 8px; border-radius: 50%; background: #ff5c5c; box-shadow: 0 0 10px #ff5c5c; animation: ping 1.4s ease-out infinite; }
+.replay.done .rec { background: var(--dim); box-shadow: none; animation: none; }
+.replay-what { margin: 6px 0; font: 500 12px var(--sans); color: var(--soft); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.replay-bar { height: 2px; background: var(--line); border-radius: 2px; overflow: hidden; margin-bottom: 8px; }
+.replay-bar i { display: block; height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 8px var(--accent); transition: width .4s ease; }
+.replay-steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; max-height: 150px; overflow: auto; }
+.replay-steps li { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: baseline; color: var(--dim); transition: color .3s; }
+.replay-steps li::before { content: ""; width: 7px; height: 7px; border-radius: 50%; border: 1px solid currentColor; }
+.replay-steps li.on { color: var(--ink); }
+.replay-steps li.on::before { background: var(--c); border-color: var(--c); box-shadow: 0 0 8px var(--c); }
+.replay-steps li.now { color: var(--accent); }
+.replay-steps li em { font-style: normal; color: var(--muted); }
+.replay-steps li .say { grid-column: 2 / 4; color: var(--soft); font: 11px var(--sans); white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.replay-again { margin-top: 8px; color: var(--accent); letter-spacing: .1em; }
+.sig .rp { position: absolute; right: 8px; bottom: 8px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; font: 9px var(--mono);
+  letter-spacing: .1em; color: var(--muted); opacity: 0; transition: opacity .2s; background: var(--bg); }
+.sig:hover .rp, .sig:focus-within .rp { opacity: 1; }
+.sig .rp:hover { color: var(--accent); border-color: var(--accent); }
+.drawer-replay { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 16px; padding: 7px 14px; border-radius: 999px;
+  border: 1px solid rgba(124,255,107,.4); color: var(--accent); font: 600 11px var(--mono); letter-spacing: .12em; }
+.drawer-replay:hover { background: rgba(124,255,107,.08); }
 .tip {
   position: absolute; pointer-events: none; opacity: 0; transition: opacity .15s; max-width: 260px; z-index: 3;
   padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(124,255,107,.35); background: rgba(4,7,9,.94);

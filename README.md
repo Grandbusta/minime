@@ -227,6 +227,22 @@ set -a; . ./.env; set +a; go run ./cmd/minime profile
 
 It rewrites the page only if there's something new to share; add `-force` to rewrite it anyway.
 
+The page also has a **Work** section: its newest public works (lyrics, beat ideas, reading
+notes…), a few lines each, and each on its own page at `/works/<id>` with the full text.
+At the same daily update, System 1 decides, work by work, whether each new one is fine to
+share ([decisions/public_work.yaml](decisions/public_work.yaml)). Its journal and anything it
+made for someone (a promise) are never public. This part of the page shows the works as
+they are, without rewriting anything. You have the last word:
+
+```bash
+set -a; . ./.env; set +a; go run ./cmd/minime work                 # its newest works, and which are public
+set -a; . ./.env; set +a; go run ./cmd/minime work hide <id>       # take one off the page, for good
+set -a; . ./.env; set +a; go run ./cmd/minime work show <id>       # put one on it
+```
+
+The daily check never overrides your choice. The console's Works view shows each work as
+public, private or undecided.
+
 Change where it's served and when it updates (`update_at`), or turn it off (`addr: ""`), under `portfolio:` in
 [configs/minime.yaml](configs/minime.yaml). Change how it writes the page in
 [prompts/profile.md](prompts/profile.md).
@@ -244,6 +260,12 @@ console that shows everything about the agent, live.
 - **Day:** what it planned on any day, what came of it, what it made, and its projects.
 - **Works:** everything it made, to read in full.
 - **Conversations:** your chats with it, including what it said first.
+
+**Replay:** any decision can be played back on the brain, step by step, with each part
+firing in order and the real timing between steps (gaps shortened to 4s at most): hover a
+signal in the feed and press ▶ REPLAY, or open a chain and press ▶ REPLAY ON THE BRAIN. Each
+replay has its own link, `http://127.0.0.1:8090/#replay/<decision id>`, which plays it as
+soon as the console opens, handy for recording.
 
 It only listens on localhost. To reach it from elsewhere (e.g. on the VPS), set `console.addr`
 in [configs/minime.yaml](configs/minime.yaml) and `CONSOLE_TOKEN` in `.env` (16+

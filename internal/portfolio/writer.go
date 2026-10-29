@@ -6,6 +6,11 @@
 // of thing people happily share in public (public_profile question set).
 // System 2 then writes the page in the agent's own voice from its life story
 // and those facts, and writes it again only when they change.
+//
+// Its works (lyrics, beat ideas, notes) are shared the same way: System 1
+// decides, work by work, whether each may be public (public_work), and the
+// page shows the public ones as they are, with no rewrite. Its journal and
+// what it made for someone are never public.
 package portfolio
 
 import (
@@ -53,11 +58,15 @@ type Store interface {
 	Profile(ctx context.Context) (page []byte, inputs string, at time.Time, ok bool, err error)
 	SaveProfile(ctx context.Context, page []byte, inputs string, at time.Time) error
 	SaveDecision(ctx context.Context, d decision.Decision) error
+	UndecidedPublicWorks(ctx context.Context, limit int) ([]memory.Work, error)
+	SetWorkPublic(ctx context.Context, id ulid.ULID, public bool, by string) (bool, error)
 }
 
 const (
-	factsPerCheck = 100 // undecided facts System 1 checks in one call
-	pageFacts     = 30  // public facts the page is written from, newest
+	factsPerCheck = 100  // undecided facts System 1 checks in one call
+	pageFacts     = 30   // public facts the page is written from, newest
+	worksPerCheck = 20   // undecided works System 1 checks in one update
+	workChars     = 2000 // of a work's text System 1 reads
 )
 
 // Writer keeps the page up to date: once a day at UpdateAt (UTC), and on
@@ -69,10 +78,13 @@ type Writer struct {
 	System2 system2.Reasoner
 	// Public is the public_profile set: a one-question template ({fact} marks
 	// where each fact goes). Zero value: no fact is ever public.
-	Public   questions.Set
-	Prompt   mind.Prompt   // how System 2 writes the page
-	UpdateAt time.Duration // time of day, from midnight UTC, e.g. 0 for 00:00
-	Log      *slog.Logger
+	Public questions.Set
+	// PublicWork is the public_work set: a one-question template ({work}
+	// marks the work). Zero value: no work is ever public.
+	PublicWork questions.Set
+	Prompt     mind.Prompt   // how System 2 writes the page
+	UpdateAt   time.Duration // time of day, from midnight UTC, e.g. 0 for 00:00
+	Log        *slog.Logger
 }
 
 func (w *Writer) Run(ctx context.Context) error {
@@ -117,6 +129,9 @@ func (w *Writer) refresh(ctx context.Context) {
 func (w *Writer) Update(ctx context.Context, force bool) (bool, error) {
 	if err := w.decidePublic(ctx); err != nil {
 		w.Log.Warn("deciding which facts are public failed; the page uses what was decided before", "err", err)
+	}
+	if err := w.decidePublicWorks(ctx); err != nil {
+		w.Log.Warn("deciding which works are public failed; the page shows what was decided before", "err", err)
 	}
 	return w.write(ctx, force)
 }
@@ -166,6 +181,60 @@ func (w *Writer) decidePublic(ctx context.Context) error {
 	}
 	w.finish(ctx, d, start, fmt.Sprintf("%d of %d facts may be public", public, len(facts)))
 	return nil
+}
+
+// decidePublicWorks has System 1 decide, for each of the agent's works not
+// decided yet (never its journal or what it made for someone), whether it may
+// go on the page. Each work is asked in its own call: asked together, a
+// harmless work next to a private one was dragged down with it. A refusal
+// counts as no; a work it couldn't ask about is asked again next time.
+func (w *Writer) decidePublicWorks(ctx context.Context) error {
+	if w.PublicWork.ID == "" {
+		return nil
+	}
+	works, err := w.Store.UndecidedPublicWorks(ctx, worksPerCheck)
+	if err != nil || len(works) == 0 {
+		return err
+	}
+	start := time.Now()
+	d := w.newDecision(start, decision.TierSystem1, w.PublicWork.Ref(), "decide_public_works")
+	d.Answers = map[string]decision.Answer{}
+	q := w.PublicWork.Questions[0]
+	q.Instructions = strings.NewReplacer("{work}", "`work`", "{agent}", w.Life.Name).Replace(q.Instructions)
+	public, asked := 0, 0
+	var failed error
+	for _, work := range works {
+		text := work.Text
+		if r := []rune(text); len(r) > workChars {
+			text = string(r[:workChars])
+		}
+		resp, err := w.System1.Decide(ctx, system1.Request{
+			State:     map[string]any{"work": map[string]string{"title": work.Title, "kind": work.Kind, "text": text}},
+			Questions: []system1.Question{q},
+		})
+		if err != nil {
+			failed = err
+			continue // asked again next time
+		}
+		d.Provider, d.CostUSD = resp.Provider, d.CostUSD+resp.CostUSD
+		a, ok := resp.Answers[q.Name]
+		if !ok {
+			continue
+		}
+		d.Answers[work.ID.String()] = a
+		asked++
+		yes := !a.Refused && a.Probability >= w.PublicWork.Thresholds.Act
+		if _, err := w.Store.SetWorkPublic(ctx, work.ID, yes, memory.PublicBySystem1); err != nil {
+			return err
+		}
+		if yes {
+			public++
+		}
+	}
+	if asked > 0 {
+		w.finish(ctx, d, start, fmt.Sprintf("%d of %d works may be public", public, asked))
+	}
+	return failed
 }
 
 // write has System 2 write the page from the life story and the public facts,

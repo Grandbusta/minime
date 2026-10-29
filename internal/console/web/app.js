@@ -39,7 +39,7 @@ const ACTIONS = {
   small_talk: "small talk", other: "other", continue: "continued a thread", ask: "fairly sure → System 2",
   escalate: "unsure → System 2", reply: "replied", recall: "recalled facts", recall_all: "recalled everything",
   recall_open: "looked for open threads", check_in: "check-in", no_check_in: "nothing to check in on",
-  plan_day: "planned the day", activity: "did something", task: "made what it promised", deliver: "sent what it promised", decide_public: "chose what's public",
+  plan_day: "planned the day", activity: "did something", task: "made what it promised", deliver: "sent what it promised", decide_public: "chose what's public", decide_public_works: "chose public works",
   write_profile: "wrote the profile page", error: "error",
 };
 const actionText = (a) => ACTIONS[a] || a;
@@ -63,6 +63,7 @@ function pathFor(e) {
   if (a === "remind") return e.tier === "system2" ? ["clock", "intentions", "system2", "senses"] : ["senses", "system1", "router"];
   if (a === "check_in" || a === "no_check_in") return e.tier === "system2" ? ["clock", "system2", "senses"] : ["clock", "system1", "facts"];
   if (a === "decide_public") return ["facts", "system1", "profile"];
+  if (a === "decide_public_works") return ["life", "system1", "profile"];
   if (a === "write_profile") return ["facts", "system2", "profile"];
   if (["recall", "recall_open", "recall_all"].includes(a)) return ["router", "system1", "facts"];
   if (e.tier === "reflex") return ["senses", "router", "senses"];
@@ -438,7 +439,10 @@ const brain = (() => {
   build(); resize();
   new ResizeObserver(resize).observe(canvas);
   requestAnimationFrame(frame);
-  return { fire: (e) => { fire(e); pathFor(e).forEach((n) => (fires[n] = (fires[n] || 0) + 1)); } };
+  return {
+    fire: (e) => { fire(e); pathFor(e).forEach((n) => (fires[n] = (fires[n] || 0) + 1)); },
+    replay: fire, // a past decision: fired again, not counted
+  };
 })();
 
 /* ---------- EEG: its real activity over the last two hours ---------- */
@@ -540,8 +544,9 @@ function sigItem(e, isNew) {
   b.innerHTML = `<span class="n"></span>
     <div><div class="sig-top"><b>${esc(actionText(e.action))}</b><time>${fmtTime(e.at)}</time></div>
     <div class="sig-text" style="color:var(--soft)">${esc(text || setName(e.set))}</div>
-    <div class="sig-meta">${esc(setName(e.set))}${conf ? " · " + esc(conf) : ""} · ${money(e.cost_usd)} · ${e.latency_ms}ms</div></div>`;
-  b.onclick = () => openChain(e.id);
+    <div class="sig-meta">${esc(setName(e.set))}${conf ? " · " + esc(conf) : ""} · ${money(e.cost_usd)} · ${e.latency_ms}ms</div></div>
+    <span class="rp" role="button" tabindex="0" title="replay it on the brain">▶ REPLAY</span>`;
+  b.onclick = (ev) => (ev.target.closest(".rp") ? replay(e.id) : openChain(e.id));
   return b;
 }
 
@@ -834,13 +839,16 @@ $("#dayNext").onclick = () => { dayOffset = Math.min(0, dayOffset + 1); loadDay(
 /* ---------- works ---------- */
 
 let workFilter = "all", worksCache = [];
+// publicTag says whether a work is on its profile page, and who decided.
+const publicTag = (w) => w.public === true ? `<span class="tag pub" title="by ${esc(w.public_by)}">public</span>`
+  : w.public === false ? `<span class="tag priv" title="by ${esc(w.public_by)}">private</span>` : `<span class="tag">undecided</span>`;
 function workButton(w, cls) {
   const b = document.createElement("button"), col = kindColor(w.kind);
   b.className = cls;
   b.style.setProperty("--c", col);
   b.innerHTML = cls === "wk" ? `<b>${esc(w.title)}</b><span>${esc(w.kind)} · ${fmtTime(w.created_at)} · ${w.words} words</span>`
     : `<span class="kind">${esc(w.kind.replace("_", " "))}</span><h3>${esc(w.title)}</h3><p>${esc(w.excerpt || "")}</p>
-       <span class="when"><span>${fmtTime(w.created_at, true)}</span><span>${w.words} words</span></span>`;
+       <span class="when"><span>${fmtTime(w.created_at, true)}</span><span>${publicTag(w)} ${w.words} words</span></span>`;
   b.onclick = () => openWork(w.id);
   return b;
 }
@@ -859,7 +867,7 @@ function renderWorks() {
 async function openWork(id) {
   const w = await api("/api/works/" + id), col = kindColor(w.kind);
   openDrawer(w.kind.replace("_", " ").toUpperCase(), `<h2 style="margin:0 0 4px;font:600 24px var(--sans)">${esc(w.title)}</h2>
-    <div style="font:11px var(--mono);color:var(--muted);margin-bottom:18px"><span style="color:${col}">●</span> ${fmtTime(w.created_at, true)} · ${w.words} words</div>
+    <div style="font:11px var(--mono);color:var(--muted);margin-bottom:18px"><span style="color:${col}">●</span> ${fmtTime(w.created_at, true)} · ${w.words} words · ${publicTag(w)}</div>
     <div class="reader">${esc(w.text)}</div>`);
 }
 
@@ -915,8 +923,52 @@ async function openChain(id) {
       <div class="meta">${esc(e.tier)} · ${esc(e.set)} · ${esc(e.provider || "no model")} · ${e.latency_ms}ms · ${money(e.cost_usd)}${e.outcome ? " · " + esc(e.outcome.status) + (e.outcome.detail ? ": " + esc(e.outcome.detail) : "") : ""}</div>
       ${answersHTML(e)}${e.reply ? `<div class="quote">${esc(e.reply)}</div>` : ""}</div>`;
   }
-  openDrawer("DECISION CHAIN", html);
+  openDrawer("DECISION CHAIN", `<button class="drawer-replay" id="drawerReplay">▶ REPLAY ON THE BRAIN</button>` + html);
+  $("#drawerReplay").onclick = () => replay(id);
 }
+
+/* ---------- replay: a past decision chain, fired again on the brain ---------- */
+
+// Each step fires when it happened, relative to the first: real timing, but
+// a long wait is shortened and a short one stretched so every impulse shows.
+const REPLAY_MIN_MS = 1700, REPLAY_MAX_MS = 4000;
+let replayRun = 0;
+async function replay(id) {
+  const chain = await api("/api/chain/" + id);
+  if (!chain.length) return;
+  closeDrawer();
+  if (view !== "mind") show("mind");
+  $(".brain-card").scrollIntoView({ behavior: "smooth", block: "center" });
+  const run = ++replayRun, first = chain[0], panel = $("#replay");
+  panel.hidden = false;
+  panel.classList.remove("done");
+  $("#replayAgain").hidden = true;
+  $("#replayWhen").textContent = fmtTime(first.at, true);
+  $("#replayWhat").textContent = first.text || (["reminder", "check_in", "delivery"].includes(first.kind) ? "It spoke first" : actionText(first.action));
+  $("#replaySteps").innerHTML = chain.map((e) => `<li style="--c:${FAMILY_COLOR[family(e)]}"><span>${esc(actionText(e.action))}</span>
+    <em>${e.latency_ms >= 1000 ? (e.latency_ms / 1000).toFixed(1) + "s" : e.latency_ms + "ms"}</em>${e.reply ? `<span class="say">${esc(e.reply)}</span>` : ""}</li>`).join("");
+  $("#replayBar").style.width = "0";
+  const steps = [...$("#replaySteps").children];
+  await new Promise((r) => setTimeout(r, 700)); // let the view settle first
+  for (let i = 0; i < chain.length; i++) {
+    if (run !== replayRun) return; // stopped, or another replay started
+    const e = chain[i];
+    brain.replay(e);
+    steps.forEach((s, k) => { s.classList.toggle("on", k <= i); s.classList.toggle("now", k === i); });
+    steps[i].scrollIntoView({ block: "nearest" });
+    $("#replayBar").style.width = ((i + 1) / chain.length) * 100 + "%";
+    const next = chain[i + 1];
+    const gap = next ? new Date(next.at) - new Date(e.at) : e.latency_ms;
+    await new Promise((r) => setTimeout(r, Math.min(REPLAY_MAX_MS, Math.max(REPLAY_MIN_MS, gap))));
+  }
+  if (run !== replayRun) return;
+  steps.forEach((s) => s.classList.remove("now"));
+  panel.classList.add("done");
+  $("#replayAgain").hidden = false;
+  $("#replayAgain").onclick = () => replay(id);
+  if (location.hash !== "#replay/" + id) history.replaceState(null, "", "#replay/" + id);
+}
+$("#replayStop").onclick = () => { replayRun++; $("#replay").hidden = true; history.replaceState(null, "", "#" + view); };
 
 function openDrawer(title, html) {
   $("#drawerTitle").textContent = title;
@@ -969,7 +1021,11 @@ function connect() {
   });
 }
 
-const start = (location.hash || "#mind").slice(1);
-loadOverview().then(() => show(start in LOADERS ? start : "mind")).catch(console.error);
+// #replay/<decision id> opens the mind and replays that decision's chain: a link to share or record.
+const start = (location.hash || "#mind").slice(1), replayID = start.startsWith("replay/") ? start.slice(7) : "";
+loadOverview().then(() => {
+  show(start in LOADERS ? start : "mind");
+  if (replayID) replay(replayID).catch(console.error);
+}).catch(console.error);
 connect();
 setInterval(() => loadOverview().catch(() => {}), 30000);

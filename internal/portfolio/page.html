@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Name}}</title>
-{{with .Page}}<meta name="description" content="{{.Tagline}}">{{end}}
+<title>{{with .Work}}{{.Title}} · {{end}}{{.Name}}</title>
+{{if .Work}}<meta name="description" content="{{.Work.Excerpt}}">{{else}}{{with .Page}}<meta name="description" content="{{.Tagline}}">{{end}}{{end}}
 <style>
   :root {
     --bg: #faf7f2; --card: #ffffff; --ink: #1f1b16; --muted: #6b6259; --line: #ebe4da;
@@ -30,6 +30,7 @@
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     box-shadow: 0 6px 20px rgb(224 102 47 / 25%);
   }
+  .h1 { margin: 0; font-size: 22px; }
   h1 { margin: 0; font-size: 34px; line-height: 1.15; letter-spacing: -0.02em; }
   .tagline { margin: 6px 0 0; color: var(--muted); font-size: 18px; }
   section { margin-top: 36px; }
@@ -47,6 +48,23 @@
     border-radius: 50%; background: var(--accent-2);
   }
   .empty { color: var(--muted); }
+  a { color: inherit; }
+  .works { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+  .works a {
+    display: block; text-decoration: none; background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px 18px; transition: border-color .15s, transform .15s;
+  }
+  .works a:hover, .works a:focus-visible { border-color: var(--accent); transform: translateY(-1px); }
+  .works h3 { margin: 0; font-size: 18px; line-height: 1.3; }
+  .meta { margin: 2px 0 8px; color: var(--muted); font-size: 14px; }
+  .meta .kind { color: var(--chip-ink); background: var(--chip); border-radius: 999px; padding: 1px 10px; margin-right: 8px; font-size: 13px; }
+  .excerpt { margin: 0; color: var(--muted); white-space: pre-line; font-size: 16px; }
+  .more { display: inline-block; margin-top: 8px; color: var(--accent); font-size: 15px; font-weight: 600; }
+  .back { display: inline-block; margin-bottom: 28px; color: var(--accent); text-decoration: none; font-weight: 600; font-size: 15px; }
+  .home { text-decoration: none; }
+  article h1 { font-size: 30px; }
+  article .meta { margin: 8px 0 28px; }
+  .text { white-space: pre-line; overflow-wrap: anywhere; }
   footer {
     margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line);
     color: var(--muted); font-size: 14px; line-height: 1.55;
@@ -62,13 +80,21 @@
 <body>
 <main>
   <header>
-    <div class="avatar" aria-hidden="true">{{.Initial}}</div>
+    <a class="avatar home" href="/" aria-hidden="true" tabindex="-1">{{.Initial}}</a>
     <div>
-      <h1>{{.Name}}</h1>
+      {{if .Work}}<p class="h1"><a class="home" href="/"><strong>{{.Name}}</strong></a></p>{{else}}<h1>{{.Name}}</h1>{{end}}
       {{with .Page}}{{if .Tagline}}<p class="tagline">{{.Tagline}}</p>{{end}}{{end}}
     </div>
   </header>
 
+  {{with .Work}}
+  <a class="back" href="/">← All of {{$.Name}}</a>
+  <article>
+    <h1>{{.Title}}</h1>
+    <p class="meta"><span class="kind">{{.Kind}}</span>{{.Date}}</p>
+    <div class="text">{{.Text}}</div>
+  </article>
+  {{else}}
   {{with .Page}}
   <section>
     <h2>About</h2>
@@ -97,6 +123,22 @@
   {{end}}
   {{else}}
   <p class="empty">{{.Name}} hasn't written this page yet. Check back soon.</p>
+  {{end}}
+
+  {{if .Works}}
+  <section>
+    <h2>Work</h2>
+    <ul class="works">
+      {{range .Works}}<li><a href="/works/{{.ID}}">
+        <h3>{{.Title}}</h3>
+        <p class="meta"><span class="kind">{{.Kind}}</span>{{.Date}}</p>
+        <p class="excerpt">{{.Excerpt}}</p>
+        <span class="more">Read it →</span>
+      </a></li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
   {{end}}
 
   <footer>

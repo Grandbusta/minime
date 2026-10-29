@@ -29,6 +29,46 @@ type fakeStore struct {
 	inputs    string
 	at        time.Time
 	decisions []decision.Decision
+	works     []memory.Work // all eligible: the store leaves out the journal and promises
+}
+
+func (s *fakeStore) UndecidedPublicWorks(_ context.Context, limit int) ([]memory.Work, error) {
+	var out []memory.Work
+	for _, w := range s.works {
+		if w.Public == nil && len(out) < limit {
+			out = append(out, w)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) SetWorkPublic(_ context.Context, id ulid.ULID, public bool, by string) (bool, error) {
+	for i := range s.works {
+		if s.works[i].ID == id {
+			s.works[i].Public, s.works[i].PublicBy = &public, by
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *fakeStore) PublicWorks(_ context.Context, limit int) ([]memory.Work, error) {
+	var out []memory.Work
+	for n := len(s.works) - 1; n >= 0 && len(out) < limit; n-- {
+		if w := s.works[n]; w.Public != nil && *w.Public {
+			out = append(out, w)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) PublicWork(_ context.Context, id ulid.ULID) (memory.Work, bool, error) {
+	for _, w := range s.works {
+		if w.ID == id && w.Public != nil && *w.Public {
+			return w, true, nil
+		}
+	}
+	return memory.Work{}, false, nil
 }
 
 func (s *fakeStore) UndecidedPublicFacts(_ context.Context, limit int) ([]memory.Fact, error) {
@@ -71,7 +111,7 @@ func (s *fakeStore) SaveDecision(_ context.Context, d decision.Decision) error {
 }
 
 // fakeS1 answers each question with the probability keyed by the fact text
-// it points at; a missing text is refused.
+// it points at, or the title of the work; a missing one is refused.
 type fakeS1 struct {
 	probs map[string]float64
 	reqs  []system1.Request
@@ -79,8 +119,13 @@ type fakeS1 struct {
 
 func (f *fakeS1) Decide(_ context.Context, req system1.Request) (system1.Response, error) {
 	f.reqs = append(f.reqs, req)
-	texts := req.State.(map[string]any)["facts"].([]string)
 	answers := map[string]decision.Answer{}
+	if work, ok := req.State.(map[string]any)["work"].(map[string]string); ok {
+		p, ok := f.probs[work["title"]]
+		answers[req.Questions[0].Name] = decision.Answer{Type: decision.QuestionPredicate, Probability: p, Refused: !ok}
+		return system1.Response{Provider: "fake/s1", Answers: answers, CostUSD: 0.0001}, nil
+	}
+	texts := req.State.(map[string]any)["facts"].([]string)
 	for i, q := range req.Questions {
 		p, ok := f.probs[texts[i]]
 		answers[q.Name] = decision.Answer{Type: decision.QuestionPredicate, Probability: p, Refused: !ok}
@@ -274,5 +319,110 @@ func TestUpdateForceRewritesUnchangedPage(t *testing.T) {
 	}
 	if len(s2.reqs) != 2 {
 		t.Errorf("system 2 wrote %d times, want 2", len(s2.reqs))
+	}
+}
+
+var testPublicWork = questions.Set{ID: "public_work", Version: 1, Primary: "public",
+	Questions:  []system1.Question{{Name: "public", Type: decision.QuestionPredicate, Instructions: "Would {agent} share {work}?"}},
+	Thresholds: questions.Thresholds{Act: 0.75, Ask: 0.75}}
+
+func work(kind, title, text string, day int) memory.Work {
+	return memory.Work{ID: ulid.Make(), Kind: kind, Title: title, Text: text, CreatedAt: time.Date(2026, 10, day, 18, 0, 0, 0, time.UTC)}
+}
+
+func TestUpdateDecidesWhichWorksArePublic(t *testing.T) {
+	beat, diary, refused := work("beat_idea", "Harmattan Groove", "92 BPM, A minor.", 27),
+		work("writing", "A hard week", "Dad has been quiet.", 28), work("lyrics", "Odd one", "...", 29)
+	st := &fakeStore{public: map[ulid.ULID]bool{}, works: []memory.Work{beat, diary, refused}, page: []byte(pageJSON)}
+	s1 := &fakeS1{probs: map[string]float64{beat.Title: 0.94, diary.Title: 0.04}}
+	w := newWriter(st, s1, &fakeS2{out: pageJSON})
+	w.PublicWork = testPublicWork
+
+	if _, err := w.Update(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if len(s1.reqs) != 3 {
+		t.Fatalf("system 1 requests = %d, want one per work", len(s1.reqs))
+	}
+	if q := s1.reqs[0].Questions[0].Instructions; q != "Would Tobi share `work`?" {
+		t.Errorf("question = %q", q)
+	}
+	want := map[string]bool{beat.Title: true, diary.Title: false, refused.Title: false}
+	for _, wk := range st.works {
+		if wk.Public == nil || *wk.Public != want[wk.Title] || wk.PublicBy != memory.PublicBySystem1 {
+			t.Errorf("%s: public %v by %q", wk.Title, wk.Public, wk.PublicBy)
+		}
+	}
+	var d decision.Decision
+	for _, dd := range st.decisions {
+		if dd.Action == "decide_public_works" {
+			d = dd
+		}
+	}
+	if d.Outcome == nil || len(d.Answers) != 3 || !strings.Contains(d.Outcome.Detail, "1 of 3 works") {
+		t.Errorf("decision = %+v", d)
+	}
+
+	// Decided works aren't asked about again.
+	if _, err := w.Update(context.Background(), false); err != nil || len(s1.reqs) != 3 {
+		t.Errorf("asked again: %d requests, %v", len(s1.reqs), err)
+	}
+}
+
+func TestHandlerShowsPublicWorks(t *testing.T) {
+	yes, no := true, false
+	lyrics := work("lyrics", "Lagos Rain", "Rain on the danfo roof\nhorns in the street\n\nwe dance anyway\nline four\nline five", 27)
+	lyrics.Public = &yes
+	beat := work("beat_idea", "Harmattan <Groove>", "92 BPM, A minor.", 28)
+	beat.Public = &yes
+	hidden := work("notes", "Private notes", "not for you", 29)
+	hidden.Public = &no
+	st := &fakeStore{page: []byte(pageJSON), at: time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC), works: []memory.Work{lyrics, beat, hidden}}
+	srv := httptest.NewServer(Handler("Tobi", st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer srv.Close()
+	get := func(path string) (int, string) {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(body)
+	}
+
+	_, html := get("/")
+	for _, want := range []string{"<h2>Work</h2>", `href="/works/` + lyrics.ID.String() + `"`, "Lagos Rain", "beat idea",
+		"Harmattan &lt;Groove&gt;", "28 October 2026", "Rain on the danfo roof\nhorns in the street\nwe dance anyway\nline four…"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("page is missing %q", want)
+		}
+	}
+	if strings.Contains(html, "Private notes") || strings.Index(html, "Harmattan") > strings.Index(html, "Lagos Rain") {
+		t.Error("shows a hidden work, or not newest first")
+	}
+
+	status, html := get("/works/" + lyrics.ID.String())
+	if status != http.StatusOK || !strings.Contains(html, "<h1>Lagos Rain</h1>") || !strings.Contains(html, "line five") ||
+		!strings.Contains(html, "<title>Lagos Rain · Tobi</title>") || !strings.Contains(html, `href="/"`) {
+		t.Errorf("work page: %d\n%s", status, html)
+	}
+	for _, path := range []string{"/works/" + hidden.ID.String(), "/works/" + ulid.Make().String(), "/works/not-an-id"} {
+		if status, _ := get(path); status != http.StatusNotFound {
+			t.Errorf("%s = %d, want 404", path, status)
+		}
+	}
+}
+
+func TestNoWorksNoSection(t *testing.T) {
+	srv := httptest.NewServer(Handler("Tobi", &fakeStore{page: []byte(pageJSON)}, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if strings.Contains(string(body), "<h2>Work</h2>") {
+		t.Error("an empty Work section was shown")
 	}
 }

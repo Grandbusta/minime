@@ -678,8 +678,13 @@ everything it says it read or made exists, so its profile's Work section is hone
   at the 17:50 tick. Splitting a
   promise into steps over days is for later.
 - **Evening journal:** a short look back, which also feeds the next morning's plan.
-- **On its profile:** "Lately" fills from its public facts; a new **Work** section shows
-  finished works that System 1 decides are public (like facts, `public_profile`).
+- **On its profile** (✅): "Lately" fills from its public facts; a **Work** section shows its
+  newest public works, a few lines each, each with its own page (`/works/{id}`). At the
+  daily update System 1 decides on each new work (`public_work`, one call per work: asked
+  together, a harmless work next to a private one was dragged down with it). The journal
+  and works made for someone are never public, enforced in the store's queries.
+  `works.public_by` records who decided; the owner's `minime work show/hide` is never
+  overridden. The section is read straight from the store, with no System 2 rewrite.
 - **Web search: not needed yet.** Gutenberg (its OPDS catalogue search) and Wikipedia have their own
   free search and text APIs, so a plain HTTP client covers step 6.2, and an allow-list keeps
   out pages written to manipulate it. A search provider comes only when it must find things on
@@ -794,7 +799,8 @@ mini-me/
       Wikipedia, books read a passage at a time with progress kept per project. Reading and
       the journal are abilities (`internal/ability`), so new ones (web search) plug in.
    3. ✅ Promises from chat: commitments become `task` intentions, made and delivered when due.
-   4. Work on its profile: a Work section from the works it decides are public.
+   4. ✅ Work on its profile: a Work section from the works it decides are public, each on its
+      own page; the owner can hide or show any with `minime work`.
    - Later: the same machinery takes jobs from other sources (chat, email, a job board); audio
      for its music is TBD.
 7. **Autonomy gate:**

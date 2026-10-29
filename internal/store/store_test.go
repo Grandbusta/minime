@@ -567,3 +567,85 @@ func TestSourcesAndReadingProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPublicWorks(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Microsecond).AddDate(0, 0, -400) // older than the other tests' works
+
+	own := memory.Intention{ID: ulid.Make(), Subject: memory.SubjectSelf, Kind: memory.IntentionActivity, Text: "write",
+		DueAt: base, Status: memory.IntentionDone, CreatedAt: base}
+	promise := memory.Intention{ID: ulid.Make(), Subject: "test:" + ulid.Make().String(), Kind: memory.IntentionTask, Text: "a poem for them",
+		DueAt: base, Status: memory.IntentionDone, CreatedAt: base}
+	for _, i := range []memory.Intention{own, promise} {
+		if err := s.SaveIntention(ctx, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	work := func(kind, title string, intention ulid.ULID, n int) memory.Work {
+		w := memory.Work{ID: ulid.Make(), IntentionID: intention, Kind: kind, Title: title, Text: "...", CreatedAt: base.Add(time.Duration(n) * time.Minute)}
+		if err := s.SaveWork(ctx, w); err != nil {
+			t.Fatal(err)
+		}
+		return w
+	}
+	lyrics := work("lyrics", "Lagos Rain", own.ID, 0)
+	notes := work("notes", "On rhythm", ulid.ULID{}, 1)
+	journal := work("journal", "29 Oct", own.ID, 2)
+	forThem := work("writing", "NEPA Took the Light", promise.ID, 3)
+
+	undecided, err := s.UndecidedPublicWorks(ctx, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[ulid.ULID]bool{}
+	for _, w := range undecided {
+		ids[w.ID] = true
+	}
+	if !ids[lyrics.ID] || !ids[notes.ID] || ids[journal.ID] || ids[forThem.ID] {
+		t.Errorf("undecided = %v; want only its own works, not the journal or the promise", ids)
+	}
+
+	set := func(id ulid.ULID, public bool, by string) bool {
+		ok, err := s.SetWorkPublic(ctx, id, public, by)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	if !set(lyrics.ID, true, memory.PublicBySystem1) || !set(notes.ID, true, memory.PublicBySystem1) {
+		t.Fatal("couldn't make its own works public")
+	}
+	if set(journal.ID, true, memory.PublicByOwner) || set(forThem.ID, true, memory.PublicByOwner) {
+		t.Error("made the journal or a promise public")
+	}
+	// The owner hides the notes; the daily check can't bring them back.
+	if !set(notes.ID, false, memory.PublicByOwner) || set(notes.ID, true, memory.PublicBySystem1) {
+		t.Error("the owner's choice was overridden")
+	}
+
+	ws, err := s.PublicWorks(ctx, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mine []memory.Work
+	for _, w := range ws {
+		if w.ID == lyrics.ID || w.ID == notes.ID || w.ID == journal.ID || w.ID == forThem.ID {
+			mine = append(mine, w)
+		}
+	}
+	if len(mine) != 1 || mine[0].ID != lyrics.ID || mine[0].Public == nil || !*mine[0].Public || mine[0].PublicBy != memory.PublicBySystem1 {
+		t.Errorf("public works = %+v", mine)
+	}
+	if _, ok, err := s.PublicWork(ctx, lyrics.ID); err != nil || !ok {
+		t.Errorf("public work: %v, %v", ok, err)
+	}
+	for _, id := range []ulid.ULID{notes.ID, journal.ID, forThem.ID, ulid.Make()} {
+		if _, ok, err := s.PublicWork(ctx, id); err != nil || ok {
+			t.Errorf("%s is public: %v, %v", id, ok, err)
+		}
+	}
+	if w, ok, _ := s.Work(ctx, notes.ID); !ok || w.Public == nil || *w.Public || w.PublicBy != memory.PublicByOwner {
+		t.Errorf("hidden work = %+v", w)
+	}
+}

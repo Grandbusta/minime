@@ -146,7 +146,15 @@ type Work struct {
 	Title       string
 	Text        string
 	CreatedAt   time.Time
+	Public      *bool  // whether it may go on its public page; nil until decided
+	PublicBy    string // who decided: PublicBySystem1 or PublicByOwner; "" until decided
 }
+
+// Who decided whether a work is public.
+const (
+	PublicBySystem1 = "system1" // the daily check (public_work question set)
+	PublicByOwner   = "owner"   // its owner, which the daily check never overrides
+)
 
 // Conversation is where the agent last talked with a person, so it can
 // message them first.

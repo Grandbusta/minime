@@ -72,7 +72,15 @@
         <div class="card brain-card">
           <div class="card-h">NEURAL MAP <span class="muted">· the parts of its mind, firing as it decides</span>
             <span class="hud-tag">LIVE · SIDE VIEW</span></div>
-          <div class="brain-wrap"><canvas id="brain"></canvas><div class="tip" id="tip"></div></div>
+          <div class="brain-wrap"><canvas id="brain"></canvas><div class="tip" id="tip"></div>
+            <div class="replay" id="replay" hidden>
+              <div class="replay-h"><span class="rec"></span><b>REPLAY</b><span id="replayWhen"></span><button id="replayStop" aria-label="stop the replay">✕</button></div>
+              <div class="replay-what" id="replayWhat"></div>
+              <div class="replay-bar"><i id="replayBar"></i></div>
+              <ol class="replay-steps" id="replaySteps"></ol>
+              <button class="replay-again" id="replayAgain" hidden>↻ Replay again</button>
+            </div>
+          </div>
           <div class="eeg-wrap">
             <div class="eeg-h"><span>NEURAL ACTIVITY</span><span class="muted">last 2h · each spike is a decision</span></div>
             <canvas id="eeg"></canvas>

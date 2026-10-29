@@ -427,7 +427,7 @@ func workViews(ws []memory.Work, withText bool) []map[string]any {
 	out := make([]map[string]any, len(ws))
 	for i, w := range ws {
 		v := map[string]any{"id": w.ID.String(), "kind": w.Kind, "title": w.Title, "created_at": w.CreatedAt,
-			"words": wordCount(w.Text)}
+			"words": wordCount(w.Text), "public": w.Public, "public_by": w.PublicBy}
 		if !w.ProjectID.IsZero() {
 			v["project_id"] = w.ProjectID.String()
 		}
