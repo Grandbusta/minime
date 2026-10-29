@@ -309,6 +309,34 @@ b { font-weight: 600; }
 .review p { margin: 0; font-size: 13px; color: var(--soft); white-space: pre-line; }
 @media (max-width: 1100px) { .growth-grid { grid-template-columns: 1fr; } }
 
+/* ---------- judgment: principles and the owner's decisions ---------- */
+.jlist { display: grid; gap: 12px; }
+.jp, .jcase { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: rgba(0,0,0,.25); }
+.jp { border-color: rgba(255,195,92,.3); background: rgba(255,195,92,.04); }
+.jp.st-approved, .jcase.st-approved { border-color: rgba(124,255,107,.35); background: rgba(124,255,107,.04); }
+.jp.st-rejected, .jcase.st-rejected { opacity: .5; }
+.jtop { display: flex; justify-content: space-between; gap: 10px; font: 10px var(--mono); color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+.jtop b { color: var(--lf); font-weight: 500; }
+.st-approved > .jtop span { color: var(--accent); }
+.jp h3 { margin: 6px 0 0; font: 600 15px var(--sans); line-height: 1.4; color: var(--ink); }
+.jsit { margin: 6px 0 0; font-size: 13px; color: var(--soft); }
+.jopts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.jopts span { font: 10px var(--mono); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.jopts span.picked { color: var(--accent); border-color: rgba(124,255,107,.45); }
+.jchoice { margin: 6px 0 0; font-size: 13px; color: var(--ink); }
+.jreason { margin: 4px 0 0; font-size: 12px; color: var(--soft); font-style: italic; }
+.jreason.none { color: var(--dim); font-style: normal; font-family: var(--mono); font-size: 10px; }
+.jbtns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.jb { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.jb:hover { color: var(--ink); border-color: rgba(255,255,255,.25); }
+.jb-approved { color: var(--accent); border-color: rgba(124,255,107,.45); }
+.jb-rejected:hover { color: var(--bad); border-color: rgba(255,107,139,.45); }
+.jedit textarea { width: 100%; margin-top: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(124,255,107,.35); background: rgba(0,0,0,.4);
+  color: var(--ink); font: 13px/1.45 var(--sans); resize: vertical; }
+.jp details { margin-top: 10px; }
+.jp summary { cursor: pointer; font: 10px var(--mono); color: var(--muted); letter-spacing: .06em; }
+.jp details .jcase { margin-top: 8px; background: rgba(0,0,0,.3); }
+
 /* ---------- activity: chains of neurons ---------- */
 .chains { display: grid; gap: 10px; }
 .chain {

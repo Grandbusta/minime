@@ -3,6 +3,9 @@
 # Who the agent is: its name and life story, written by you.
 self:
   life: self/life.yaml
+  # How you decide, for it to learn to decide like you (optional). Seeded as
+  # proposed: you approve, edit or reject each in the console's Judgment view.
+  judgment: self/judgment.yaml
 
 database:
   url: ${DATABASE_URL}

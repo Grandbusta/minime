@@ -1002,3 +1002,74 @@ func TestWeb(t *testing.T) {
 		t.Errorf("pages = %d, %v", n, err)
 	}
 }
+
+func TestJudgment(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	tag := ulid.Make().String() // keys and seed texts unique to this run
+	cases := []memory.JudgmentCase{
+		{ID: ulid.Make(), Key: "tiny-" + tag, Type: "general", Situation: "What to build first.", Options: []string{"all", "tiny"},
+			Choice: "tiny", Reason: "build on it", Status: memory.JudgmentProposed, Source: memory.JudgmentFromSeed, At: now},
+		{ID: ulid.Make(), Key: "ask-" + tag, Type: "autonomy", Situation: "Who approves.", Choice: "the owner",
+			Status: memory.JudgmentProposed, Source: memory.JudgmentFromSeed, At: now.Add(time.Second)},
+	}
+	p := memory.Principle{ID: ulid.Make(), Text: "Start small " + tag, Seed: "Start small " + tag, Types: []string{"general"},
+		Cases: []string{"tiny-" + tag}, Status: memory.JudgmentProposed, Source: memory.JudgmentFromSeed, CreatedAt: now}
+	if nc, np, err := s.SeedJudgment(ctx, cases, []memory.Principle{p}); err != nil || nc != 2 || np != 1 {
+		t.Fatalf("seed = %d cases, %d principles, %v", nc, np, err)
+	}
+	// Edited and seeded again: nothing new, and the edit stays.
+	if ok, err := s.ReviewPrinciple(ctx, p.ID, memory.JudgmentApproved, "Start small, then grow "+tag, now); err != nil || !ok {
+		t.Fatalf("review = %v, %v", ok, err)
+	}
+	again := p
+	again.ID = ulid.Make()
+	cases[0].ID, cases[1].ID = ulid.Make(), ulid.Make()
+	if nc, np, err := s.SeedJudgment(ctx, cases, []memory.Principle{again}); err != nil || nc != 0 || np != 0 {
+		t.Fatalf("seed again = %d cases, %d principles, %v", nc, np, err)
+	}
+	ps, err := s.Principles(ctx, memory.JudgmentApproved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *memory.Principle
+	for i := range ps {
+		if ps[i].ID == p.ID {
+			got = &ps[i]
+		}
+	}
+	if got == nil || got.Text != "Start small, then grow "+tag || len(got.Cases) != 1 || got.Cases[0] != "tiny-"+tag {
+		t.Errorf("principle = %+v", got)
+	}
+	cs, err := s.JudgmentCases(ctx, memory.JudgmentProposed, []string{"autonomy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ask *memory.JudgmentCase
+	for i := range cs {
+		if cs[i].Type != "autonomy" {
+			t.Errorf("case of type %s; want only autonomy", cs[i].Type)
+		}
+		if cs[i].Key == "ask-"+tag {
+			ask = &cs[i]
+		}
+	}
+	if ask == nil || ask.Reason != "" || len(ask.Options) != 0 {
+		t.Fatalf("ask case = %+v", ask)
+	}
+	if ok, err := s.ReviewCase(ctx, ask.ID, memory.JudgmentApproved, "silence isn't consent", now); err != nil || !ok {
+		t.Fatalf("review case = %v, %v", ok, err)
+	}
+	cs, _ = s.JudgmentCases(ctx, memory.JudgmentApproved, nil)
+	found := false
+	for _, c := range cs {
+		found = found || (c.Key == "ask-"+tag && c.Reason == "silence isn't consent")
+	}
+	if !found {
+		t.Error("the reviewed case isn't approved with its reason")
+	}
+	if ok, _ := s.ReviewCase(ctx, ulid.Make(), memory.JudgmentApproved, "", now); ok {
+		t.Error("reviewed a case that doesn't exist")
+	}
+}

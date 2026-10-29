@@ -50,6 +50,7 @@ own person, clone it and change these files; then follow [Run locally](#run-loca
 | File | What you change |
 |---|---|
 | [self/life.yaml](self/life.yaml) | **Who they are:** `name`, `story` (their life, one fact per line, third person), `personality` (how they are with people), `routine` (how their days go), `makes` (what they make in their own day), `dreams` (who they want to become), `skills` (what they're good at, and where they start), `family` (who they're born knowing, including you). |
+| [self/judgment.yaml](self/judgment.yaml) | **How you decide** (optional): `cases` (decisions you made: the situation, the options, what you chose and why) and `principles` (the rules behind them), so they learn to decide like you. You review them in the console before they're used. |
 | [configs/minime.yaml](configs/minime.yaml) | **Where they live and what they can do:** `initiative.timezone` and `check_ins`, `daily_life` (when they plan and journal, a daily `budget_usd`, and `abilities`), `autonomy` (what they may do without asking you), the profile page and console addresses. |
 | `.env` (from [.env.example](.env.example)) | **Secrets and accounts:** the Telegram bot token and your Telegram user ID, the Postgres URL, the OpenAI key and model. |
 
@@ -335,6 +336,25 @@ set -a; . ./.env; set +a; go run ./cmd/minime growth   # dreams, goals, skills
 set -a; . ./.env; set +a; go run ./cmd/minime review   # run the weekly review now
 set -a; . ./.env; set +a; go run ./cmd/minime learn    # draft a learning plan for each skill goal without one
 ```
+
+### Learning your judgment
+
+So that it decides the way you would, it learns your judgment: decisions you made (cases:
+the situation, the options, what you chose and **why**) and the rules behind them
+(principles). [self/judgment.yaml](self/judgment.yaml) seeds them the first time it starts.
+Daniel's were drawn from Busta's decisions while building mini-me. Nothing in it is used
+yet: everything starts as *proposed*. In the console's **Judgment** view you approve, edit
+or reject each principle, and approve, reject or add your reason to each decision. Your
+reasons teach it most.
+
+Approved principles and a few of your past decisions go into how it plans its day, reviews
+its week and plans its learning, each with the kinds of decision that fit (`general`,
+`life`, `product`, `autonomy`; `engineering` waits for when it writes code). A principle
+seeded once isn't seeded again, so your edits and rejections stay. Add new ones to the file
+at any time; they come in as proposed on the next start.
+
+Next: it will predict what you'd choose on its own decisions and ask you on Telegram, and
+take over a kind of decision once it matches you on 18 of the last 20.
 
 ### Corrections and replay
 

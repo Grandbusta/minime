@@ -51,6 +51,8 @@ type fakeStore struct {
 	skills         []memory.Skill
 	evidence       []memory.Evidence // oldest first
 	lessons        []memory.Lesson
+	principles     []memory.Principle
+	cases          []memory.JudgmentCase
 	reviewAsked    map[ulid.ULID]time.Time
 	plans          []memory.LearningPlan
 	resources      []memory.Resource
@@ -1492,4 +1494,39 @@ func TestFailedReplyIsRecordedOnTheActingDecision(t *testing.T) {
 	if o := s.decisions[0].Outcome; o.Status != decision.OutcomeOK {
 		t.Fatalf("root outcome = %+v", o)
 	}
+}
+
+func (s *fakeStore) SeedJudgment(_ context.Context, cases []memory.JudgmentCase, ps []memory.Principle) (int, int, error) {
+	nc, np := 0, 0
+	for _, c := range cases {
+		if !slices.ContainsFunc(s.cases, func(x memory.JudgmentCase) bool { return x.Key == c.Key }) {
+			s.cases, nc = append(s.cases, c), nc+1
+		}
+	}
+	for _, p := range ps {
+		if !slices.ContainsFunc(s.principles, func(x memory.Principle) bool { return x.Seed == p.Seed }) {
+			s.principles, np = append(s.principles, p), np+1
+		}
+	}
+	return nc, np, nil
+}
+
+func (s *fakeStore) Principles(_ context.Context, status string) ([]memory.Principle, error) {
+	var out []memory.Principle
+	for _, p := range s.principles {
+		if status == "" || p.Status == status {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) JudgmentCases(_ context.Context, status string, types []string) ([]memory.JudgmentCase, error) {
+	var out []memory.JudgmentCase
+	for _, c := range s.cases {
+		if (status == "" || c.Status == status) && (len(types) == 0 || slices.Contains(types, c.Type)) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }

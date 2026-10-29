@@ -99,6 +99,7 @@ func (m *Mind) draftPlan(ctx context.Context, g memory.Goal, now time.Time) erro
 		}
 	}
 	fmt.Fprintf(&note, "\n\nWhat you can study with (resources must use one of these):\n%s", m.readingList())
+	note.WriteString(m.judgmentNote(ctx, learnJudgment))
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.lifeInstructions(m.Day.LearnPrompt),
 		Note:         note.String(),

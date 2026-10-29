@@ -188,6 +188,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 	}
 	fmt.Fprintf(&note, "\n\nWhat you can study with (for new resources):\n%s", m.readingList())
 	fmt.Fprintf(&note, "\n\nYou can have at most %d goals at a time, and %d dreams.", maxActiveGoals, maxActiveDreams)
+	note.WriteString(m.judgmentNote(ctx, reviewJudgment))
 
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.lifeInstructions(m.Day.ReviewPrompt),

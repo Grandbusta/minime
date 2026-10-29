@@ -126,3 +126,49 @@ func TestDreamsAndSkills(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadJudgment(t *testing.T) {
+	j, err := LoadJudgment(write(t, `
+principles:
+  - text: ' Start small. '
+    types: [general]
+    cases: [tiny]
+cases:
+  - key: tiny
+    type: general
+    situation: What to build first.
+    options: [all of it, ' the tiniest part ', '']
+    choice: the tiniest part
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(j.Principles) != 1 || j.Principles[0].Text != "Start small." || len(j.Cases) != 1 ||
+		len(j.Cases[0].Options) != 2 || j.Cases[0].Options[1] != "the tiniest part" || j.Cases[0].Reason != "" {
+		t.Errorf("judgment = %+v", j)
+	}
+	if j, err := LoadJudgment(filepath.Join(t.TempDir(), "none.yaml")); err != nil || len(j.Cases) != 0 {
+		t.Errorf("missing file = %+v, %v; want none", j, err)
+	}
+	for name, body := range map[string]string{
+		"unknown case":  "principles: [{text: a, cases: [nope]}]\n",
+		"bad type":      "cases: [{key: a, type: chores, situation: s, choice: c}]\n",
+		"no choice":     "cases: [{key: a, type: life, situation: s}]\n",
+		"twice":         "cases: [{key: a, type: life, situation: s, choice: c}, {key: a, type: life, situation: s, choice: c}]\n",
+		"unknown field": "cases: [{key: a, type: life, situation: s, choice: c, why: x}]\n",
+	} {
+		if _, err := LoadJudgment(write(t, body)); err == nil {
+			t.Errorf("%s: loaded; want an error", name)
+		}
+	}
+}
+
+func TestDanielsJudgment(t *testing.T) {
+	j, err := LoadJudgment("../../self/judgment.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(j.Principles) == 0 || len(j.Cases) == 0 {
+		t.Errorf("judgment = %d principles, %d cases", len(j.Principles), len(j.Cases))
+	}
+}

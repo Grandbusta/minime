@@ -936,6 +936,79 @@ async function loadGrowth() {
     : `<div class="empty">no review yet: it reviews its week on Sundays</div>`;
 }
 
+/* ---------- judgment: how the owner decides, for them to review ---------- */
+
+let judgment = null, jFilter = "proposed";
+const J_STATUS = { proposed: "to review", approved: "approved", rejected: "rejected", all: "all" };
+
+async function loadJudgment() {
+  judgment = await api("/api/judgment");
+  renderJudgment();
+}
+
+function jShown(x) { return jFilter === "all" || x.status === jFilter; }
+
+function jButtons(kind, x) {
+  const b = (status, label) => `<button data-kind="${kind}" data-id="${esc(x.id)}" data-status="${status}" class="jb jb-${status}">${label}</button>`;
+  const edit = `<button data-kind="${kind}" data-id="${esc(x.id)}" data-edit="1" class="jb">${kind === "principle" ? "edit" : x.reason ? "edit reason" : "add reason"}</button>`;
+  return `<div class="jbtns">${x.status !== "approved" ? b("approved", "approve") : ""}${edit}${x.status !== "rejected" ? b("rejected", "reject") : ""}${x.status !== "proposed" ? b("proposed", "undo") : ""}</div>`;
+}
+
+function caseHTML(c, compact) {
+  return `<div class="jcase st-${esc(c.status)}" data-key="${esc(c.key)}">
+    <div class="jtop"><b>${esc(c.type)}</b><span>${esc(J_STATUS[c.status] || c.status)}</span></div>
+    <p class="jsit">${esc(c.situation)}</p>
+    ${c.options.length ? `<div class="jopts">${c.options.map((o) => `<span class="${o === c.choice ? "picked" : ""}">${esc(o)}</span>`).join("")}</div>` : ""}
+    <p class="jchoice">→ ${esc(c.choice)}</p>
+    ${c.reason ? `<p class="jreason">“${esc(c.reason)}”</p>` : `<p class="jreason none">no reason given</p>`}
+    ${compact ? "" : jButtons("case", c)}</div>`;
+}
+
+function renderJudgment() {
+  if (!judgment) return;
+  const all = [...judgment.principles, ...judgment.cases];
+  const count = (s) => all.filter((x) => s === "all" || x.status === s).length;
+  $("#jFilter").innerHTML = Object.keys(J_STATUS).map((s) => `<button class="chip ${s === jFilter ? "on" : ""}" data-f="${s}">${J_STATUS[s]} · ${count(s)}</button>`).join("");
+  const byKey = Object.fromEntries(judgment.cases.map((c) => [c.key, c]));
+  const ps = judgment.principles.filter(jShown), cs = judgment.cases.filter(jShown);
+  $("#principles").innerHTML = ps.length ? ps.map((p) => `<div class="jp st-${esc(p.status)}">
+      <div class="jtop"><b>${p.types.map(esc).join(" · ") || "any decision"}</b><span>${esc(J_STATUS[p.status] || p.status)}${p.edited ? " · edited" : ""}</span></div>
+      <h3>${esc(p.text)}</h3>
+      ${jButtons("principle", p)}
+      ${p.cases.length ? `<details><summary>${p.cases.length} decision${p.cases.length > 1 ? "s" : ""} behind it</summary>
+        ${p.cases.map((k) => byKey[k] ? caseHTML(byKey[k], true) : "").join("")}</details>` : ""}
+    </div>`).join("") : `<div class="empty">${judgment.principles.length ? "nothing " + J_STATUS[jFilter] : "no principles yet: add some to self/judgment.yaml"}</div>`;
+  $("#cases").innerHTML = cs.length ? cs.map((c) => caseHTML(c, false)).join("")
+    : `<div class="empty">${judgment.cases.length ? "nothing " + J_STATUS[jFilter] : "no decisions yet: add some to self/judgment.yaml"}</div>`;
+}
+
+$("#jFilter").onclick = (e) => {
+  const b = e.target.closest("[data-f]");
+  if (b) { jFilter = b.dataset.f; renderJudgment(); }
+};
+$("#view-judgment").addEventListener("click", async (e) => {
+  const b = e.target.closest(".jb");
+  if (!b) return;
+  const { kind, id } = b.dataset, item = (kind === "principle" ? judgment.principles : judgment.cases).find((x) => x.id === id);
+  if (b.dataset.edit) {
+    const box = b.closest(".jp, .jcase"), was = kind === "principle" ? item.text : item.reason;
+    box.querySelector(".jbtns").outerHTML = `<div class="jedit"><textarea rows="3" maxlength="1000" placeholder="${kind === "principle" ? "the rule, in your words" : "why you chose it"}">${esc(was)}</textarea>
+      <div class="jbtns"><button class="jb jb-approved" data-save="1">save &amp; approve</button><button class="jb" data-cancel="1">cancel</button></div></div>`;
+    const ta = box.querySelector("textarea");
+    ta.focus();
+    box.querySelector("[data-cancel]").onclick = (ev) => { ev.stopPropagation(); renderJudgment(); };
+    box.querySelector("[data-save]").onclick = (ev) => { ev.stopPropagation(); reviewJudgment(kind, id, "approved", ta.value); };
+    return;
+  }
+  if (b.dataset.status) reviewJudgment(kind, id, b.dataset.status, "");
+});
+
+async function reviewJudgment(kind, id, status, text) {
+  const r = await fetch("/api/judgment", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, id, status, text }) });
+  if (r.ok) loadJudgment();
+}
+
 /* ---------- conversations ---------- */
 
 async function loadTalk() {
@@ -1084,13 +1157,13 @@ document.addEventListener("keydown", (e) => e.key === "Escape" && closeDrawer())
 /* ---------- navigation, clock, live stream ---------- */
 
 const LOADERS = { mind: () => Promise.all([loadOverview(), loadFeed(), loadPlan(), loadApprovals()]), activity: loadLog, memory: loadMemory,
-  day: loadDay, works: loadWorks, growth: loadGrowth, talk: loadTalk };
+  day: loadDay, works: loadWorks, growth: loadGrowth, judgment: loadJudgment, talk: loadTalk };
 let view = "mind";
 function show(v) {
   view = v;
   document.querySelectorAll(".nav button").forEach((b) => b.classList.toggle("on", b.dataset.view === v));
   document.querySelectorAll(".view").forEach((s) => s.classList.toggle("on", s.id === "view-" + v));
-  $("#viewTitle").textContent = { mind: "MIND", activity: "ACTIVITY", memory: "MEMORY", day: "DAY", works: "WORKS", growth: "GROWTH", talk: "CONVERSATIONS" }[v];
+  $("#viewTitle").textContent = { mind: "MIND", activity: "ACTIVITY", memory: "MEMORY", day: "DAY", works: "WORKS", growth: "GROWTH", judgment: "JUDGMENT", talk: "CONVERSATIONS" }[v];
   history.replaceState(null, "", "#" + v);
   LOADERS[v]().catch(console.error);
 }

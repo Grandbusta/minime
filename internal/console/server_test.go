@@ -24,6 +24,9 @@ type fakeStore struct {
 	mu     sync.Mutex
 	log    []store.LogEntry
 	labels []memory.Label
+	// principles and cases are its owner's judgment; reviews are what the owner did to them
+	principles []memory.Principle
+	cases      []memory.JudgmentCase
 }
 
 func (f *fakeStore) DecisionLog(_ context.Context, after time.Time, limit int, newestFirst bool) ([]store.LogEntry, error) {
@@ -358,5 +361,100 @@ func TestLabelling(t *testing.T) {
 	getJSON(t, srv.URL+"/api/chain/"+e.ID.String(), &chain)
 	if len(chain) != 1 || chain[0].Labels["intent"] != "ask_for_help" {
 		t.Errorf("chain = %+v", chain)
+	}
+}
+
+func (f *fakeStore) Principles(context.Context, string) ([]memory.Principle, error) {
+	return f.principles, nil
+}
+func (f *fakeStore) JudgmentCases(context.Context, string, []string) ([]memory.JudgmentCase, error) {
+	return f.cases, nil
+}
+
+func (f *fakeStore) ReviewPrinciple(_ context.Context, id ulid.ULID, status, text string, _ time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, p := range f.principles {
+		if p.ID == id {
+			f.principles[i].Status = status
+			if text != "" {
+				f.principles[i].Text = text
+			}
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeStore) ReviewCase(_ context.Context, id ulid.ULID, status, reason string, _ time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, c := range f.cases {
+		if c.ID == id {
+			f.cases[i].Status = status
+			if reason != "" {
+				f.cases[i].Reason = reason
+			}
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func TestJudgmentReview(t *testing.T) {
+	s, st := newServer("")
+	p := memory.Principle{ID: ulid.Make(), Text: "Start small.", Seed: "Start small.", Types: []string{"general"}, Cases: []string{"tiny"},
+		Status: memory.JudgmentProposed}
+	c := memory.JudgmentCase{ID: ulid.Make(), Key: "tiny", Type: "general", Situation: "What to build first.", Choice: "the tiniest part",
+		Status: memory.JudgmentProposed}
+	st.principles, st.cases = []memory.Principle{p}, []memory.JudgmentCase{c}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	post := func(body string, headers map[string]string) int {
+		req, _ := http.NewRequest("POST", srv.URL+"/api/judgment", strings.NewReader(body))
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	jsonHeader := map[string]string{"Content-Type": "application/json"}
+	edit := `{"kind":"principle","id":"` + p.ID.String() + `","status":"approved","text":"Start small, then build on it."}`
+	if code := post(edit, map[string]string{"Content-Type": "application/json", "Sec-Fetch-Site": "cross-site"}); code != http.StatusForbidden {
+		t.Errorf("cross-site = %d", code)
+	}
+	for name, body := range map[string]string{
+		"bad status": `{"kind":"principle","id":"` + p.ID.String() + `","status":"maybe"}`,
+		"bad kind":   `{"kind":"dream","id":"` + p.ID.String() + `","status":"approved"}`,
+		"bad id":     `{"kind":"case","id":"x","status":"approved"}`,
+	} {
+		if code := post(body, jsonHeader); code != http.StatusBadRequest {
+			t.Errorf("%s = %d", name, code)
+		}
+	}
+	if code := post(`{"kind":"case","id":"`+ulid.Make().String()+`","status":"approved"}`, jsonHeader); code != http.StatusNotFound {
+		t.Errorf("unknown case = %d", code)
+	}
+	if code := post(edit, jsonHeader); code != http.StatusNoContent {
+		t.Fatalf("edit = %d", code)
+	}
+	if code := post(`{"kind":"case","id":"`+c.ID.String()+`","status":"rejected","text":"I'd go bigger now"}`, jsonHeader); code != http.StatusNoContent {
+		t.Fatalf("reject = %d", code)
+	}
+	var got struct {
+		Principles []map[string]any `json:"principles"`
+		Cases      []map[string]any `json:"cases"`
+	}
+	getJSON(t, srv.URL+"/api/judgment", &got)
+	if len(got.Principles) != 1 || got.Principles[0]["text"] != "Start small, then build on it." || got.Principles[0]["status"] != "approved" ||
+		got.Principles[0]["edited"] != true {
+		t.Errorf("principles = %+v", got.Principles)
+	}
+	if len(got.Cases) != 1 || got.Cases[0]["status"] != "rejected" || got.Cases[0]["reason"] != "I'd go bigger now" {
+		t.Errorf("cases = %+v", got.Cases)
 	}
 }

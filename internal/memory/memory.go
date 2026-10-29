@@ -318,6 +318,43 @@ const (
 	LessonFromOthers = "others" // studying how others do it
 )
 
+// Principle is a rule of its owner's judgment, drawn from their decisions.
+type Principle struct {
+	ID        ulid.ULID
+	Text      string
+	Types     []string // kinds of decision it applies to
+	Status    string   // JudgmentProposed, JudgmentApproved or JudgmentRejected
+	Source    string   // JudgmentFromSeed, ...
+	Seed      string   // its text in the seed file; empty for others
+	Cases     []string // keys of the cases behind it
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// JudgmentCase is a decision its owner made: what was on the table, what
+// they chose, and why.
+type JudgmentCase struct {
+	ID        ulid.ULID
+	Key       string // the seed file's key; the ID for others
+	Type      string // general, engineering, product, autonomy or life
+	Situation string
+	Options   []string
+	Choice    string
+	Reason    string // the owner's own words; empty when they gave none
+	Status    string
+	Source    string
+	At        time.Time
+	UpdatedAt time.Time
+}
+
+const (
+	JudgmentProposed = "proposed" // waiting for the owner's review; not used
+	JudgmentApproved = "approved"
+	JudgmentRejected = "rejected"
+
+	JudgmentFromSeed = "seed" // the owner's judgment file
+)
+
 // Who decided whether a work is public.
 const (
 	PublicBySystem1 = "system1"  // the daily check (public_work question set)

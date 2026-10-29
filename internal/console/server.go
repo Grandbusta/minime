@@ -1,7 +1,8 @@
-// Package console is the owner's mind console: a private, read-only web view
+// Package console is the owner's mind console: a private web view
 // of everything about the agent, live. Its brain (the parts of its mind,
 // firing as decisions flow), what it decided and why, what it remembers,
-// its day, what it made, and its conversations.
+// its day, what it made, and its conversations. It writes only what the owner
+// reviews: labels on decisions, and their judgment.
 //
 // It never shares a server with the public profile page. It listens on
 // localhost, or, anywhere else, only with a token.
@@ -58,6 +59,10 @@ type Store interface {
 	Lessons(ctx context.Context, skill string, limit int) ([]memory.Lesson, error)
 	Plans(ctx context.Context, activeOnly bool) ([]memory.LearningPlan, error)
 	Resources(ctx context.Context, plan ulid.ULID) ([]memory.Resource, error)
+	Principles(ctx context.Context, status string) ([]memory.Principle, error)
+	JudgmentCases(ctx context.Context, status string, types []string) ([]memory.JudgmentCase, error)
+	ReviewPrinciple(ctx context.Context, id ulid.ULID, status, text string, at time.Time) (bool, error)
+	ReviewCase(ctx context.Context, id ulid.ULID, status, reason string, at time.Time) (bool, error)
 }
 
 // Info is what the console says about the running agent.
@@ -95,6 +100,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/approvals", s.approvals)
 	mux.HandleFunc("POST /api/labels", s.label)
 	mux.HandleFunc("GET /api/growth", s.growth)
+	mux.HandleFunc("GET /api/judgment", s.judgment)
+	mux.HandleFunc("POST /api/judgment", s.reviewJudgment)
 	return s.auth(headers(mux))
 }
 
@@ -232,12 +239,20 @@ func (s *Server) chain(w http.ResponseWriter, r *http.Request) {
 	s.json(w, views)
 }
 
-// label records what a System 1 answer should have been, from the owner in
-// the console: the one thing the console writes. Only from the console's own
-// page (same origin), as JSON.
-func (s *Server) label(w http.ResponseWriter, r *http.Request) {
+// fromConsole is whether a write comes from the console's own page (same
+// origin), as JSON: the only writes it takes.
+func fromConsole(w http.ResponseWriter, r *http.Request) bool {
 	if site := r.Header.Get("Sec-Fetch-Site"); (site != "" && site != "same-origin") || r.Header.Get("Content-Type") != "application/json" {
 		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+// label records what a System 1 answer should have been, from the owner in
+// the console.
+func (s *Server) label(w http.ResponseWriter, r *http.Request) {
+	if !fromConsole(w, r) {
 		return
 	}
 	var in struct {
@@ -570,6 +585,78 @@ func (s *Server) growth(w http.ResponseWriter, r *http.Request) {
 		out["review"] = map[string]any{"id": rv.ID.String(), "title": rv.Title, "text": rv.Text, "at": rv.CreatedAt}
 	}
 	s.json(w, out)
+}
+
+// judgment is how its owner decides: their principles, with the cases
+// behind them, and their decisions, for them to review.
+func (s *Server) judgment(w http.ResponseWriter, r *http.Request) {
+	ps, err := s.Store.Principles(r.Context(), "")
+	if s.failed(w, err) {
+		return
+	}
+	cs, err := s.Store.JudgmentCases(r.Context(), "", nil)
+	if s.failed(w, err) {
+		return
+	}
+	pv := make([]map[string]any, len(ps))
+	for i, p := range ps {
+		pv[i] = map[string]any{"id": p.ID.String(), "text": p.Text, "types": nonNil(p.Types), "status": p.Status, "source": p.Source,
+			"edited": p.Seed != "" && p.Seed != p.Text, "cases": nonNil(p.Cases), "updated_at": p.UpdatedAt}
+	}
+	cv := make([]map[string]any, len(cs))
+	for i, c := range cs {
+		cv[i] = map[string]any{"id": c.ID.String(), "key": c.Key, "type": c.Type, "situation": c.Situation, "options": nonNil(c.Options),
+			"choice": c.Choice, "reason": c.Reason, "status": c.Status, "source": c.Source, "at": c.At}
+	}
+	s.json(w, map[string]any{"principles": pv, "cases": cv})
+}
+
+// reviewJudgment records the owner's review of a principle or one of their
+// decisions: approved, rejected or back to proposed, with a principle's
+// edited text or a decision's reason.
+func (s *Server) reviewJudgment(w http.ResponseWriter, r *http.Request) {
+	if !fromConsole(w, r) {
+		return
+	}
+	var in struct {
+		Kind   string `json:"kind"` // principle | case
+		ID     string `json:"id"`
+		Status string `json:"status"`
+		Text   string `json:"text"` // a principle's new text, or a decision's reason; empty keeps it
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&in); err != nil {
+		http.Error(w, "bad review", http.StatusBadRequest)
+		return
+	}
+	id, err := ulid.Parse(in.ID)
+	in.Text = strings.TrimSpace(in.Text)
+	switch in.Status {
+	case memory.JudgmentProposed, memory.JudgmentApproved, memory.JudgmentRejected:
+	default:
+		err = errors.New("bad status")
+	}
+	if err != nil || len([]rune(in.Text)) > 1000 {
+		http.Error(w, "bad review", http.StatusBadRequest)
+		return
+	}
+	var found bool
+	switch in.Kind {
+	case "principle":
+		found, err = s.Store.ReviewPrinciple(r.Context(), id, in.Status, in.Text, time.Now().UTC())
+	case "case":
+		found, err = s.Store.ReviewCase(r.Context(), id, in.Status, in.Text, time.Now().UTC())
+	default:
+		http.Error(w, "bad review", http.StatusBadRequest)
+		return
+	}
+	if s.failed(w, err) {
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func nonNilMaps(m []map[string]any) []map[string]any {

@@ -196,6 +196,10 @@ func run(args []string) error {
 }
 
 func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store.Store, log *slog.Logger) error {
+	judgment, err := self.LoadJudgment(cfg.Self.Judgment)
+	if err != nil {
+		return err
+	}
 	s1, err := newDecisionModel(cfg.Decision.Provider, cfg.Pricing, log)
 	if err != nil {
 		return err
@@ -293,6 +297,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 
 	m := mind.New(mind.Config{
 		Life:     life,
+		Judgment: judgment,
 		Percepts: percepts.Subscribe(), Store: st, Replier: tg,
 		System1: s1, System2: s2, Incoming: incoming, FollowUp: followUp, LifeArea: lifeArea, ReplyPrompt: replyPrompt,
 		PersonCircle:  personCircle,

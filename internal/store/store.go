@@ -1543,3 +1543,122 @@ func (s *Store) WebSince(ctx context.Context, kind string, since time.Time) (int
 	}
 	return n, nil
 }
+
+// SeedJudgment copies its owner's judgment file into memory, as proposed: each
+// case not seen before (by key), and each principle not seeded before (by its
+// seed text, so an edited or rejected one isn't seeded again), with the cases
+// behind it. It returns how many of each it added.
+func (s *Store) SeedJudgment(ctx context.Context, cases []memory.JudgmentCase, principles []memory.Principle) (int, int, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("seed judgment: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	nc, np := 0, 0
+	for _, c := range cases {
+		tag, err := tx.Exec(ctx, `INSERT INTO judgment_cases (id, key, type, situation, options, choice, reason, status, source, at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10) ON CONFLICT (key) DO NOTHING`,
+			c.ID.String(), c.Key, c.Type, c.Situation, nonNil(c.Options), c.Choice, c.Reason, c.Status, c.Source, c.At)
+		if err != nil {
+			return 0, 0, fmt.Errorf("seed case %s: %w", c.Key, err)
+		}
+		nc += int(tag.RowsAffected())
+	}
+	for _, p := range principles {
+		tag, err := tx.Exec(ctx, `INSERT INTO principles (id, text, types, status, source, seed, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $7) ON CONFLICT (seed) DO NOTHING`,
+			p.ID.String(), p.Text, nonNil(p.Types), p.Status, p.Source, p.Seed, p.CreatedAt)
+		if err != nil {
+			return 0, 0, fmt.Errorf("seed principle: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			continue
+		}
+		np++
+		if _, err := tx.Exec(ctx, `INSERT INTO principle_cases (principle_id, case_id)
+			SELECT $1, id FROM judgment_cases WHERE key = ANY($2) ON CONFLICT DO NOTHING`, p.ID.String(), nonNil(p.Cases)); err != nil {
+			return 0, 0, fmt.Errorf("link principle's cases: %w", err)
+		}
+	}
+	return nc, np, tx.Commit(ctx)
+}
+
+// Principles returns its owner's principles, oldest first, with the keys of
+// the cases behind them: all of them, or only those with status.
+func (s *Store) Principles(ctx context.Context, status string) ([]memory.Principle, error) {
+	rows, err := s.pool.Query(ctx, `SELECT p.id, p.text, p.types, p.status, p.source, COALESCE(p.seed, ''), p.created_at, p.updated_at,
+			COALESCE(array_agg(c.key ORDER BY c.at, c.key) FILTER (WHERE c.key IS NOT NULL), '{}')
+		FROM principles p LEFT JOIN principle_cases pc ON pc.principle_id = p.id LEFT JOIN judgment_cases c ON c.id = pc.case_id
+		WHERE $1 = '' OR p.status = $1 GROUP BY p.id ORDER BY p.created_at, p.id`, status)
+	if err != nil {
+		return nil, fmt.Errorf("query principles: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Principle
+	for rows.Next() {
+		var (
+			p  memory.Principle
+			id string
+		)
+		if err := rows.Scan(&id, &p.Text, &p.Types, &p.Status, &p.Source, &p.Seed, &p.CreatedAt, &p.UpdatedAt, &p.Cases); err != nil {
+			return nil, err
+		}
+		if p.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// JudgmentCases returns its owner's decisions, oldest first: all of them, or
+// only those with status, of any of types (all types if none).
+func (s *Store) JudgmentCases(ctx context.Context, status string, types []string) ([]memory.JudgmentCase, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, key, type, situation, options, choice, reason, status, source, at, updated_at
+		FROM judgment_cases WHERE ($1 = '' OR status = $1) AND (cardinality($2::text[]) = 0 OR type = ANY($2))
+		ORDER BY at, key`, status, nonNil(types))
+	if err != nil {
+		return nil, fmt.Errorf("query judgment cases: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.JudgmentCase
+	for rows.Next() {
+		var (
+			c  memory.JudgmentCase
+			id string
+		)
+		if err := rows.Scan(&id, &c.Key, &c.Type, &c.Situation, &c.Options, &c.Choice, &c.Reason, &c.Status, &c.Source, &c.At,
+			&c.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if c.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ReviewPrinciple records its owner's review of a principle: its status, and
+// its text when they edited it (empty keeps it). It returns whether there
+// was such a principle.
+func (s *Store) ReviewPrinciple(ctx context.Context, id ulid.ULID, status, text string, at time.Time) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE principles SET status = $2, text = COALESCE(NULLIF($3, ''), text), updated_at = $4
+		WHERE id = $1`, id.String(), status, text, at)
+	if err != nil {
+		return false, fmt.Errorf("review principle: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// ReviewCase records its owner's review of one of their decisions: its
+// status, and their reason when they gave one (empty keeps it). It returns
+// whether there was such a case.
+func (s *Store) ReviewCase(ctx context.Context, id ulid.ULID, status, reason string, at time.Time) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE judgment_cases SET status = $2, reason = COALESCE(NULLIF($3, ''), reason), updated_at = $4
+		WHERE id = $1`, id.String(), status, reason, at)
+	if err != nil {
+		return false, fmt.Errorf("review case: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}

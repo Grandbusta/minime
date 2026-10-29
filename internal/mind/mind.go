@@ -98,6 +98,9 @@ type Store interface {
 	Resources(ctx context.Context, plan ulid.ULID) ([]memory.Resource, error)
 	FinishResource(ctx context.Context, id, work ulid.ULID, title string, at time.Time) error
 	RecentFound(ctx context.Context, limit int) ([]search.Result, error)
+	SeedJudgment(ctx context.Context, cases []memory.JudgmentCase, principles []memory.Principle) (int, int, error)
+	Principles(ctx context.Context, status string) ([]memory.Principle, error)
+	JudgmentCases(ctx context.Context, status string, types []string) ([]memory.JudgmentCase, error)
 	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
 	SaveProject(ctx context.Context, p memory.Project) error
 	Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error)
@@ -133,7 +136,10 @@ type Prompt struct {
 }
 
 type Config struct {
-	Life     self.Life // who the agent is
+	Life self.Life // who the agent is
+	// Judgment is how its owner decides, seeded into memory for the owner to
+	// review; only what they approve is used. Zero value: none seeded.
+	Judgment self.Judgment
 	Percepts <-chan perception.Percept
 	Store    Store
 	Replier  Replier
@@ -195,6 +201,7 @@ func (m *Mind) Run(ctx context.Context) error {
 	m.loadPermissions(ctx)
 	m.bornKnowing(ctx)
 	m.bornWanting(ctx)
+	m.seedJudgment(ctx)
 	m.labelUnlabelledFacts(ctx)
 	for {
 		select {

@@ -233,6 +233,9 @@ type WorkingMemory struct {
 // Self is who the agent is.
 type Self struct {
 	Life string `yaml:"life"` // file with the agent's name and life story
+	// Judgment is a file with how its owner decides (optional), seeded for
+	// the owner to review in the console.
+	Judgment string `yaml:"judgment"`
 }
 
 type Database struct {
@@ -276,7 +279,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 	cfg := &Config{
-		Self:          Self{Life: "self/life.yaml"},
+		Self:          Self{Life: "self/life.yaml", Judgment: "self/judgment.yaml"},
 		Telegram:      Telegram{PollTimeoutSeconds: 30},
 		Decision:      Decision{QuestionSets: "decisions"},
 		Reasoning:     Reasoning{Prompt: "prompts/reply.md", Effort: "low"},
