@@ -63,6 +63,7 @@ type Store interface {
 	SetWorkPublic(ctx context.Context, id ulid.ULID, public bool, by string) (bool, error)
 	AwaitWorkPublic(ctx context.Context, id ulid.ULID) error
 	SaveApproval(ctx context.Context, a memory.Approval) error
+	AutonomyRules(ctx context.Context) (map[string]string, error)
 }
 
 const (
@@ -209,6 +210,12 @@ func (w *Writer) decidePublicWorks(ctx context.Context) error {
 	q := w.PublicWork.Questions[0]
 	q.Instructions = strings.NewReplacer("{work}", "`work`", "{agent}", w.Life.Name).Replace(q.Instructions)
 	public, waiting, asked := 0, 0, 0
+	policy := w.Autonomy
+	if rules, err := w.Store.AutonomyRules(ctx); err == nil {
+		policy = policy.WithChatRules(rules) // what the owner changed by chat
+	} else {
+		w.Log.Warn("loading the owner's permission changes failed; using the config's", "err", err)
+	}
 	var failed error
 	for _, work := range works {
 		text := work.Text
@@ -233,7 +240,7 @@ func (w *Writer) decidePublicWorks(ctx context.Context) error {
 		yes := !a.Refused && a.Probability >= w.PublicWork.Thresholds.Act
 		verdict := action.Auto
 		if yes {
-			verdict = w.Autonomy.Check(action.Publish, "")
+			verdict = policy.Check(action.Publish, "")
 		}
 		switch verdict {
 		case action.Ask:

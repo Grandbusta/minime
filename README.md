@@ -39,7 +39,8 @@ knows. Design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - Every message is stored in Postgres, along with the decisions it led to: answers,
   provider, version, cost and latency. A System 2 decision is linked to the System 1
   decision that handed it over.
-- **Not built yet:** forgetting or correcting facts.
+- **Corrections:** tell it a fact is wrong ("I live in Lekki, not Ikoyi") and it replaces
+  it; ask it to forget something and it does. See "Corrections and replay" below.
 
 ## Make your own
 
@@ -271,6 +272,40 @@ promise (and tells them), or publishes the work or not. Only you (`autonomy.owne
 default the first of `telegram.owner_ids`) can answer. Unanswered after `ask_expires`
 (24h), a request is denied. The console's Mind view shows what's waiting, and the decision
 log marks each as `asked` or `denied`.
+
+You can also change these by telling it, in your own chat with it: "you can send reminders
+without asking", "ask me before you publish anything". It confirms the change, which
+applies at once and lasts across restarts (each change is kept, and shows in the decision
+log as `permission`). `reach_out`, `commit`, `publish` and `read_web` change this way;
+spending and posting outside the chat only in the config. Ask it what it may do on its own
+and it tells you.
+
+### Corrections and replay
+
+- **Wrong facts:** tell it ("I live in Lekki, not Ikoyi", "you're 18, not 19") and it
+  replaces the fact instead of keeping both. Anyone can correct what it knows about them;
+  only you can correct what it knows about itself. It can only correct a fact it just
+  recalled, which is usually the one the conversation is about.
+- **Forgetting:** "forget that I told you about the bank" removes the fact for good. The
+  log keeps that a fact was forgotten, not what it said.
+- **Misreads:** "that's not what I meant, I was asking for help" labels its read of your
+  previous message with what you meant. You can also label any System 1 answer in the
+  console: open a decision and press ✓ (right) or ✗ (wrong, then pick what it should have
+  been).
+
+Labelled messages are how you check a change to a question set, a threshold or the model.
+Edit [decisions/incoming_message.yaml](decisions/incoming_message.yaml), bump its version,
+then replay:
+
+```bash
+set -a; . ./.env; set +a; go run ./cmd/minime replay
+```
+
+It asks System 1 about every labelled message again, with the set as it is now, and shows
+each answer then and now against your label, how many it gets right, and an act threshold
+that keeps at least 95% of its confident answers right (with 10 or more labels). It changes
+nothing: apply a suggested threshold yourself. On start, the agent logs a reminder when
+labelled messages were read by an older version of the set.
 
 ### Its mind console
 

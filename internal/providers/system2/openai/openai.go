@@ -58,7 +58,7 @@ type wireFormat struct {
 var replyWithFacts = &wireText{Format: wireFormat{
 	Type: "json_schema", Name: "reply_with_facts", Strict: true,
 	Schema: map[string]any{
-		"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises"},
+		"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises", "permissions", "corrections", "misread"},
 		"properties": map[string]any{
 			"reply":        map[string]any{"type": "string"},
 			"who_they_are": map[string]any{"type": "string"},
@@ -69,6 +69,22 @@ var replyWithFacts = &wireText{Format: wireFormat{
 					"what": map[string]any{"type": "string"},
 				},
 			}},
+			"permissions": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object", "additionalProperties": false, "required": []string{"class", "verdict"},
+				"properties": map[string]any{
+					"class":   map[string]any{"type": "string"},
+					"verdict": map[string]any{"type": "string", "enum": []string{"auto", "ask", "forbid"}},
+				},
+			}},
+			"corrections": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object", "additionalProperties": false, "required": []string{"fact", "action", "text"},
+				"properties": map[string]any{
+					"fact":   map[string]any{"type": "string", "description": "the fact's ref from the note, e.g. f2"},
+					"action": map[string]any{"type": "string", "enum": []string{"replace", "forget"}},
+					"text":   map[string]any{"type": "string", "description": "the right fact, for replace; empty for forget"},
+				},
+			}},
+			"misread": map[string]any{"type": "string"},
 			"promises": map[string]any{"type": "array", "items": map[string]any{
 				"type": "object", "additionalProperties": false, "required": []string{"by", "what", "ability", "query"},
 				"properties": map[string]any{
@@ -191,6 +207,9 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		whoTheyAre string
 		reminders  []system2.Reminder
 		promises   []system2.Promise
+		perms      []system2.Permission
+		fixes      []system2.Correction
+		misread    string
 	)
 	switch {
 	case refusal.Len() > 0:
@@ -213,6 +232,16 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 				Ability string `json:"ability"`
 				Query   string `json:"query"`
 			} `json:"promises"`
+			Permissions []struct {
+				Class   string `json:"class"`
+				Verdict string `json:"verdict"`
+			} `json:"permissions"`
+			Corrections []struct {
+				Fact   string `json:"fact"`
+				Action string `json:"action"`
+				Text   string `json:"text"`
+			} `json:"corrections"`
+			Misread string `json:"misread"`
 		}
 		if err := json.Unmarshal([]byte(reply), &out); err != nil {
 			return system2.Response{}, fmt.Errorf("openai responses: reply is not the requested JSON: %w", err)
@@ -230,6 +259,18 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 				reminders = append(reminders, system2.Reminder{When: when, What: what})
 			}
 		}
+		for _, p := range out.Permissions {
+			if class := strings.TrimSpace(p.Class); class != "" {
+				perms = append(perms, system2.Permission{Class: class, Verdict: strings.TrimSpace(p.Verdict)})
+			}
+		}
+		for _, c := range out.Corrections {
+			fact, text := strings.TrimSpace(c.Fact), strings.TrimSpace(c.Text)
+			if fact != "" && (c.Action == "forget" || text != "") {
+				fixes = append(fixes, system2.Correction{Fact: fact, Forget: c.Action == "forget", Text: text})
+			}
+		}
+		misread = strings.TrimSpace(out.Misread)
 		for _, p := range out.Promises {
 			if by, what := strings.TrimSpace(p.By), strings.TrimSpace(p.What); by != "" && what != "" {
 				promises = append(promises, system2.Promise{By: by, What: what, Ability: strings.TrimSpace(p.Ability),
@@ -247,13 +288,16 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 
 	u := w.Usage
 	return system2.Response{
-		Provider:   "openai/" + w.Model,
-		Text:       reply,
-		Remember:   remember,
-		WhoTheyAre: whoTheyAre,
-		Reminders:  reminders,
-		Promises:   promises,
-		Usage:      system2.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, ReasoningTokens: u.OutputTokensDetails.ReasoningTokens},
+		Provider:    "openai/" + w.Model,
+		Text:        reply,
+		Remember:    remember,
+		WhoTheyAre:  whoTheyAre,
+		Reminders:   reminders,
+		Promises:    promises,
+		Permissions: perms,
+		Corrections: fixes,
+		Misread:     misread,
+		Usage:       system2.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, ReasoningTokens: u.OutputTokensDetails.ReasoningTokens},
 		CostUSD: c.price.Cost(pricing.Usage{
 			InputTokens: u.InputTokens, CachedTokens: u.InputTokensDetails.CachedTokens,
 			CacheWriteTokens: u.InputTokensDetails.CacheWriteTokens, OutputTokens: u.OutputTokens,

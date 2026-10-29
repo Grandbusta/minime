@@ -25,6 +25,9 @@ func (n noEmDashes) Reason(ctx context.Context, req Request) (Response, error) {
 	for i := range resp.Reminders {
 		resp.Reminders[i].What = RemoveEmDashes(resp.Reminders[i].What)
 	}
+	for i := range resp.Corrections {
+		resp.Corrections[i].Text = RemoveEmDashes(resp.Corrections[i].Text)
+	}
 	for i := range resp.Promises {
 		resp.Promises[i].What = RemoveEmDashes(resp.Promises[i].What)
 	}

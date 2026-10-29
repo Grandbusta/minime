@@ -48,6 +48,7 @@ import (
 	s1openai "minime/internal/providers/system1/openai"
 	"minime/internal/providers/system2"
 	s2openai "minime/internal/providers/system2/openai"
+	"minime/internal/replay"
 	"minime/internal/self"
 	"minime/internal/store"
 )
@@ -66,7 +67,7 @@ func run(args []string) error {
 	}
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	cfgPath := fs.String("config", "configs/minime.yaml", "path to the config file")
-	limit := fs.Int("n", 20, "number of decisions to show")
+	limit := fs.Int("n", 20, "decisions: how many to show; replay: how many labelled messages")
 	force := fs.Bool("force", false, "profile: rewrite the page even if nothing changed")
 	date := fs.String("date", "", "day: the day to show, YYYY-MM-DD (default today)")
 	if err := fs.Parse(args); err != nil {
@@ -134,6 +135,13 @@ func run(args []string) error {
 		}
 		defer st.Close()
 		return printDay(ctx, st, zone, *date)
+	case "replay":
+		st, err := store.Open(ctx, cfg.Database.URL)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		return runReplay(ctx, cfg, st, *limit, log)
 	case "work":
 		st, err := store.Open(ctx, cfg.Database.URL)
 		if err != nil {
@@ -142,7 +150,7 @@ func run(args []string) error {
 		defer st.Close()
 		return works(ctx, st, fs.Args(), *limit, os.Stdout)
 	default:
-		return fmt.Errorf("unknown command %q (want run, decisions, profile, day or work)", cmd)
+		return fmt.Errorf("unknown command %q (want run, decisions, profile, day, work or replay)", cmd)
 	}
 }
 
@@ -159,6 +167,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	if !ok {
 		return fmt.Errorf("question set incoming_message not found in %s", cfg.Decision.QuestionSets)
 	}
+	replayHint(ctx, st, incoming, log)
 	followUp, ok := sets["follow_up"]
 	if !ok {
 		log.Warn("question set follow_up not found; replies to the agent's questions are routed on intent alone",
@@ -344,6 +353,51 @@ func updateProfile(ctx context.Context, cfg *config.Config, life self.Life, st *
 		fmt.Println("Nothing new to share; the profile page is unchanged. Use -force to rewrite it anyway.")
 	}
 	return nil
+}
+
+// runReplay re-asks System 1 about the messages the owner labelled, with the
+// incoming_message question set as it is now, and prints how it compares.
+func runReplay(ctx context.Context, cfg *config.Config, st *store.Store, n int, log *slog.Logger) error {
+	s1, err := newDecisionModel(cfg.Decision.Provider, cfg.Pricing, log)
+	if err != nil {
+		return err
+	}
+	sets, err := questions.LoadDir(cfg.Decision.QuestionSets)
+	if err != nil {
+		return err
+	}
+	set, ok := sets["incoming_message"]
+	if !ok {
+		return errors.New("question set incoming_message not found")
+	}
+	if n == 20 {
+		n = 500 // the flag's default is for decisions; replay all there is, within reason
+	}
+	r, err := replay.Run(ctx, st, s1, set, n)
+	if err != nil {
+		return err
+	}
+	r.Write(os.Stdout)
+	return nil
+}
+
+// replayHint logs when labelled messages were read by an older version of
+// the incoming_message set: the new one should be replayed before it's trusted.
+func replayHint(ctx context.Context, st *store.Store, set questions.Set, log *slog.Logger) {
+	examples, err := st.LabelledExamples(ctx, set.ID, set.Primary, 500)
+	if err != nil {
+		return
+	}
+	older := 0
+	for _, e := range examples {
+		if e.SetID != set.Ref() {
+			older++
+		}
+	}
+	if older > 0 {
+		log.Info("labelled messages were read by an older question set; run `minime replay` to check this one",
+			"set", set.Ref(), "older", older, "labelled", len(examples))
+	}
 }
 
 // worksStore is what the work command needs.

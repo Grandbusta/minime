@@ -955,3 +955,140 @@ func ulidOrEmpty(id ulid.ULID) string {
 	}
 	return id.String()
 }
+
+// SaveAutonomyRule records a change the owner made to the autonomy policy.
+func (s *Store) SaveAutonomyRule(ctx context.Context, class, verdict, by string, percept ulid.ULID, at time.Time) error {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO autonomy_rules (id, class, verdict, set_by, percept_id, at) VALUES ($1, $2, $3, $4, $5, $6)`,
+		ulid.Make().String(), class, verdict, by, nullULID(percept), at); err != nil {
+		return fmt.Errorf("save autonomy rule: %w", err)
+	}
+	return nil
+}
+
+// AutonomyRules returns the owner's newest change per class: class → verdict.
+func (s *Store) AutonomyRules(ctx context.Context) (map[string]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT ON (class) class, verdict FROM autonomy_rules ORDER BY class, at DESC, id DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("query autonomy rules: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var class, verdict string
+		if err := rows.Scan(&class, &verdict); err != nil {
+			return nil, err
+		}
+		out[class] = verdict
+	}
+	return out, rows.Err()
+}
+
+// DeleteFact forgets a fact. It reports whether there was one.
+func (s *Store) DeleteFact(ctx context.Context, id ulid.ULID) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM facts WHERE id = $1`, id.String())
+	if err != nil {
+		return false, fmt.Errorf("delete fact: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// SaveLabel records what a System 1 answer should have been, replacing an
+// earlier label for the same decision and question.
+func (s *Store) SaveLabel(ctx context.Context, l memory.Label) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO labels (decision_id, question, value, source, at) VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (decision_id, question) DO UPDATE SET value = EXCLUDED.value, source = EXCLUDED.source, at = EXCLUDED.at`,
+		l.DecisionID.String(), l.Question, l.Value, l.Source, l.At)
+	if err != nil {
+		return fmt.Errorf("save label: %w", err)
+	}
+	return nil
+}
+
+// Labels returns the labels on the given decisions.
+func (s *Store) Labels(ctx context.Context, decisions []ulid.ULID) ([]memory.Label, error) {
+	ids := make([]string, len(decisions))
+	for i, id := range decisions {
+		ids[i] = id.String()
+	}
+	rows, err := s.pool.Query(ctx, `SELECT decision_id, question, value, source, at FROM labels WHERE decision_id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("query labels: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Label
+	for rows.Next() {
+		var (
+			l  memory.Label
+			id string
+		)
+		if err := rows.Scan(&id, &l.Question, &l.Value, &l.Source, &l.At); err != nil {
+			return nil, err
+		}
+		if l.DecisionID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// LastRead returns the newest decision of question set setID (any version)
+// on a message in source's thread before before: the agent's read of the
+// message before the one it is answering.
+func (s *Store) LastRead(ctx context.Context, setID, source, thread string, before time.Time) (ulid.ULID, bool, error) {
+	var id string
+	err := s.pool.QueryRow(ctx, `SELECT d.id FROM decisions d JOIN percepts p ON p.id = d.percept_id
+		WHERE d.set_id LIKE $1 AND p.source = $2 AND p.thread = $3 AND p.at < $4 AND p.kind = 'message'
+		ORDER BY p.at DESC, d.at LIMIT 1`, setID+"@%", source, thread, before).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ulid.ULID{}, false, nil
+	}
+	if err != nil {
+		return ulid.ULID{}, false, fmt.Errorf("last read: %w", err)
+	}
+	d, err := ulid.Parse(id)
+	return d, err == nil, err
+}
+
+// Example is a labelled System 1 decision about a message, for replay.
+type Example struct {
+	DecisionID ulid.ULID
+	SetID      string // the set and version that decided, e.g. "incoming_message@1"
+	Text       string // the message it read
+	Answer     decision.Answer
+	Label      string
+}
+
+// LabelledExamples returns up to limit of the newest decisions of setID (any
+// version) with a label on question, with the message each read.
+func (s *Store) LabelledExamples(ctx context.Context, setID, question string, limit int) ([]Example, error) {
+	rows, err := s.pool.Query(ctx, `SELECT d.id, split_part(d.set_id, ',', 1), p.text, d.answers -> $2, l.value
+		FROM labels l JOIN decisions d ON d.id = l.decision_id JOIN percepts p ON p.id = d.percept_id
+		WHERE l.question = $2 AND d.set_id LIKE $1 AND p.text <> ''
+		ORDER BY d.at DESC LIMIT $3`, setID+"@%", question, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query labelled examples: %w", err)
+	}
+	defer rows.Close()
+	var out []Example
+	for rows.Next() {
+		var (
+			e      Example
+			id     string
+			answer []byte
+		)
+		if err := rows.Scan(&id, &e.SetID, &e.Text, &answer, &e.Label); err != nil {
+			return nil, err
+		}
+		if e.DecisionID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if len(answer) > 0 {
+			if err := json.Unmarshal(answer, &e.Answer); err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

@@ -85,7 +85,7 @@ func TestCollectFactsUsesStructuredOutput(t *testing.T) {
 			t.Errorf("text format = %+v", body.Text)
 		}
 		io.WriteString(w, `{"model":"m","status":"completed","output":[{"type":"message","content":[{"type":"output_text",
-			"text":"{\"reply\":\"Forest green, I think.\",\"who_they_are\":\" Sam is Tobi's cousin. \",\"remember\":[{\"about\":\"self\",\"fact\":\"Tobi's favourite colour is forest green\"},{\"about\":\"speaker\",\"fact\":\"Sam goes to Grace Chapel\"},{\"about\":\"speaker\",\"fact\":\"  \"},{\"about\":\"nobody\",\"fact\":\"x\"}],\"reminders\":[{\"when\":\"2026-10-30T09:00\",\"what\":\"call mum\"},{\"when\":\" \",\"what\":\"x\"}],\"promises\":[{\"by\":\"2026-10-30T20:00\",\"what\":\" Tobi writes Sam a verse \",\"ability\":\"\",\"query\":\"\"},{\"by\":\"\",\"what\":\"x\",\"ability\":\"\",\"query\":\"\"}]}"}]}]}`)
+			"text":"{\"reply\":\"Forest green, I think.\",\"who_they_are\":\" Sam is Tobi's cousin. \",\"remember\":[{\"about\":\"self\",\"fact\":\"Tobi's favourite colour is forest green\"},{\"about\":\"speaker\",\"fact\":\"Sam goes to Grace Chapel\"},{\"about\":\"speaker\",\"fact\":\"  \"},{\"about\":\"nobody\",\"fact\":\"x\"}],\"reminders\":[{\"when\":\"2026-10-30T09:00\",\"what\":\"call mum\"},{\"when\":\" \",\"what\":\"x\"}],\"permissions\":[{\"class\":\"reach_out\",\"verdict\":\"auto\"},{\"class\":\" \",\"verdict\":\"auto\"}],\"corrections\":[{\"fact\":\"f2\",\"action\":\"replace\",\"text\":\"Sam lives in Lekki\"},{\"fact\":\"f3\",\"action\":\"forget\",\"text\":\"\"},{\"fact\":\"f4\",\"action\":\"replace\",\"text\":\" \"}],\"misread\":\" ask_for_help \",\"promises\":[{\"by\":\"2026-10-30T20:00\",\"what\":\" Tobi writes Sam a verse \",\"ability\":\"\",\"query\":\"\"},{\"by\":\"\",\"what\":\"x\",\"ability\":\"\",\"query\":\"\"}]}"}]}]}`)
 	})
 	resp, err := c.Reason(context.Background(), system2.Request{Message: "What's your favourite colour?", CollectFacts: true})
 	if err != nil {
@@ -97,7 +97,10 @@ func TestCollectFactsUsesStructuredOutput(t *testing.T) {
 	}
 	if resp.Text != "Forest green, I think." || !slices.Equal(resp.Remember, want) || resp.WhoTheyAre != "Sam is Tobi's cousin." ||
 		!slices.Equal(resp.Reminders, []system2.Reminder{{When: "2026-10-30T09:00", What: "call mum"}}) ||
-		!slices.Equal(resp.Promises, []system2.Promise{{By: "2026-10-30T20:00", What: "Tobi writes Sam a verse"}}) {
+		!slices.Equal(resp.Promises, []system2.Promise{{By: "2026-10-30T20:00", What: "Tobi writes Sam a verse"}}) ||
+		!slices.Equal(resp.Permissions, []system2.Permission{{Class: "reach_out", Verdict: "auto"}}) ||
+		!slices.Equal(resp.Corrections, []system2.Correction{{Fact: "f2", Text: "Sam lives in Lekki"}, {Fact: "f3", Forget: true}}) ||
+		resp.Misread != "ask_for_help" {
 		t.Errorf("resp = %+v", resp)
 	}
 }

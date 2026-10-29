@@ -30,6 +30,17 @@ func TestZeroPolicyAllowsEverything(t *testing.T) {
 	}
 }
 
+func TestWithChatRules(t *testing.T) {
+	p := Policy{Owner: "telegram:1", Classes: Defaults()}.WithChatRules(map[string]string{
+		"reach_out": "auto", "spend": "auto", "read_web": "ask", "fly": "auto"})
+	if p.Check(ReachOut, "x") != Auto || p.Check(Spend, "x") != Forbid || p.Check(ReadWeb, "x") != Auto {
+		t.Errorf("classes = %v", p.Classes)
+	}
+	if d := Defaults(); d[ReachOut] != Ask {
+		t.Error("changed the defaults")
+	}
+}
+
 func TestValidate(t *testing.T) {
 	if err := Validate(Defaults()); err != nil {
 		t.Fatal(err)

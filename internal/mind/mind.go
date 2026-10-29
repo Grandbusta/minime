@@ -70,6 +70,11 @@ type Store interface {
 	DecideApproval(ctx context.Context, id ulid.ULID, status string, at time.Time) (bool, error)
 	StaleApprovals(ctx context.Context, before time.Time, limit int) ([]memory.Approval, error)
 	SetWorkPublic(ctx context.Context, id ulid.ULID, public bool, by string) (bool, error)
+	SaveAutonomyRule(ctx context.Context, class, verdict, by string, percept ulid.ULID, at time.Time) error
+	AutonomyRules(ctx context.Context) (map[string]string, error)
+	DeleteFact(ctx context.Context, id ulid.ULID) (bool, error)
+	SaveLabel(ctx context.Context, l memory.Label) error
+	LastRead(ctx context.Context, setID, source, thread string, before time.Time) (ulid.ULID, bool, error)
 	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
 	SaveProject(ctx context.Context, p memory.Project) error
 	Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error)
@@ -160,6 +165,7 @@ func New(c Config) *Mind {
 }
 
 func (m *Mind) Run(ctx context.Context) error {
+	m.loadPermissions(ctx)
 	m.bornKnowing(ctx)
 	m.labelUnlabelledFacts(ctx)
 	for {
@@ -203,7 +209,10 @@ func (m *Mind) handle(ctx context.Context, p perception.Percept) {
 	start := time.Now()
 	root := newDecision(p, nil, start)
 	chain := []*decision.Decision{root} // root first; a System 2 hand-off is its child
-	var reply string
+	var (
+		reply string
+		after []*decision.Decision // what the reply's answer changed: saved after it
+	)
 	if p.Text == "" {
 		// Reflex: nothing to read, so nothing to think about.
 		root.Tier, root.SetID, root.Action = decision.TierReflex, nonTextSetID, "reply"
@@ -229,7 +238,7 @@ func (m *Mind) handle(ctx context.Context, p perception.Percept) {
 				chain = append(chain, recallDecision)
 			}
 			child := newDecision(p, &root.ID, time.Now())
-			reply = m.reason(ctx, p, person, root, child, recent, facts, why)
+			reply, after = m.reason(ctx, p, person, root, child, recent, facts, why)
 			chain = append(chain, child)
 		}
 	}
@@ -254,6 +263,7 @@ func (m *Mind) handle(ctx context.Context, p perception.Percept) {
 			d.Outcome = &decision.Outcome{Status: decision.OutcomeOK, At: now.UTC()}
 		}
 	}
+	chain = append(chain, after...)
 
 	for _, d := range chain {
 		if err := m.Store.SaveDecision(ctx, *d); err != nil {
@@ -524,21 +534,22 @@ func (m *Mind) checkFacts(ctx context.Context, p perception.Percept, d *decision
 
 // reason has System 2 reply as the agent itself, recording it as child decision d.
 func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.Person, parent, d *decision.Decision,
-	recent []memory.Exchange, facts []memory.Fact, why string) string {
+	recent []memory.Exchange, facts []memory.Fact, why string) (string, []*decision.Decision) {
 	d.Tier, d.SetID, d.Action = decision.TierSystem2, m.ReplyPrompt.Ref, "reply"
 	n := m.namesFor(p)
+	note, refs := m.system2Note(parent, why, facts, n)
 
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.instructions(ctx, person, n),
 		History:      turns(recent),
-		Note:         m.now(p.At) + "\n\n" + m.system2Note(parent, why, facts, n) + m.promisesNote(ctx, p, person, n),
+		Note:         m.now(p.At) + "\n\n" + note + m.promisesNote(ctx, p, person, n) + m.permissionsNote(p),
 		Message:      p.Text,
 		CollectFacts: true,
 	})
 	if err != nil {
 		m.Log.Error("system 2 failed", "percept", p.ID.String(), "err", err)
 		d.Action = "error"
-		return "Sorry, I couldn't think that through just now."
+		return "Sorry, I couldn't think that through just now.", nil
 	}
 	d.Provider, d.CostUSD = resp.Provider, resp.CostUSD
 	m.Log.Debug("system 2 usage", "input_tokens", resp.Usage.InputTokens,
@@ -565,7 +576,13 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	d.CostUSD += m.learnRelation(ctx, p, person, resp.WhoTheyAre)
 	m.saveReminders(ctx, p, resp.Reminders)
 	m.savePromises(ctx, p, person, resp.Promises)
-	return resp.Text
+	// What the speaker corrected: facts, the agent's permissions, its read of
+	// their last message. Each is a decision of its own, after the reply.
+	var more []*decision.Decision
+	more = append(more, m.correctFacts(ctx, p, d, refs, resp.Corrections, n)...)
+	more = append(more, m.changePermissions(ctx, p, d, resp.Permissions)...)
+	more = append(more, m.labelMisread(ctx, p, d, resp.Misread)...)
+	return resp.Text, more
 }
 
 // canPromise reports whether the agent may promise person things: not a
@@ -696,7 +713,8 @@ func (m *Mind) instructions(ctx context.Context, person memory.Person, n names) 
 	}
 	return strings.NewReplacer("{name}", n.agent, "{speaker}", n.speaker, "{life_story}", story,
 		"{personality}", personality, "{who_they_are}", m.whoTheyAre(ctx, person, n),
-		"{makes}", m.makesList(), "{abilities}", m.abilitiesList()).Replace(m.ReplyPrompt.Text)
+		"{makes}", m.makesList(), "{abilities}", m.abilitiesList(), "{intents}", strings.Join(m.intents(), ", "),
+		"{correct_self}", m.correctSelf(person), "{permissions_help}", m.permissionsHelp(person, n)).Replace(m.ReplyPrompt.Text)
 }
 
 // turns lays recalled exchanges out as a conversation for System 2.
@@ -716,7 +734,8 @@ func turns(recent []memory.Exchange) []system2.Turn {
 // system2Note tells System 2 why it is answering, what System 1 made of the
 // message, and what it remembers that could help, about itself and about the
 // speaker, with names in place of pronouns.
-func (m *Mind) system2Note(s1 *decision.Decision, why string, facts []memory.Fact, n names) string {
+func (m *Mind) system2Note(s1 *decision.Decision, why string, facts []memory.Fact, n names) (string, map[string]memory.Fact) {
+	refs := map[string]memory.Fact{}
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are answering %s's latest message because %s.", n.speaker, why)
 	if a, ok := s1.Answers[m.Incoming.Primary]; ok && !a.Refused {
@@ -736,16 +755,18 @@ func (m *Mind) system2Note(s1 *decision.Decision, why string, facts []memory.Fac
 	}
 	if len(mine) == 0 && len(theirs) == 0 {
 		fmt.Fprintf(&b, "\n\nBeyond your life story, nothing you remember about yourself or %s is relevant here.", n.speaker)
-		return b.String()
+		return b.String(), refs
 	}
-	b.WriteString("\n\nWhat you remember that may help, with when you learned it:")
+	b.WriteString("\n\nWhat you remember that may help, with when you learned it (and a ref, for corrections):")
 	writeFacts := func(title string, fs []memory.Fact) {
 		if len(fs) == 0 {
 			return
 		}
 		fmt.Fprintf(&b, "\n%s:", title)
 		for _, f := range fs {
-			fmt.Fprintf(&b, "\n- %s: %s", f.At.Format("2 Jan 2006"), n.fact(f))
+			ref := fmt.Sprintf("f%d", len(refs)+1)
+			refs[ref] = f
+			fmt.Fprintf(&b, "\n- [%s] %s: %s", ref, f.At.Format("2 Jan 2006"), n.fact(f))
 		}
 	}
 	writeFacts("About yourself", mine)
@@ -753,7 +774,7 @@ func (m *Mind) system2Note(s1 *decision.Decision, why string, facts []memory.Fac
 	if len(theirs) == 0 {
 		fmt.Fprintf(&b, "\nNothing you remember about %s is relevant here.", n.speaker)
 	}
-	return b.String()
+	return b.String(), refs
 }
 
 // intentPhrases puts the intent read in the agent's own terms for System 2:

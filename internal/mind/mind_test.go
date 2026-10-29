@@ -42,7 +42,39 @@ type fakeStore struct {
 	percepts       []perception.Percept // saved, in order
 	asked          map[ulid.ULID]time.Time
 	approvals      []memory.Approval
+	rules          map[string]string // autonomy rules: class → verdict
+	labels         []memory.Label
+	lastRead       ulid.ULID            // what LastRead returns
 	public         map[ulid.ULID]string // works set public: "true by owner", ...
+}
+
+func (s *fakeStore) SaveAutonomyRule(_ context.Context, class, verdict, _ string, _ ulid.ULID, _ time.Time) error {
+	if s.rules == nil {
+		s.rules = map[string]string{}
+	}
+	s.rules[class] = verdict
+	return nil
+}
+
+func (s *fakeStore) AutonomyRules(context.Context) (map[string]string, error) { return s.rules, nil }
+
+func (s *fakeStore) DeleteFact(_ context.Context, id ulid.ULID) (bool, error) {
+	for n, f := range s.facts {
+		if f.ID == id {
+			s.facts = append(s.facts[:n], s.facts[n+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *fakeStore) SaveLabel(_ context.Context, l memory.Label) error {
+	s.labels = append(s.labels, l)
+	return nil
+}
+
+func (s *fakeStore) LastRead(context.Context, string, string, string, time.Time) (ulid.ULID, bool, error) {
+	return s.lastRead, !s.lastRead.IsZero(), nil
 }
 
 func (s *fakeStore) AwaitIntention(_ context.Context, id ulid.ULID) error {
@@ -504,6 +536,7 @@ type fakeSystem2 struct {
 	whoTheyAre string
 	reminders  []system2.Reminder
 	promises   []system2.Promise
+	perms      []system2.Permission
 	formats    map[string]string // reply text by Format.Name, for structured requests
 	requests   []system2.Request
 }
@@ -516,7 +549,7 @@ func (f *fakeSystem2) Reason(_ context.Context, req system2.Request) (system2.Re
 	if req.Format != nil {
 		return system2.Response{Provider: "fake2/1", Text: f.formats[req.Format.Name], CostUSD: 0.002}, nil
 	}
-	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, Promises: f.promises, CostUSD: 0.001}, nil
+	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, Promises: f.promises, Permissions: f.perms, CostUSD: 0.001}, nil
 }
 
 var testSet = questions.Set{
@@ -988,7 +1021,7 @@ func TestRecallPassesRelevantFactsToSystem2(t *testing.T) {
 	}
 
 	note := s2.requests[0].Note
-	if !strings.Contains(note, "About Sam:\n- 20 Oct 2026: Sam's passport expires in March 2027") || strings.Contains(note, "Golf") {
+	if !strings.Contains(note, "About Sam:\n- [f1] 20 Oct 2026: Sam's passport expires in March 2027") || strings.Contains(note, "Golf") {
 		t.Errorf("note = %q", note)
 	}
 
@@ -1035,8 +1068,8 @@ func TestOwnFactsAndTheirsAreKeptApart(t *testing.T) {
 	m.handle(context.Background(), percept("1", "Tell me something"))
 
 	note := s2.requests[0].Note
-	wantMine := "About yourself:\n- 27 Oct 2026: Tobi's favourite food is jollof rice"
-	wantTheirs := "About Sam:\n- 27 Oct 2026: Sam go to Grace Chapel"
+	wantMine := "About yourself:\n- [f1] 27 Oct 2026: Tobi's favourite food is jollof rice"
+	wantTheirs := "About Sam:\n- [f2] 27 Oct 2026: Sam go to Grace Chapel"
 	if !strings.Contains(note, wantMine) || !strings.Contains(note, wantTheirs) || strings.Contains(note, "St. Mary") {
 		t.Errorf("note = %q", note)
 	}

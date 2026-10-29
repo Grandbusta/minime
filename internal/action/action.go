@@ -72,6 +72,44 @@ func (p Policy) Check(class Class, person string) Verdict {
 	return v
 }
 
+// ByChat reports whether the owner may change class by telling the agent:
+// not money, and not the world outside the chat, which stay in the config.
+func ByChat(c Class) bool {
+	switch c {
+	case ReachOut, Commit, Publish, ReadWeb:
+		return true
+	}
+	return false
+}
+
+// With is p with the given classes changed.
+func (p Policy) With(changes map[Class]Verdict) Policy {
+	classes := make(map[Class]Verdict, len(p.Classes)+len(changes))
+	for c, v := range p.Classes {
+		classes[c] = v
+	}
+	for c, v := range changes {
+		classes[c] = v
+	}
+	p.Classes = classes
+	return p
+}
+
+// WithChatRules is p with the owner's changes made by chat (class → verdict)
+// applied, skipping any that can't be made by chat or aren't valid.
+func (p Policy) WithChatRules(rules map[string]string) Policy {
+	if p.Classes == nil {
+		return p // a zero policy allows everything, and stays that way
+	}
+	changes := map[Class]Verdict{}
+	for c, v := range rules {
+		if class, verdict := Class(c), Verdict(v); ByChat(class) && Validate(map[Class]Verdict{class: verdict}) == nil {
+			changes[class] = verdict
+		}
+	}
+	return p.With(changes)
+}
+
 // Validate checks a policy read from config: known classes and verdicts,
 // replies and memory always on, and no asking for what can't wait for an
 // answer (reading the web happens in the middle of an activity).

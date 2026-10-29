@@ -175,6 +175,21 @@ const (
 	ApprovalExpired  = "expired" // not answered in time: denied
 )
 
+// Label is what a System 1 answer should have been, from the owner: a
+// correction in chat or a label in the console.
+type Label struct {
+	DecisionID ulid.ULID
+	Question   string // e.g. "intent"
+	Value      string // a choice, or "true" / "false" for a yes/no question
+	Source     string // LabelFromChat or LabelFromConsole
+	At         time.Time
+}
+
+const (
+	LabelFromChat    = "chat"
+	LabelFromConsole = "console"
+)
+
 // Who decided whether a work is public.
 const (
 	PublicBySystem1 = "system1"  // the daily check (public_work question set)

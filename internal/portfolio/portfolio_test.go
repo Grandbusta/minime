@@ -32,6 +32,7 @@ type fakeStore struct {
 	decisions []decision.Decision
 	works     []memory.Work // all eligible: the store leaves out the journal and promises
 	approvals []memory.Approval
+	rules     map[string]string
 }
 
 func (s *fakeStore) UndecidedPublicWorks(_ context.Context, limit int) ([]memory.Work, error) {
@@ -62,6 +63,8 @@ func (s *fakeStore) AwaitWorkPublic(_ context.Context, id ulid.ULID) error {
 	}
 	return nil
 }
+
+func (s *fakeStore) AutonomyRules(context.Context) (map[string]string, error) { return s.rules, nil }
 
 func (s *fakeStore) SaveApproval(_ context.Context, a memory.Approval) error {
 	s.approvals = append(s.approvals, a)
@@ -469,7 +472,7 @@ func TestPublishingCanWaitForTheOwner(t *testing.T) {
 		t.Errorf("asked again: %d requests, %d approvals, %v", len(s1.reqs), len(st.approvals), err)
 	}
 
-	w.Autonomy.Classes[action.Publish] = action.Forbid
+	st.rules = map[string]string{"publish": "forbid"} // the owner changed it by chat
 	other := work("lyrics", "Odd one", "...", 29)
 	st.works = append(st.works, other)
 	s1.probs[other.Title] = 0.9

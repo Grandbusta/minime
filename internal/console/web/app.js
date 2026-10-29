@@ -918,14 +918,24 @@ function answersHTML(e) {
     const kept = entries.filter(([, a]) => a.probability >= 0.5).length;
     return `<div class="ans"><span>facts checked</span><div class="bar"><i style="width:${(kept / entries.length) * 100}%"></i></div><b>${kept}/${entries.length}</b></div>`;
   }
+  // System 1's answers can be labelled right or wrong, for replay.
+  const label = (k, said, choices) => {
+    if (e.tier !== "system1") return "";
+    const have = (e.labels || {})[k];
+    if (have) return `<div class="lbl ${have === said ? "right" : "wrong"}">${have === said ? "✓ right" : "✎ should be " + esc(have.replace(/_/g, " "))}</div>`;
+    return `<div class="lbl" data-d="${esc(e.id)}" data-q="${esc(k)}" data-said="${esc(said)}" data-choices="${esc(choices.join(","))}">
+      <button class="lb" data-v="right" title="System 1 got this right">✓</button><button class="lb" data-v="wrong" title="System 1 got this wrong">✗</button></div>`;
+  };
   return entries.map(([k, a]) => {
     if (a.refused) return `<div class="ans"><span>${esc(k)}</span><div>refused</div><b></b></div>`;
     if (a.type === "choice") {
       const top = Object.entries(a.probabilities || {}).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([c, p]) => `${c} ${Math.round(p * 100)}%`).join(" · ");
-      return `<div class="ans"><span title="${esc(top)}">${esc(k)}: ${esc(a.choice)}</span><div class="bar"><i style="width:${a.confidence * 100}%"></i></div><b>${Math.round(a.confidence * 100)}%</b></div>`;
+      return `<div class="ans"><span title="${esc(top)}">${esc(k)}: ${esc(a.choice)}</span><div class="bar"><i style="width:${a.confidence * 100}%"></i></div><b>${Math.round(a.confidence * 100)}%</b>
+        ${label(k, a.choice, Object.keys(a.probabilities || {}))}</div>`;
     }
     const p = a.probability ?? a.confidence ?? 0;
-    return `<div class="ans"><span>${esc(k)}</span><div class="bar"><i style="width:${p * 100}%"></i></div><b>${Math.round(p * 100)}%</b></div>`;
+    return `<div class="ans"><span>${esc(k)}</span><div class="bar"><i style="width:${p * 100}%"></i></div><b>${Math.round(p * 100)}%</b>
+      ${label(k, String(p >= 0.5), ["true", "false"])}</div>`;
   }).join("");
 }
 
@@ -943,6 +953,32 @@ async function openChain(id) {
   }
   openDrawer("DECISION CHAIN", `<button class="drawer-replay" id="drawerReplay">▶ REPLAY ON THE BRAIN</button>` + html);
   $("#drawerReplay").onclick = () => replay(id);
+  $("#drawerBody").querySelectorAll(".lbl[data-d]").forEach((el) => (el.onclick = (ev) => labelClick(el, ev, id)));
+}
+
+// labelClick: ✓ labels System 1's answer right; ✗ asks what it should have
+// been (a yes/no flips), then saves the label and reopens the chain.
+async function labelClick(el, ev, chainID) {
+  const b = ev.target.closest("button, select");
+  if (!b) return;
+  const { d, q, said } = el.dataset, choices = el.dataset.choices.split(",").filter(Boolean);
+  let value = null;
+  if (b.dataset.v === "right") value = said;
+  else if (b.dataset.v === "wrong") {
+    if (choices.length === 2 && choices.includes("true")) value = said === "true" ? "false" : "true";
+    else {
+      el.innerHTML = `<select class="lb-pick"><option value="">should be…</option>${choices.filter((c) => c !== said)
+        .map((c) => `<option value="${esc(c)}">${esc(c.replace(/_/g, " "))}</option>`).join("")}</select>`;
+      el.querySelector("select").onchange = (e2) => e2.target.value && saveLabel(d, q, e2.target.value, chainID);
+      return;
+    }
+  }
+  if (value !== null) saveLabel(d, q, value, chainID);
+}
+async function saveLabel(decision, question, value, chainID) {
+  const r = await fetch("/api/labels", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision_id: decision, question, value }) });
+  if (r.ok) openChain(chainID);
 }
 
 /* ---------- replay: a past decision chain, fired again on the brain ---------- */

@@ -716,3 +716,80 @@ func TestApprovals(t *testing.T) {
 		t.Errorf("recent = %+v, %v", recent, err)
 	}
 }
+
+func TestLearning(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Microsecond).AddDate(0, 0, -600) // older than other tests' data
+	thread := "learn-" + ulid.Make().String()
+
+	// Permission changes: every one kept, the newest per class wins.
+	if err := s.SaveAutonomyRule(ctx, "reach_out", "auto", "test:owner", ulid.ULID{}, base); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveAutonomyRule(ctx, "reach_out", "ask", "test:owner", ulid.ULID{}, base.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if rules, err := s.AutonomyRules(ctx); err != nil || rules["reach_out"] != "ask" {
+		t.Errorf("rules = %v, %v", rules, err)
+	}
+
+	// Forgetting a fact.
+	fp := perception.Percept{ID: ulid.Make(), Source: "test", ExternalID: ulid.Make().String(), Thread: thread, Kind: "message", At: base}
+	if _, err := s.SavePercept(ctx, fp); err != nil {
+		t.Fatal(err)
+	}
+	f := memory.Fact{ID: ulid.Make(), PerceptID: fp.ID, Subject: "test:x", Text: "x lives in Ikoyi", At: base}
+	if err := s.SaveFact(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.DeleteFact(ctx, f.ID); err != nil || !ok {
+		t.Errorf("delete: %v, %v", ok, err)
+	}
+	if ok, _ := s.DeleteFact(ctx, f.ID); ok {
+		t.Error("deleted twice")
+	}
+
+	// Two messages and their reads; the first is labelled, twice.
+	msg := func(text string, at time.Time, set string, choice string) decision.Decision {
+		p := perception.Percept{ID: ulid.Make(), Source: "test", ExternalID: ulid.Make().String(), Thread: thread, Kind: "message", Text: text, At: at}
+		if _, err := s.SavePercept(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+		d := decision.Decision{ID: ulid.Make(), At: at, PerceptID: p.ID, SetID: set, Tier: decision.TierSystem1, Action: choice, Gate: decision.GateAuto,
+			Answers: map[string]decision.Answer{"intent": {Type: decision.QuestionChoice, Choice: choice, Confidence: 0.6}}}
+		if err := s.SaveDecision(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	first := msg("I need a dentist", base, "incoming_message@1,life_area@1", "share")
+	second := msg("No, I was asking for help", base.Add(time.Minute), "incoming_message@1", "other")
+
+	if id, ok, err := s.LastRead(ctx, "incoming_message", "test", thread, base.Add(time.Minute)); err != nil || !ok || id != first.ID {
+		t.Errorf("last read = %s, %v, %v; want the first message's", id, ok, err)
+	}
+	for _, v := range []string{"small_talk", "ask_for_help"} {
+		if err := s.SaveLabel(ctx, memory.Label{DecisionID: first.ID, Question: "intent", Value: v, Source: memory.LabelFromChat, At: base}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	labels, err := s.Labels(ctx, []ulid.ULID{first.ID, second.ID})
+	if err != nil || len(labels) != 1 || labels[0].Value != "ask_for_help" {
+		t.Errorf("labels = %+v, %v", labels, err)
+	}
+	examples, err := s.LabelledExamples(ctx, "incoming_message", "intent", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mine []Example
+	for _, e := range examples {
+		if e.DecisionID == first.ID {
+			mine = append(mine, e)
+		}
+	}
+	if len(mine) != 1 || mine[0].Text != "I need a dentist" || mine[0].SetID != "incoming_message@1" || mine[0].Label != "ask_for_help" ||
+		mine[0].Answer.Choice != "share" || mine[0].Answer.Confidence != 0.6 {
+		t.Errorf("examples = %+v", mine)
+	}
+}

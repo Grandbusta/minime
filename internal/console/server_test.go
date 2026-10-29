@@ -21,8 +21,9 @@ import (
 )
 
 type fakeStore struct {
-	mu  sync.Mutex
-	log []store.LogEntry
+	mu     sync.Mutex
+	log    []store.LogEntry
+	labels []memory.Label
 }
 
 func (f *fakeStore) DecisionLog(_ context.Context, after time.Time, limit int, newestFirst bool) ([]store.LogEntry, error) {
@@ -75,6 +76,19 @@ func (f *fakeStore) RecentExchanges(context.Context, string, string, time.Time, 
 func (f *fakeStore) RecentApprovals(context.Context, int) ([]memory.Approval, error) {
 	return []memory.Approval{{ID: ulid.Make(), Class: "reach_out", Person: "telegram:1", What: "message Sam first (reminder)",
 		Text: "Don't forget the bank!", Status: memory.ApprovalPending, AskedAt: time.Now()}}, nil
+}
+
+func (f *fakeStore) Labels(context.Context, []ulid.ULID) ([]memory.Label, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.labels, nil
+}
+
+func (f *fakeStore) SaveLabel(_ context.Context, l memory.Label) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.labels = append(f.labels, l)
+	return nil
 }
 
 func (f *fakeStore) add(e store.LogEntry) {
@@ -250,5 +264,47 @@ func getJSON(t *testing.T, url string, v any) {
 	}
 	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
 		t.Fatalf("%s: %v", url, err)
+	}
+}
+
+func TestLabelling(t *testing.T) {
+	s, st := newServer("")
+	e := entry("small_talk", time.Now().Add(-time.Minute))
+	st.add(e)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	post := func(body string, headers map[string]string) int {
+		req, _ := http.NewRequest("POST", srv.URL+"/api/labels", strings.NewReader(body))
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	good := `{"decision_id":"` + e.ID.String() + `","question":"intent","value":"ask_for_help"}`
+	jsonHeader := map[string]string{"Content-Type": "application/json"}
+	if code := post(good, map[string]string{"Content-Type": "application/json", "Sec-Fetch-Site": "cross-site"}); code != http.StatusForbidden {
+		t.Errorf("cross-site = %d", code)
+	}
+	if code := post(good, map[string]string{"Content-Type": "text/plain"}); code != http.StatusForbidden {
+		t.Errorf("not JSON = %d", code)
+	}
+	if code := post(`{"decision_id":"x","question":"intent","value":"y"}`, jsonHeader); code != http.StatusBadRequest {
+		t.Errorf("bad id = %d", code)
+	}
+	if code := post(good, jsonHeader); code != http.StatusNoContent {
+		t.Fatalf("label = %d", code)
+	}
+	if len(st.labels) != 1 || st.labels[0].Value != "ask_for_help" || st.labels[0].Source != memory.LabelFromConsole {
+		t.Errorf("labels = %+v", st.labels)
+	}
+	var chain []entryView
+	getJSON(t, srv.URL+"/api/chain/"+e.ID.String(), &chain)
+	if len(chain) != 1 || chain[0].Labels["intent"] != "ask_for_help" {
+		t.Errorf("chain = %+v", chain)
 	}
 }

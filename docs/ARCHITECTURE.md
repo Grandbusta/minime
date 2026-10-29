@@ -470,11 +470,20 @@ type Decision struct {
 }
 ```
 
-**Learning loop (later phase):**
-- **Owner corrections** become labeled examples.
-- **Replay:** re-run labeled examples whenever a question set, threshold or provider changes.
+**Learning loop:**
+- ✅ **Owner corrections** become labeled examples: "that's not what I meant" in chat
+  (System 2 returns `misread`, and the read of the owner's previous message is labelled),
+  or ✓/✗ on any System 1 answer in the console (`labels` table, one per decision and
+  question).
+- ✅ **Replay:** `minime replay` re-asks System 1 about labelled messages with the
+  incoming_message set as it is now and reports accuracy then and now; the agent logs a
+  reminder on start when labels came from an older version.
 - **Graduation:** System 2 decisions that keep recurring get turned into System 1 question sets.
-- **Thresholds** get raised or lowered from measured accuracy.
+- **Thresholds** get raised or lowered from measured accuracy: replay suggests the lowest
+  act threshold that keeps 95% of confident answers right (10+ labels); the owner applies it.
+- **Facts** are corrected or forgotten from chat: the note gives each recalled fact a ref,
+  and System 2 returns `corrections` (replace or forget), allowed for facts about the
+  speaker, and about the agent itself only for its owner.
 
 ### 4.4 Action & autonomy
 - `Actuator`/`Tool` interface. Each tool declares an **action class**:
@@ -798,8 +807,8 @@ mini-me/
      subject (itself or a person); pronouns are resolved to names.
    - ✅ The intent read is a person's read, and every message gets a reply in the agent's
      own words.
-   - Later: forgetting and correcting facts. For now a changed fact is saved as a new one, and
-     both reach System 2 with their dates. Learning a person's real name when they say it.
+   - ✅ Forgetting and correcting facts (step 8). Later: learning a person's real name when
+     they say it.
 4. **Public profile** ✅ A page it writes about itself from what it chose to share.
    - Later: work to show (beats, books, notes), once it does things on its own; a contact
      link, once strangers can talk to it.
@@ -821,9 +830,12 @@ mini-me/
      for its music is TBD.
 7. ✅ **Autonomy gate:** action classes and a config policy (auto, ask, forbid); asking the
    owner on Telegram with inline Approve/Deny buttons, denied after 24h unanswered.
-   - Next: changing the policy from chat ("you can send reminders without asking"), each
-     widening logged.
-8. **Corrections & replay:** label decisions from chat, replay on change, tune thresholds.
+   - ✅ Changing the policy from chat ("you can send reminders without asking"): System 2
+     returns `permissions` (the owner's only), kept in `autonomy_rules` over the config and
+     logged as `permission` decisions; money and the world outside the chat stay config-only.
+8. ✅ **Corrections & replay:** wrong facts replaced or forgotten from chat; misreads labelled
+   from chat or the console; `minime replay` checks a changed question set against the
+   labels and suggests an act threshold.
 9. **Deploy:** Docker Compose on the VPS, metrics.
 10. **Money** (§4.10): a USDC wallet of its own, in four small steps, each on a testnet first:
     1. Receive and see: wallet provider, address, balance, ledger, payment sensor. No spending.

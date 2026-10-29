@@ -48,6 +48,8 @@ type Store interface {
 	Conversations(ctx context.Context) ([]memory.Conversation, error)
 	RecentExchanges(ctx context.Context, source, thread string, since time.Time, exclude ulid.ULID, limit int) ([]memory.Exchange, error)
 	RecentApprovals(ctx context.Context, limit int) ([]memory.Approval, error)
+	Labels(ctx context.Context, decisions []ulid.ULID) ([]memory.Label, error)
+	SaveLabel(ctx context.Context, l memory.Label) error
 }
 
 // Info is what the console says about the running agent.
@@ -83,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/conversation", s.conversation)
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/approvals", s.approvals)
+	mux.HandleFunc("POST /api/labels", s.label)
 	return s.auth(headers(mux))
 }
 
@@ -198,7 +201,56 @@ func (s *Server) chain(w http.ResponseWriter, r *http.Request) {
 	if s.failed(w, err) {
 		return
 	}
-	s.json(w, entryViews(entries))
+	views := entryViews(entries)
+	ids := make([]ulid.ULID, len(entries))
+	for i, e := range entries {
+		ids[i] = e.ID
+	}
+	labels, err := s.Store.Labels(r.Context(), ids)
+	if s.failed(w, err) {
+		return
+	}
+	for _, l := range labels {
+		for i := range views {
+			if views[i].ID == l.DecisionID.String() {
+				if views[i].Labels == nil {
+					views[i].Labels = map[string]string{}
+				}
+				views[i].Labels[l.Question] = l.Value
+			}
+		}
+	}
+	s.json(w, views)
+}
+
+// label records what a System 1 answer should have been, from the owner in
+// the console: the one thing the console writes. Only from the console's own
+// page (same origin), as JSON.
+func (s *Server) label(w http.ResponseWriter, r *http.Request) {
+	if site := r.Header.Get("Sec-Fetch-Site"); (site != "" && site != "same-origin") || r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var in struct {
+		Decision string `json:"decision_id"`
+		Question string `json:"question"`
+		Value    string `json:"value"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil {
+		http.Error(w, "bad label", http.StatusBadRequest)
+		return
+	}
+	id, err := ulid.Parse(in.Decision)
+	in.Question, in.Value = strings.TrimSpace(in.Question), strings.TrimSpace(in.Value)
+	if err != nil || in.Question == "" || in.Value == "" || len(in.Question) > 100 || len(in.Value) > 100 {
+		http.Error(w, "bad label", http.StatusBadRequest)
+		return
+	}
+	if s.failed(w, s.Store.SaveLabel(r.Context(), memory.Label{DecisionID: id, Question: in.Question, Value: in.Value,
+		Source: memory.LabelFromConsole, At: time.Now().UTC()})) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) memory(w http.ResponseWriter, r *http.Request) {
@@ -413,24 +465,25 @@ func (s *Server) approvals(w http.ResponseWriter, r *http.Request) {
 }
 
 type entryView struct {
-	ID        string          `json:"id"`
-	ParentID  string          `json:"parent_id,omitempty"`
-	At        time.Time       `json:"at"`
-	PerceptID string          `json:"percept_id,omitempty"`
-	Set       string          `json:"set"`
-	Tier      string          `json:"tier"`
-	Provider  string          `json:"provider"`
-	Answers   json.RawMessage `json:"answers"`
-	Action    string          `json:"action"`
-	Gate      string          `json:"gate"`
-	Reply     string          `json:"reply"`
-	LatencyMS int64           `json:"latency_ms"`
-	CostUSD   float64         `json:"cost_usd"`
-	Outcome   any             `json:"outcome"`
-	Source    string          `json:"source"`
-	Kind      string          `json:"kind"`
-	Text      string          `json:"text"`
-	Speaker   string          `json:"speaker"`
+	ID        string            `json:"id"`
+	ParentID  string            `json:"parent_id,omitempty"`
+	At        time.Time         `json:"at"`
+	PerceptID string            `json:"percept_id,omitempty"`
+	Set       string            `json:"set"`
+	Tier      string            `json:"tier"`
+	Provider  string            `json:"provider"`
+	Answers   json.RawMessage   `json:"answers"`
+	Action    string            `json:"action"`
+	Gate      string            `json:"gate"`
+	Labels    map[string]string `json:"labels,omitempty"` // what answers should have been, by question
+	Reply     string            `json:"reply"`
+	LatencyMS int64             `json:"latency_ms"`
+	CostUSD   float64           `json:"cost_usd"`
+	Outcome   any               `json:"outcome"`
+	Source    string            `json:"source"`
+	Kind      string            `json:"kind"`
+	Text      string            `json:"text"`
+	Speaker   string            `json:"speaker"`
 }
 
 func entryViews(entries []store.LogEntry) []entryView {

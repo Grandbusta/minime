@@ -58,6 +58,20 @@ type Promise struct {
 	Query   string // what the ability is to look for; "" if none
 }
 
+// Permission is a change the owner made to what the agent may do on its own.
+type Permission struct {
+	Class   string // an action class, e.g. "reach_out"
+	Verdict string // auto, ask or forbid
+}
+
+// Correction is a fact the speaker said is wrong (replaced by Text) or asked
+// it to forget.
+type Correction struct {
+	Fact   string // the fact's ref in the note, e.g. "f2"
+	Forget bool   // forget it; otherwise replace it with Text
+	Text   string // the right fact, in the third person with names
+}
+
 type Role string
 
 const (
@@ -81,8 +95,16 @@ type Response struct {
 	Reminders []Reminder
 	// Promises, with CollectFacts: what the agent agreed to make for the speaker.
 	Promises []Promise
-	Usage    Usage
-	CostUSD  float64 // 0 when no price is configured
+	// Permissions, with CollectFacts: changes the speaker made to what the
+	// agent may do on its own (only the owner's count).
+	Permissions []Permission
+	// Corrections, with CollectFacts: facts the speaker said are wrong, or asked it to forget.
+	Corrections []Correction
+	// Misread, with CollectFacts: what the speaker's previous message was
+	// really doing (one of the intent choices), when they said it was misread; "" if not.
+	Misread string
+	Usage   Usage
+	CostUSD float64 // 0 when no price is configured
 }
 
 type Usage struct {
