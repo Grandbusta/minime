@@ -173,3 +173,43 @@ func TestAskAndSettle(t *testing.T) {
 		t.Errorf("settled %v", calls[1])
 	}
 }
+
+func TestCallButtons(t *testing.T) {
+	s := NewSensor(nil, []int64{42}, 1, bus.New[perception.Percept](1), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	tap := func(from int64, data string) Update {
+		return Update{UpdateID: 1, CallbackQuery: &CallbackQuery{ID: "cb2", From: &User{ID: from, FirstName: "Busta"},
+			Message: &Message{MessageID: 5, Chat: Chat{ID: 7}}, Data: data}}
+	}
+	for data, want := range map[string]int{"call:01ABC:1": 1, "call:01ABC:x": -1} {
+		p, ok := s.percept(tap(42, data))
+		var pick perception.Pick
+		if !ok || p.Kind != perception.KindCall || json.Unmarshal(p.Payload, &pick) != nil || pick.Call != "01ABC" || pick.Option != want {
+			t.Errorf("%s: percept = %+v, %v; pick %+v", data, p, ok, pick)
+		}
+	}
+	for _, u := range []Update{tap(99, "call:01ABC:1"), tap(42, "call:01ABC:two"), tap(42, "call::1"), tap(42, "call:01ABC:-3")} {
+		if _, ok := s.percept(u); ok {
+			t.Errorf("kept %+v", u.CallbackQuery)
+		}
+	}
+
+	var calls []map[string]any
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		calls = append(calls, body)
+		io.WriteString(w, `{"ok":true,"result":{"message_id":78,"chat":{"id":7}}}`)
+	})
+	p := perception.Percept{Source: Source, Payload: json.RawMessage(`{"chat_id":7,"message_id":1,"user_id":42}`)}
+	where, err := c.Choose(context.Background(), p, "What would you do?", "01ABC", 3, 1)
+	if err != nil || string(where) != `{"chat_id":7,"message_id":78}` {
+		t.Fatalf("choose = %s, %v", where, err)
+	}
+	kb, _ := json.Marshal(calls[0]["reply_markup"])
+	for _, want := range []string{`"callback_data":"call:01ABC:1","text":"2 ★"`, `"callback_data":"call:01ABC:2","text":"3"`,
+		`"callback_data":"call:01ABC:x"`} {
+		if !strings.Contains(string(kb), want) {
+			t.Errorf("keyboard %s is missing %s", kb, want)
+		}
+	}
+}

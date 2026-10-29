@@ -2,6 +2,7 @@ package mind
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -53,6 +54,7 @@ type fakeStore struct {
 	lessons        []memory.Lesson
 	principles     []memory.Principle
 	cases          []memory.JudgmentCase
+	calls          []memory.Call
 	reviewAsked    map[ulid.ULID]time.Time
 	plans          []memory.LearningPlan
 	resources      []memory.Resource
@@ -1529,4 +1531,122 @@ func (s *fakeStore) JudgmentCases(_ context.Context, status string, types []stri
 		}
 	}
 	return out, nil
+}
+
+func (s *fakeStore) SavePrinciple(_ context.Context, p memory.Principle) error {
+	s.principles = append(s.principles, p)
+	return nil
+}
+
+func (s *fakeStore) SaveCall(_ context.Context, c memory.Call) error {
+	s.calls = append(s.calls, c)
+	return nil
+}
+
+func (s *fakeStore) callAt(id ulid.ULID) *memory.Call {
+	for i := range s.calls {
+		if s.calls[i].ID == id {
+			return &s.calls[i]
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) Call(_ context.Context, id ulid.ULID) (memory.Call, bool, error) {
+	if c := s.callAt(id); c != nil {
+		return *c, true, nil
+	}
+	return memory.Call{}, false, nil
+}
+
+func (s *fakeStore) RecentCalls(_ context.Context, status string, limit int) ([]memory.Call, error) {
+	var out []memory.Call
+	for i := len(s.calls) - 1; i >= 0 && len(out) < limit; i-- {
+		if status == "" || s.calls[i].Status == status {
+			out = append(out, s.calls[i])
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) CallsAskedSince(_ context.Context, mode string, since time.Time) (int, error) {
+	n := 0
+	for _, c := range s.calls {
+		if c.Mode == mode && !c.AskedAt.IsZero() && !c.AskedAt.Before(since) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *fakeStore) MarkCallAsked(_ context.Context, id ulid.ULID, where json.RawMessage, at time.Time) error {
+	if c := s.callAt(id); c != nil && c.Status == memory.CallLogged {
+		c.Status, c.Message, c.AskedAt = memory.CallAsked, where, at
+	}
+	return nil
+}
+
+func (s *fakeStore) StaleCalls(_ context.Context, before time.Time, limit int) ([]memory.Call, error) {
+	var out []memory.Call
+	for _, c := range s.calls {
+		if c.Status == memory.CallAsked && c.AskedAt.Before(before) && len(out) < limit {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) ExpireCall(_ context.Context, id ulid.ULID) (bool, error) {
+	if c := s.callAt(id); c != nil && c.Status == memory.CallAsked {
+		c.Status, c.Waiting = memory.CallExpired, ""
+		return true, nil
+	}
+	return false, nil
+}
+
+func (s *fakeStore) WaitForOwner(_ context.Context, id ulid.ULID, waiting string, at time.Time) error {
+	if c := s.callAt(id); c != nil {
+		c.Waiting, c.WaitingAt = waiting, at
+	}
+	return nil
+}
+
+func (s *fakeStore) WaitingCall(_ context.Context, since time.Time) (memory.Call, bool, error) {
+	for i := len(s.calls) - 1; i >= 0; i-- {
+		if c := s.calls[i]; c.Waiting != "" && !c.WaitingAt.Before(since) {
+			return c, true, nil
+		}
+	}
+	return memory.Call{}, false, nil
+}
+
+func (s *fakeStore) AnswerCall(_ context.Context, c memory.Call, asCase bool) (bool, error) {
+	old := s.callAt(c.ID)
+	if old == nil || old.Status == memory.CallAnswered {
+		return false, nil
+	}
+	agreed := c.OwnerPick == c.Pick
+	c.Status, c.Agreed, c.WaitingAt = memory.CallAnswered, &agreed, c.AnsweredAt
+	if asCase {
+		choice := c.OwnerChoice
+		if c.OwnerPick >= 0 {
+			choice = c.Options[c.OwnerPick]
+		}
+		c.CaseID = ulid.Make()
+		s.cases = append(s.cases, memory.JudgmentCase{ID: c.CaseID, Key: c.CaseID.String(), Type: memory.CallCaseType(c.Type),
+			Situation: c.Situation, Options: c.Options, Choice: choice, Reason: c.OwnerReason, Status: memory.JudgmentApproved, Source: c.AnsweredBy})
+	}
+	*old = c
+	return true, nil
+}
+
+func (s *fakeStore) GiveCallReason(_ context.Context, id ulid.ULID, reason string, _ time.Time) error {
+	c := s.callAt(id)
+	c.OwnerReason, c.Waiting = reason, ""
+	for i := range s.cases {
+		if s.cases[i].ID == c.CaseID {
+			s.cases[i].Reason = reason
+		}
+	}
+	return nil
 }

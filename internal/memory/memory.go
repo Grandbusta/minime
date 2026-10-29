@@ -271,9 +271,10 @@ const (
 )
 
 const (
-	GoalActive  = "active"
-	GoalDone    = "done"
-	GoalDropped = "dropped"
+	GoalProposed = "proposed" // waiting for its owner's answer before it's set
+	GoalActive   = "active"
+	GoalDone     = "done"
+	GoalDropped  = "dropped"
 )
 
 // Skill is something the agent is getting better at.
@@ -352,8 +353,81 @@ const (
 	JudgmentApproved = "approved"
 	JudgmentRejected = "rejected"
 
-	JudgmentFromSeed = "seed" // the owner's judgment file
+	JudgmentFromSeed   = "seed"   // the owner's judgment file
+	JudgmentFromReview = "review" // drawn by its weekly review from where the owner chose differently
 )
+
+// Call is a decision it made where it predicted what its owner would choose:
+// the options, its pick, why, and how sure it is they'd agree. The owner's
+// answer, when they give one, says whether they agree.
+type Call struct {
+	ID          ulid.ULID
+	Type        string // CallFocus, CallStart, ...
+	Mode        string // CallAfter or CallBefore
+	Situation   string
+	Options     []string
+	Pick        int // its pick, an index into Options
+	Why         string
+	Confidence  float64   // how sure it is the owner would agree, 0 to 1; 0 unknown
+	Ref         ulid.ULID // the goal or approval it is about; zero if none
+	Status      string    // CallLogged, CallAsked, CallAnswered or CallExpired
+	Waiting     string    // CallWaitingReason or CallWaitingAnswer: what the owner's next message is; "" nothing
+	WaitingAt   time.Time
+	OwnerPick   int // an index into Options; -1 their own answer (OwnerChoice)
+	OwnerChoice string
+	OwnerReason string
+	Agreed      *bool // nil until answered
+	AnsweredBy  string
+	Message     json.RawMessage // where it was asked
+	CaseID      ulid.ULID       // the case the answer became; zero if none
+	CreatedAt   time.Time
+	AskedAt     time.Time
+	AnsweredAt  time.Time
+}
+
+// Kinds of call.
+const (
+	CallFocus    = "focus"     // what to work on today (the day plan)
+	CallStart    = "start"     // starting something new rather than going on (the day plan)
+	CallNewGoal  = "new_goal"  // setting a goal (the weekly review)
+	CallDropGoal = "drop_goal" // dropping a goal (the weekly review)
+)
+
+const (
+	CallAfter  = "after"  // it acts on its pick; the owner grades it later
+	CallBefore = "before" // it waits for the owner's answer; unanswered, it goes with its pick
+
+	CallLogged   = "logged"   // made, not asked: graded in the console, if ever
+	CallAsked    = "asked"    // asked on Telegram
+	CallAnswered = "answered" // the owner chose
+	CallExpired  = "expired"  // asked, unanswered in time
+
+	CallWaitingReason = "reason" // the owner chose differently: their next message says why
+	CallWaitingAnswer = "answer" // the owner chose something else: their next message says what, and why
+
+	AnsweredOnTelegram = "telegram"
+	AnsweredInConsole  = "console"
+	AnsweredByApproval = "approval" // answering an approval: a yes or no to what it wanted
+)
+
+// CallCaseType is the kind of decision a call's answer is filed under as a case.
+func CallCaseType(callType string) string {
+	switch callType {
+	case "publish":
+		return "product"
+	case "commit", "reach_out":
+		return "autonomy"
+	}
+	return "life"
+}
+
+// Agreement is how often the owner agreed with its calls of one type, over
+// the latest ones they answered.
+type Agreement struct {
+	Type     string
+	Answered int
+	Agreed   int
+}
 
 // Who decided whether a work is public.
 const (

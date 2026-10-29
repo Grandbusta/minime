@@ -100,6 +100,17 @@ daily_life:
 search:
   provider: openai
 
+judgment:
+  # It predicts what you'd choose on its own decisions (today's focus,
+  # starting something new, setting or dropping a goal) and asks you on
+  # Telegram, so it learns your judgment. Goal calls always wait for you;
+  # day-plan calls it asks at most asks_per_day of, least sure first, and the
+  # rest you can grade in the console. Pick differently and your next message
+  # (within reply_window) is taken as why.
+  calls: true
+  asks_per_day: 3
+  reply_window: 30m
+
 autonomy:
   # owner: telegram:123   # who approves; default: the first of telegram.owner_ids
   classes:

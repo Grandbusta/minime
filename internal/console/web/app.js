@@ -942,7 +942,10 @@ let judgment = null, jFilter = "proposed";
 const J_STATUS = { proposed: "to review", approved: "approved", rejected: "rejected", all: "all" };
 
 async function loadJudgment() {
+  const first = !judgment;
   judgment = await api("/api/judgment");
+  if (first && ![...judgment.principles, ...judgment.cases].some((x) => x.status === "proposed")) jFilter = "all";
+  renderCalls();
   renderJudgment();
 }
 
@@ -981,6 +984,61 @@ function renderJudgment() {
   $("#cases").innerHTML = cs.length ? cs.map((c) => caseHTML(c, false)).join("")
     : `<div class="empty">${judgment.cases.length ? "nothing " + J_STATUS[jFilter] : "no decisions yet: add some to self/judgment.yaml"}</div>`;
 }
+
+const CALL_TYPES = { focus: "today's focus", start: "starting something new", new_goal: "setting a goal", drop_goal: "dropping a goal",
+  publish: "publishing", commit: "promises", reach_out: "messaging first", dream: "dreams" };
+
+function callHTML(c) {
+  const theirs = c.agreed === null ? null : c.owner_pick;
+  const opts = c.options.map((o, i) => `<span class="${i === c.pick ? "his" : ""} ${i === theirs ? "yours" : ""}">${i + 1}. ${esc(o)}${i === c.pick ? " ★" : ""}</span>`).join("");
+  const state = c.agreed === true ? "you agreed" : c.agreed === false ? "you chose differently" : c.status === "asked" ? "asked on Telegram"
+    : c.status === "expired" ? "no answer on Telegram" : "not asked";
+  const gradable = c.status === "logged" || c.status === "expired";
+  return `<div class="jcall ${c.agreed === true ? "agree" : c.agreed === false ? "differ" : ""}" data-id="${esc(c.id)}">
+    <div class="jtop"><b>${esc(CALL_TYPES[c.type] || c.type)}${c.mode === "before" ? " · waits for you" : ""}</b><span>${esc(state)} · ${fmtTime(c.created_at, true)}</span></div>
+    <p class="jsit">${esc(c.situation)}</p>
+    <div class="jopts">${opts}${c.owner_pick === -1 ? `<span class="yours">yours: ${esc(c.owner_choice)}</span>` : ""}</div>
+    ${c.why ? `<p class="jreason">his why: ${esc(c.why)}${c.confidence ? ` · ${Math.round(c.confidence * 100)}% sure you'd agree` : ""}</p>` : ""}
+    ${c.owner_reason && c.owner_reason !== c.owner_choice ? `<p class="jchoice">your why: “${esc(c.owner_reason)}”</p>` : ""}
+    ${gradable ? `<div class="jgrade"><span>you'd pick</span>${c.options.map((o, i) => `<button class="jb" data-opt="${i}">${i + 1}</button>`).join("")}
+      <button class="jb" data-opt="-1">something else</button></div>` : ""}
+    ${c.agreed === false && !c.owner_reason && c.answered_by !== "approval" ? `<div class="jbtns"><button class="jb" data-why="1">add your why</button></div>` : ""}
+  </div>`;
+}
+
+function renderCalls() {
+  const over = judgment.agreement_over || 20;
+  $("#agreement").innerHTML = judgment.agreement.length ? judgment.agreement.map((a) => {
+    const pct = Math.round((a.agreed / a.answered) * 100);
+    return `<div class="agr ${a.answered >= over && a.agreed >= Math.ceil(over * 0.9) ? "earned" : ""}"><b>${esc(CALL_TYPES[a.type] || a.type)}</b>
+      <span>${a.agreed}/${a.answered} agreed${a.answered < over ? ` · ${over - a.answered} more to judge` : ""}</span><i style="width:${pct}%"></i></div>`;
+  }).join("") : `<div class="empty">no answered calls yet</div>`;
+  $("#calls").innerHTML = judgment.calls.length ? judgment.calls.filter((c) => c.answered_by !== "approval").slice(0, 30).map(callHTML).join("")
+    : `<div class="empty">no calls yet: he makes them when he plans his day and reviews his week</div>`;
+}
+
+$("#calls").addEventListener("click", (e) => {
+  const b = e.target.closest(".jb");
+  if (!b) return;
+  const box = b.closest(".jcall"), id = box.dataset.id;
+  if (b.dataset.why || b.dataset.opt !== undefined) {
+    const opt = b.dataset.why ? null : Number(b.dataset.opt);
+    const agrees = opt !== null && opt === judgment.calls.find((c) => c.id === id).pick;
+    box.querySelector(".jgrade, .jbtns").outerHTML = `<div class="jedit">
+      ${opt === -1 ? `<textarea rows="2" maxlength="1000" class="jc-choice" placeholder="what you'd do"></textarea>` : ""}
+      <textarea rows="2" maxlength="1000" class="jc-reason" placeholder="${agrees ? "why (optional)" : "why? your reasons teach him most"}"></textarea>
+      <div class="jbtns"><button class="jb jb-approved" data-save="1">save</button><button class="jb" data-cancel="1">cancel</button></div></div>`;
+    box.querySelector("textarea").focus();
+    box.querySelector("[data-cancel]").onclick = (ev) => { ev.stopPropagation(); renderCalls(); };
+    box.querySelector("[data-save]").onclick = async (ev) => {
+      ev.stopPropagation();
+      const choice = box.querySelector(".jc-choice")?.value || "", reason = box.querySelector(".jc-reason").value;
+      const r = await fetch("/api/judgment/calls", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, option: opt === null ? 0 : opt, choice, reason }) });
+      if (r.ok) loadJudgment();
+    };
+  }
+});
 
 $("#jFilter").onclick = (e) => {
   const b = e.target.closest("[data-f]");

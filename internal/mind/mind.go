@@ -19,6 +19,7 @@ package mind
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -101,6 +102,18 @@ type Store interface {
 	SeedJudgment(ctx context.Context, cases []memory.JudgmentCase, principles []memory.Principle) (int, int, error)
 	Principles(ctx context.Context, status string) ([]memory.Principle, error)
 	JudgmentCases(ctx context.Context, status string, types []string) ([]memory.JudgmentCase, error)
+	SavePrinciple(ctx context.Context, p memory.Principle) error
+	SaveCall(ctx context.Context, c memory.Call) error
+	Call(ctx context.Context, id ulid.ULID) (memory.Call, bool, error)
+	RecentCalls(ctx context.Context, status string, limit int) ([]memory.Call, error)
+	CallsAskedSince(ctx context.Context, mode string, since time.Time) (int, error)
+	MarkCallAsked(ctx context.Context, id ulid.ULID, where json.RawMessage, at time.Time) error
+	StaleCalls(ctx context.Context, before time.Time, limit int) ([]memory.Call, error)
+	ExpireCall(ctx context.Context, id ulid.ULID) (bool, error)
+	WaitForOwner(ctx context.Context, id ulid.ULID, waiting string, at time.Time) error
+	WaitingCall(ctx context.Context, since time.Time) (memory.Call, bool, error)
+	AnswerCall(ctx context.Context, c memory.Call, asCase bool) (bool, error)
+	GiveCallReason(ctx context.Context, id ulid.ULID, reason string, at time.Time) error
 	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
 	SaveProject(ctx context.Context, p memory.Project) error
 	Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error)
@@ -177,9 +190,13 @@ type Config struct {
 	SkillLevel questions.Set
 	// Autonomy is what it may do on its own; the zero value allows everything.
 	Autonomy action.Policy
-	// Asker asks the owner what Autonomy says to ask first; nil: requests
-	// wait unsent and expire.
+	// Asker asks the owner what Autonomy says to ask first, and (as a
+	// Chooser) what they'd choose on its calls; nil: requests wait unsent
+	// and expire.
 	Asker Asker
+	// Calls is how it learns its owner's judgment from its own decisions;
+	// zero value: off.
+	Calls Calls
 	Log   *slog.Logger
 }
 
@@ -233,12 +250,19 @@ func (m *Mind) handle(ctx context.Context, p perception.Percept) {
 		m.answer(ctx, p) // the owner answering a request, not a message
 		return
 	}
+	if p.Kind == perception.KindCall {
+		m.pickAnswered(ctx, p) // the owner choosing on one of its calls
+		return
+	}
 
 	// Who is speaking: remembered from before, or met now. Their name comes
 	// from memory once known, so a changed account name does not change them.
 	person := m.meet(ctx, p)
 	if person.Name != "" {
 		p.SpeakerName = person.Name
+	}
+	if m.ownerReplied(ctx, p) { // why they chose differently, just asked
+		return
 	}
 
 	start := time.Now()

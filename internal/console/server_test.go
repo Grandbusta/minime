@@ -27,6 +27,7 @@ type fakeStore struct {
 	// principles and cases are its owner's judgment; reviews are what the owner did to them
 	principles []memory.Principle
 	cases      []memory.JudgmentCase
+	calls      []memory.Call
 }
 
 func (f *fakeStore) DecisionLog(_ context.Context, after time.Time, limit int, newestFirst bool) ([]store.LogEntry, error) {
@@ -456,5 +457,96 @@ func TestJudgmentReview(t *testing.T) {
 	}
 	if len(got.Cases) != 1 || got.Cases[0]["status"] != "rejected" || got.Cases[0]["reason"] != "I'd go bigger now" {
 		t.Errorf("cases = %+v", got.Cases)
+	}
+}
+
+func (f *fakeStore) RecentCalls(context.Context, string, int) ([]memory.Call, error) {
+	return f.calls, nil
+}
+func (f *fakeStore) Agreement(context.Context, int) ([]memory.Agreement, error) {
+	var a []memory.Agreement
+	for _, c := range f.calls {
+		if c.Agreed != nil {
+			a = append(a, memory.Agreement{Type: c.Type, Answered: 1, Agreed: map[bool]int{true: 1}[*c.Agreed]})
+		}
+	}
+	return a, nil
+}
+
+func (f *fakeStore) Call(_ context.Context, id ulid.ULID) (memory.Call, bool, error) {
+	for _, c := range f.calls {
+		if c.ID == id {
+			return c, true, nil
+		}
+	}
+	return memory.Call{}, false, nil
+}
+
+func (f *fakeStore) AnswerCall(_ context.Context, c memory.Call, _ bool) (bool, error) {
+	for i := range f.calls {
+		if f.calls[i].ID == c.ID && f.calls[i].Status != memory.CallAnswered {
+			agreed := c.OwnerPick == c.Pick
+			c.Status, c.Agreed = memory.CallAnswered, &agreed
+			f.calls[i] = c
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeStore) GiveCallReason(_ context.Context, id ulid.ULID, reason string, _ time.Time) error {
+	for i := range f.calls {
+		if f.calls[i].ID == id {
+			f.calls[i].OwnerReason = reason
+		}
+	}
+	return nil
+}
+
+func TestGradeCalls(t *testing.T) {
+	s, st := newServer("")
+	logged := memory.Call{ID: ulid.Make(), Type: memory.CallFocus, Situation: "What to focus on", Options: []string{"a", "b"}, Pick: 0,
+		Status: memory.CallLogged}
+	asked := memory.Call{ID: ulid.Make(), Type: memory.CallFocus, Situation: "s", Options: []string{"a", "b"}, Status: memory.CallAsked}
+	st.calls = []memory.Call{logged, asked}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	post := func(body string) int {
+		req, _ := http.NewRequest("POST", srv.URL+"/api/judgment/calls", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	steps := []struct {
+		name, body string
+		want       int
+	}{
+		{"out of range", `{"id":"` + logged.ID.String() + `","option":2}`, http.StatusBadRequest},
+		{"something else, empty", `{"id":"` + logged.ID.String() + `","option":-1}`, http.StatusBadRequest},
+		{"asked on Telegram", `{"id":"` + asked.ID.String() + `","option":0}`, http.StatusConflict},
+		{"unknown", `{"id":"` + ulid.Make().String() + `","option":0}`, http.StatusNotFound},
+		{"graded", `{"id":"` + logged.ID.String() + `","option":1,"reason":"rest first"}`, http.StatusNoContent},
+		{"graded again", `{"id":"` + logged.ID.String() + `","option":0,"reason":"x"}`, http.StatusConflict},
+	}
+	for _, step := range steps {
+		if code := post(step.body); code != step.want {
+			t.Errorf("%s = %d, want %d", step.name, code, step.want)
+		}
+	}
+	var got struct {
+		Calls     []map[string]any `json:"calls"`
+		Agreement []map[string]any `json:"agreement"`
+	}
+	getJSON(t, srv.URL+"/api/judgment", &got)
+	if len(got.Calls) != 2 || got.Calls[0]["agreed"] != false || got.Calls[0]["owner_pick"] != float64(1) || got.Calls[0]["owner_reason"] != "rest first" ||
+		got.Calls[0]["answered_by"] != memory.AnsweredInConsole {
+		t.Errorf("calls = %+v", got.Calls)
+	}
+	if len(got.Agreement) != 1 || got.Agreement[0]["answered"] != float64(1) || got.Agreement[0]["agreed"] != float64(0) {
+		t.Errorf("agreement = %+v", got.Agreement)
 	}
 }

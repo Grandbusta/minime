@@ -308,6 +308,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		SkillLevel: skillLevel,
 		Autonomy:   policy,
 		Asker:      tg,
+		Calls:      calls(cfg),
 		Log:        log.With("component", "mind"),
 	})
 	sensor := telegram.NewSensor(tg, cfg.Telegram.OwnerIDs, cfg.Telegram.PollTimeoutSeconds, percepts,
@@ -456,7 +457,12 @@ func growthMind(cfg *config.Config, life self.Life, st *store.Store, log *slog.L
 		return nil, err
 	}
 	return mind.New(mind.Config{Life: life, Store: st, System2: s2, Zone: zone, Day: day, Autonomy: policy, Abilities: abilities,
-		Log: log.With("component", "mind")}), nil
+		Calls: calls(cfg), Log: log.With("component", "mind")}), nil
+}
+
+// calls is how the mind learns its owner's judgment, from the config.
+func calls(cfg *config.Config) mind.Calls {
+	return mind.Calls{On: cfg.Judgment.Calls, AsksPerDay: cfg.Judgment.AsksPerDay, ReplyWindow: cfg.Judgment.ReplyWindow}
 }
 
 // runReview runs the weekly review now.

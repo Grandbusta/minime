@@ -157,6 +157,7 @@ func (m *Mind) decide(ctx context.Context, a memory.Approval, status string, per
 	}
 	a.Status = status
 	detail := m.carryOut(ctx, a, now)
+	m.approvalCall(ctx, a, now)
 
 	if m.Asker != nil && len(a.Message) > 0 {
 		ending := map[string]string{memory.ApprovalApproved: "✅ You said yes.", memory.ApprovalDenied: "❌ You said no.",

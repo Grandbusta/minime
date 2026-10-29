@@ -124,13 +124,20 @@ func (s *Sensor) percept(u Update) (perception.Percept, bool) {
 	}, true
 }
 
-// The data of an approval's buttons: "gate:<approval id>:y" or ":n".
-const gatePrefix = "gate:"
+// The data of an approval's buttons: "gate:<approval id>:y" or ":n"; of a
+// call's: "call:<call id>:<option>", "x" for something else.
+const (
+	gatePrefix = "gate:"
+	callPrefix = "call:"
+)
 
 // answer turns an owner's tap on an approval's button into a percept.
 func (s *Sensor) answer(q *CallbackQuery) (perception.Percept, bool) {
 	if q.From == nil || !s.owners[q.From.ID] || q.Message == nil {
 		return perception.Percept{}, false
+	}
+	if rest, ok := strings.CutPrefix(q.Data, callPrefix); ok {
+		return s.pick(q, rest)
 	}
 	rest, ok := strings.CutPrefix(q.Data, gatePrefix)
 	id, choice, ok2 := strings.Cut(rest, ":")
@@ -149,6 +156,55 @@ func (s *Sensor) answer(q *CallbackQuery) (perception.Percept, bool) {
 		Payload:     payload,
 		At:          time.Now().UTC(),
 	}, true
+}
+
+// pick turns an owner's tap on a call's option into a percept.
+func (s *Sensor) pick(q *CallbackQuery, rest string) (perception.Percept, bool) {
+	id, opt, ok := strings.Cut(rest, ":")
+	n, err := strconv.Atoi(opt)
+	if opt == "x" {
+		n, err = -1, nil
+	}
+	if !ok || id == "" || err != nil || n < -1 {
+		return perception.Percept{}, false
+	}
+	payload, _ := json.Marshal(perception.Pick{Call: id, Option: n})
+	return perception.Percept{
+		ID:          ulid.Make(),
+		Source:      Source,
+		ExternalID:  "callback:" + q.ID,
+		Thread:      strconv.FormatInt(q.Message.Chat.ID, 10),
+		Speaker:     Speaker(q.From.ID),
+		SpeakerName: speakerName(q.From),
+		Kind:        perception.KindCall,
+		Payload:     payload,
+		At:          time.Now().UTC(),
+	}, true
+}
+
+// Choose sends text with a button for each of a call's options, its pick
+// starred, and one for something else, to the chat p is in, and returns
+// where it was sent. Buttons are numbered; text lists the options.
+func (c *Client) Choose(ctx context.Context, p perception.Percept, text, id string, options int, pick int) (json.RawMessage, error) {
+	var pl MessagePayload
+	if err := json.Unmarshal(p.Payload, &pl); err != nil {
+		return nil, fmt.Errorf("telegram choose: bad payload: %w", err)
+	}
+	var rows [][]Button
+	var row []Button
+	for i := 0; i < options; i++ {
+		label := strconv.Itoa(i + 1)
+		if i == pick {
+			label += " ★"
+		}
+		row = append(row, Button{Text: label, Data: callPrefix + id + ":" + strconv.Itoa(i)})
+	}
+	rows = append(rows, row, []Button{{Text: "Something else", Data: callPrefix + id + ":x"}})
+	msgID, err := c.SendKeyboard(ctx, pl.ChatID, text, rows)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(AskMessage{ChatID: pl.ChatID, MessageID: msgID})
 }
 
 // AskMessage is where an approval request was sent, to update it after.

@@ -110,8 +110,9 @@ func planFormat(abilities []ability.Ability) *system2.Format {
 		names = append(names, a.Name())
 	}
 	return &system2.Format{Name: "day_plan", Schema: map[string]any{
-		"type": "object", "additionalProperties": false, "required": []string{"activities"},
+		"type": "object", "additionalProperties": false, "required": []string{"activities", "calls"},
 		"properties": map[string]any{
+			"calls": callsSchema,
 			"activities": map[string]any{"type": "array", "items": map[string]any{
 				"type": "object", "additionalProperties": false,
 				"required": []string{"at", "what", "project_id", "new_project_title", "project_kind", "ability", "query", "goal_id", "resource_id"},
@@ -209,6 +210,7 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 			GoalID          string `json:"goal_id"`
 			ResourceID      string `json:"resource_id"`
 		} `json:"activities"`
+		Calls []planCall `json:"calls"`
 	}
 	if err := json.Unmarshal([]byte(resp.Text), &plan); err != nil {
 		m.finishLife(ctx, d, start, decision.OutcomeFailed, "plan is not the requested JSON: "+err.Error())
@@ -279,7 +281,11 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 		lines = append(lines, journalAt.Format("15:04")+" "+journalText)
 	}
 	d.Reply = strings.Join(lines, "\n")
-	m.finishLife(ctx, d, start, decision.OutcomeOK, fmt.Sprintf("planned %d things", len(lines)))
+	detail := fmt.Sprintf("planned %d things", len(lines))
+	if n := m.logPlanCalls(ctx, plan.Calls, now); n > 0 {
+		detail += fmt.Sprintf("; %d calls for its owner", n)
+	}
+	m.finishLife(ctx, d, start, decision.OutcomeOK, detail)
 	m.Log.Info("planned the day", "things", len(lines), "cost_usd", resp.CostUSD)
 }
 
@@ -599,7 +605,7 @@ func (m *Mind) lifeInstructions(p Prompt) string {
 	return strings.NewReplacer("{name}", m.Life.Name, "{life_story}", list(m.Life.Story, "- (none)"),
 		"{personality}", list(m.Life.Personality, "- Be yourself."),
 		"{routine}", list(m.Life.Routine, "- No fixed routine: plan as you like."),
-		"{max}", fmt.Sprint(m.Day.MaxActivities), "{makes}", m.makesList(), "{kinds}", strings.Join(kinds, ", ")).Replace(p.Text)
+		"{max}", fmt.Sprint(m.Day.MaxActivities), "{owner}", m.ownerName(context.Background()), "{makes}", m.makesList(), "{kinds}", strings.Join(kinds, ", ")).Replace(p.Text)
 }
 
 func (m *Mind) finishLife(ctx context.Context, d *decision.Decision, start time.Time, status decision.OutcomeStatus, detail string) {

@@ -1662,3 +1662,247 @@ func (s *Store) ReviewCase(ctx context.Context, id ulid.ULID, status, reason str
 	}
 	return tag.RowsAffected() == 1, nil
 }
+
+// SavePrinciple stores a new principle and links the cases behind it (by key).
+func (s *Store) SavePrinciple(ctx context.Context, p memory.Principle) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("save principle: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `INSERT INTO principles (id, text, types, status, source, seed, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`, p.ID.String(), p.Text, nonNil(p.Types), p.Status, p.Source, nullString(p.Seed),
+		p.CreatedAt); err != nil {
+		return fmt.Errorf("save principle: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO principle_cases (principle_id, case_id)
+		SELECT $1, id FROM judgment_cases WHERE key = ANY($2) ON CONFLICT DO NOTHING`, p.ID.String(), nonNil(p.Cases)); err != nil {
+		return fmt.Errorf("link principle's cases: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
+const callColumns = `id, type, mode, situation, options, pick, why, confidence, ref, status, waiting, waiting_since, owner_pick,
+	owner_choice, owner_reason, agreed, answered_by, message, case_id, created_at, asked_at, answered_at`
+
+// SaveCall stores a new call.
+func (s *Store) SaveCall(ctx context.Context, c memory.Call) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO judgment_calls (id, type, mode, situation, options, pick, why, confidence, ref, status,
+		created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, c.ID.String(), c.Type, c.Mode, c.Situation, nonNil(c.Options),
+		c.Pick, c.Why, c.Confidence, nullULID(c.Ref), c.Status, c.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("save call: %w", err)
+	}
+	return nil
+}
+
+func scanCalls(rows pgx.Rows) ([]memory.Call, error) {
+	defer rows.Close()
+	var out []memory.Call
+	for rows.Next() {
+		var (
+			c                     memory.Call
+			id                    string
+			ref, caseID           *string
+			waitingAt, asked, ans *time.Time
+			ownerPick             *int
+		)
+		if err := rows.Scan(&id, &c.Type, &c.Mode, &c.Situation, &c.Options, &c.Pick, &c.Why, &c.Confidence, &ref, &c.Status, &c.Waiting,
+			&waitingAt, &ownerPick, &c.OwnerChoice, &c.OwnerReason, &c.Agreed, &c.AnsweredBy, &c.Message, &caseID, &c.CreatedAt, &asked,
+			&ans); err != nil {
+			return nil, err
+		}
+		var err error
+		if c.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if c.Ref, err = parseNullULID(ref); err != nil {
+			return nil, err
+		}
+		if c.CaseID, err = parseNullULID(caseID); err != nil {
+			return nil, err
+		}
+		for _, t := range []struct {
+			from *time.Time
+			to   *time.Time
+		}{{waitingAt, &c.WaitingAt}, {asked, &c.AskedAt}, {ans, &c.AnsweredAt}} {
+			if t.from != nil {
+				*t.to = *t.from
+			}
+		}
+		if ownerPick != nil {
+			c.OwnerPick = *ownerPick
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// Call returns a call, and whether there is one.
+func (s *Store) Call(ctx context.Context, id ulid.ULID) (memory.Call, bool, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+callColumns+` FROM judgment_calls WHERE id = $1`, id.String())
+	if err != nil {
+		return memory.Call{}, false, fmt.Errorf("query call: %w", err)
+	}
+	cs, err := scanCalls(rows)
+	if err != nil || len(cs) == 0 {
+		return memory.Call{}, false, err
+	}
+	return cs[0], true, nil
+}
+
+// RecentCalls returns its latest calls, newest first: all of them, or only
+// those with status.
+func (s *Store) RecentCalls(ctx context.Context, status string, limit int) ([]memory.Call, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+callColumns+` FROM judgment_calls WHERE $1 = '' OR status = $1
+		ORDER BY created_at DESC, id DESC LIMIT $2`, status, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query calls: %w", err)
+	}
+	return scanCalls(rows)
+}
+
+// CallsAskedSince counts the calls asked on Telegram since a time, in mode.
+func (s *Store) CallsAskedSince(ctx context.Context, mode string, since time.Time) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM judgment_calls WHERE mode = $1 AND asked_at >= $2`, mode, since).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count asked calls: %w", err)
+	}
+	return n, nil
+}
+
+// MarkCallAsked records that a logged call was asked, and where.
+func (s *Store) MarkCallAsked(ctx context.Context, id ulid.ULID, where json.RawMessage, at time.Time) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE judgment_calls SET status = $2, message = $3, asked_at = $4 WHERE id = $1 AND status = $5`,
+		id.String(), memory.CallAsked, where, at, memory.CallLogged); err != nil {
+		return fmt.Errorf("mark call asked: %w", err)
+	}
+	return nil
+}
+
+// StaleCalls returns calls asked before a time and still unanswered.
+func (s *Store) StaleCalls(ctx context.Context, before time.Time, limit int) ([]memory.Call, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+callColumns+` FROM judgment_calls WHERE status = $1 AND asked_at < $2
+		ORDER BY asked_at LIMIT $3`, memory.CallAsked, before, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query stale calls: %w", err)
+	}
+	return scanCalls(rows)
+}
+
+// ExpireCall marks an asked call unanswered in time. It returns whether it was still asked.
+func (s *Store) ExpireCall(ctx context.Context, id ulid.ULID) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE judgment_calls SET status = $2, waiting = '' WHERE id = $1 AND status = $3`,
+		id.String(), memory.CallExpired, memory.CallAsked)
+	if err != nil {
+		return false, fmt.Errorf("expire call: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// WaitForOwner records what the owner's next message is for a call: their
+// reason, or their own answer.
+func (s *Store) WaitForOwner(ctx context.Context, id ulid.ULID, waiting string, at time.Time) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE judgment_calls SET waiting = $2, waiting_since = $3 WHERE id = $1`,
+		id.String(), waiting, at); err != nil {
+		return fmt.Errorf("wait for owner: %w", err)
+	}
+	return nil
+}
+
+// WaitingCall returns the latest call waiting for the owner's next message
+// since a time, and whether there is one.
+func (s *Store) WaitingCall(ctx context.Context, since time.Time) (memory.Call, bool, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+callColumns+` FROM judgment_calls WHERE waiting <> '' AND waiting_since >= $1
+		ORDER BY waiting_since DESC LIMIT 1`, since)
+	if err != nil {
+		return memory.Call{}, false, fmt.Errorf("query waiting call: %w", err)
+	}
+	cs, err := scanCalls(rows)
+	if err != nil || len(cs) == 0 {
+		return memory.Call{}, false, err
+	}
+	return cs[0], true, nil
+}
+
+// AnswerCall records the owner's answer to a call (c's OwnerPick,
+// OwnerChoice, OwnerReason, AnsweredBy, AnsweredAt and Waiting), and whether
+// they agree. With asCase, the answer is also kept as one of their decisions
+// (approved: it's theirs), so their judgment grows. It returns false if the
+// call was already answered.
+func (s *Store) AnswerCall(ctx context.Context, c memory.Call, asCase bool) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("answer call: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	agreed := c.OwnerPick == c.Pick
+	var caseID any
+	if asCase {
+		choice := c.OwnerChoice
+		if c.OwnerPick >= 0 && c.OwnerPick < len(c.Options) {
+			choice = c.Options[c.OwnerPick]
+		}
+		id := ulid.Make()
+		if _, err := tx.Exec(ctx, `INSERT INTO judgment_cases (id, key, type, situation, options, choice, reason, status, source, at, updated_at)
+			VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $9)`, id.String(), memory.CallCaseType(c.Type), c.Situation, nonNil(c.Options),
+			choice, c.OwnerReason, memory.JudgmentApproved, c.AnsweredBy, c.AnsweredAt); err != nil {
+			return false, fmt.Errorf("answer call: save case: %w", err)
+		}
+		caseID = id.String()
+	}
+	tag, err := tx.Exec(ctx, `UPDATE judgment_calls SET status = $2, owner_pick = $3, owner_choice = $4, owner_reason = $5, agreed = $6,
+		answered_by = $7, answered_at = $8, waiting = $9, waiting_since = $8, case_id = $10 WHERE id = $1 AND status <> $2`,
+		c.ID.String(), memory.CallAnswered, c.OwnerPick, c.OwnerChoice, c.OwnerReason, agreed, c.AnsweredBy, c.AnsweredAt, c.Waiting, caseID)
+	if err != nil {
+		return false, fmt.Errorf("answer call: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+	return true, tx.Commit(ctx)
+}
+
+// GiveCallReason records the owner's reason for an answered call, and on
+// the case it became; it stops waiting for one.
+func (s *Store) GiveCallReason(ctx context.Context, id ulid.ULID, reason string, at time.Time) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("call reason: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var caseID *string
+	if err := tx.QueryRow(ctx, `UPDATE judgment_calls SET owner_reason = $2, waiting = '' WHERE id = $1 RETURNING case_id`,
+		id.String(), reason).Scan(&caseID); err != nil {
+		return fmt.Errorf("call reason: %w", err)
+	}
+	if caseID != nil {
+		if _, err := tx.Exec(ctx, `UPDATE judgment_cases SET reason = $2, updated_at = $3 WHERE id = $1`, *caseID, reason, at); err != nil {
+			return fmt.Errorf("call reason: %w", err)
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// Agreement is how often the owner agreed with its calls, by type, over the
+// latest n they answered of each type.
+func (s *Store) Agreement(ctx context.Context, n int) ([]memory.Agreement, error) {
+	rows, err := s.pool.Query(ctx, `SELECT type, count(*), count(*) FILTER (WHERE agreed) FROM (
+			SELECT type, agreed, row_number() OVER (PARTITION BY type ORDER BY answered_at DESC, id DESC) AS n
+			FROM judgment_calls WHERE agreed IS NOT NULL) latest
+		WHERE n <= $1 GROUP BY type ORDER BY type`, n)
+	if err != nil {
+		return nil, fmt.Errorf("query agreement: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Agreement
+	for rows.Next() {
+		var a memory.Agreement
+		if err := rows.Scan(&a.Type, &a.Answered, &a.Agreed); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}

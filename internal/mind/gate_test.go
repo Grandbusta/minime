@@ -32,6 +32,14 @@ func (f *fakeAsker) Ask(_ context.Context, p perception.Percept, text, id string
 	return json.RawMessage(`{"message_id":1}`), nil
 }
 
+func (f *fakeAsker) Choose(_ context.Context, p perception.Percept, text, id string, n, pick int) (json.RawMessage, error) {
+	if p.Speaker != owner {
+		panic("asked someone who isn't the owner: " + p.Speaker)
+	}
+	f.asked, f.ids = append(f.asked, text), append(f.ids, id)
+	return json.RawMessage(`{"message_id":2}`), nil
+}
+
 func (f *fakeAsker) Settle(_ context.Context, _ json.RawMessage, text string) error {
 	f.settled = append(f.settled, text)
 	return nil

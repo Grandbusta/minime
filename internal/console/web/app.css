@@ -335,6 +335,21 @@ b { font-weight: 600; }
   color: var(--ink); font: 13px/1.45 var(--sans); resize: vertical; }
 .jp details { margin-top: 10px; }
 .jp summary { cursor: pointer; font: 10px var(--mono); color: var(--muted); letter-spacing: .06em; }
+.calls-card { margin-bottom: 16px; }
+.jhead { margin-top: 4px; }
+.agreement { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.agr { position: relative; overflow: hidden; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: rgba(0,0,0,.25); }
+.agr b { display: block; font: 600 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--soft); }
+.agr span { font: 10px var(--mono); color: var(--muted); }
+.agr i { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--s1); }
+.agr.earned { border-color: rgba(124,255,107,.45); } .agr.earned i { background: var(--accent); }
+.jcall { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: rgba(0,0,0,.25); }
+.jcall.agree { border-color: rgba(124,255,107,.3); } .jcall.differ { border-color: rgba(255,195,92,.4); }
+.jcall .jopts span.his { color: var(--s1); border-color: rgba(91,231,255,.4); }
+.jcall .jopts span.yours { color: var(--lf); border-color: rgba(255,195,92,.55); }
+.jcall .jopts span.his.yours { color: var(--accent); border-color: rgba(124,255,107,.5); }
+.jgrade { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.jgrade span { font: 10px var(--mono); color: var(--muted); letter-spacing: .06em; text-transform: uppercase; margin-right: 4px; }
 .jp details .jcase { margin-top: 8px; background: rgba(0,0,0,.3); }
 
 /* ---------- activity: chains of neurons ---------- */

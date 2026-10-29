@@ -43,6 +43,17 @@ const (
 // so it is never part of the conversation.
 const KindApproval = "approval"
 
+// KindCall is the owner choosing what they'd do on one of the agent's calls
+// (a decision where it predicted their choice). Its Payload is a Pick; it
+// has no Text.
+const KindCall = "call"
+
+// Pick is the owner's choice on a call.
+type Pick struct {
+	Call   string `json:"call"`   // the call's ID
+	Option int    `json:"option"` // an index into its options; -1 something else
+}
+
 // Answer is the owner's answer to an approval.
 type Answer struct {
 	Approval string `json:"approval"` // the approval's ID

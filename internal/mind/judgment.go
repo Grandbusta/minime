@@ -83,12 +83,7 @@ func (m *Mind) judgmentNote(ctx context.Context, types []string) string {
 	if len(rules) == 0 && len(cs) == 0 {
 		return ""
 	}
-	owner := "your owner"
-	if m.Autonomy.Owner != "" {
-		if n := m.person(ctx, m.Autonomy.Owner).Name; n != "" {
-			owner = n
-		}
-	}
+	owner := m.ownerName(ctx)
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n\nHow %s decides (when a choice is yours, choose the way %s would):", owner, owner)
 	for _, r := range rules {

@@ -353,8 +353,27 @@ its week and plans its learning, each with the kinds of decision that fit (`gene
 seeded once isn't seeded again, so your edits and rejections stay. Add new ones to the file
 at any time; they come in as proposed on the next start.
 
-Next: it will predict what you'd choose on its own decisions and ask you on Telegram, and
-take over a kind of decision once it matches you on 18 of the last 20.
+It also learns from its own decisions. When it decides something that's your kind of call,
+it makes a **call**: the options it weighed, its pick, why, and how sure it is you'd agree.
+
+| Call | Where | What happens |
+|---|---|---|
+| `focus`: what to work on today | its day plan | it acts on its pick; you grade it |
+| `start`: start something new, or go on | its day plan | it acts on its pick; you grade it |
+| `new_goal`, `drop_goal` | its weekly review | it waits for your answer; unanswered in 24h, it goes with its pick (not counted) |
+| `publish`, `commit`, `reach_out`, `dream` | approvals you already answer | your yes or no counts as agreeing or not |
+
+It asks you on Telegram with a button per option (its pick starred) and **Something else**:
+every goal call, and up to `judgment.asks_per_day` (3) day-plan calls a day, the ones it's
+least sure of. Pick differently and it asks what tipped it: your next message (within
+`judgment.reply_window`, 30m) is your reason, not something to reply to. Choose something
+else and your next message is your answer. Every answer becomes one of your decisions,
+approved, so your judgment grows. The rest you can grade in the console's Judgment view,
+under **His calls**, which also shows how often you agree, by kind of call, over the last 20.
+Its weekly review turns the week's disagreements into new principles, proposed for you to
+approve. Turn calls off with `judgment.calls: false`.
+
+Next: a kind of decision becomes its own once it matches you on 18 of the last 20.
 
 ### Corrections and replay
 

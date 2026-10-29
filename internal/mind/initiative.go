@@ -58,6 +58,8 @@ func (m *Mind) tick(ctx context.Context, now time.Time) {
 	m.planDay(ctx, now)
 	m.expireApprovals(ctx, now)
 	m.sendApprovals(ctx)
+	m.expireCalls(ctx, now)
+	m.sendCalls(ctx, now)
 	m.doDueIntentions(ctx, now)
 	m.preparePromises(ctx, now)
 	m.weeklyReview(ctx, now)

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"slices"
 	"strings"
@@ -1071,5 +1072,77 @@ func TestJudgment(t *testing.T) {
 	}
 	if ok, _ := s.ReviewCase(ctx, ulid.Make(), memory.JudgmentApproved, "", now); ok {
 		t.Error("reviewed a case that doesn't exist")
+	}
+}
+
+func TestCalls(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond).AddDate(2, 0, 0) // after other tests' calls
+	kind := "focus_" + ulid.Make().String()[:8]                         // a type only this run uses
+	c := memory.Call{ID: ulid.Make(), Type: kind, Mode: memory.CallAfter, Situation: "What to focus on today.",
+		Options: []string{"the motif", "Equiano"}, Pick: 0, Why: "the stage is due", Confidence: 0.7, Status: memory.CallLogged, CreatedAt: now}
+	if err := s.SaveCall(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkCallAsked(ctx, c.ID, json.RawMessage(`{"chat_id":1,"message_id":2}`), now); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.CallsAskedSince(ctx, memory.CallAfter, now.Add(-time.Minute)); err != nil || n != 1 {
+		t.Errorf("asked since = %d, %v", n, err)
+	}
+	if stale, err := s.StaleCalls(ctx, now.Add(time.Minute), 100); err != nil || !slices.ContainsFunc(stale, func(x memory.Call) bool { return x.ID == c.ID }) {
+		t.Errorf("stale = %v, %v", stale, err)
+	}
+	// The owner picks the other option, then says why.
+	c.OwnerPick, c.AnsweredBy, c.AnsweredAt, c.Waiting = 1, memory.AnsweredOnTelegram, now.Add(time.Minute), memory.CallWaitingReason
+	if ok, err := s.AnswerCall(ctx, c, true); err != nil || !ok {
+		t.Fatalf("answer = %v, %v", ok, err)
+	}
+	if ok, _ := s.AnswerCall(ctx, c, true); ok {
+		t.Error("answered twice")
+	}
+	w, ok, err := s.WaitingCall(ctx, now)
+	if err != nil || !ok || w.ID != c.ID || w.Waiting != memory.CallWaitingReason {
+		t.Fatalf("waiting = %+v, %v, %v", w, ok, err)
+	}
+	if err := s.GiveCallReason(ctx, c.ID, "reading feeds the music", now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := s.Call(ctx, c.ID)
+	if err != nil || !ok || got.Status != memory.CallAnswered || got.Agreed == nil || *got.Agreed || got.OwnerReason != "reading feeds the music" ||
+		got.Waiting != "" || got.CaseID.IsZero() || len(got.Message) == 0 {
+		t.Fatalf("call = %+v, %v, %v", got, ok, err)
+	}
+	cases, _ := s.JudgmentCases(ctx, memory.JudgmentApproved, []string{"life"})
+	if !slices.ContainsFunc(cases, func(x memory.JudgmentCase) bool {
+		return x.ID == got.CaseID && x.Choice == "Equiano" && x.Reason == "reading feeds the music" && x.Source == memory.AnsweredOnTelegram
+	}) {
+		t.Error("the answer didn't become an approved case with its reason")
+	}
+	agree := memory.Call{ID: ulid.Make(), Type: kind, Mode: memory.CallAfter, Situation: "s", Options: []string{"a", "b"}, Status: memory.CallLogged,
+		CreatedAt: now}
+	if err := s.SaveCall(ctx, agree); err != nil {
+		t.Fatal(err)
+	}
+	agree.OwnerPick, agree.AnsweredBy, agree.AnsweredAt = 0, memory.AnsweredInConsole, now.Add(3*time.Minute)
+	if ok, err := s.AnswerCall(ctx, agree, false); err != nil || !ok {
+		t.Fatalf("answer = %v, %v", ok, err)
+	}
+	as, err := s.Agreement(ctx, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(as, func(a memory.Agreement) bool { return a.Type == kind && a.Answered == 2 && a.Agreed == 1 }) {
+		t.Errorf("agreement = %+v", as)
+	}
+	p := memory.Principle{ID: ulid.Make(), Text: "Reading feeds the music " + kind, Types: []string{"life"}, Cases: []string{got.CaseID.String()},
+		Status: memory.JudgmentProposed, Source: "review", CreatedAt: now}
+	if err := s.SavePrinciple(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := s.Principles(ctx, memory.JudgmentProposed)
+	if !slices.ContainsFunc(ps, func(x memory.Principle) bool { return x.ID == p.ID && len(x.Cases) == 1 }) {
+		t.Error("the principle isn't saved with its case")
 	}
 }

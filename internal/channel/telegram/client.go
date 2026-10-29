@@ -105,6 +105,11 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) err
 
 // SendButtons sends text with a row of buttons under it, and returns the message's ID.
 func (c *Client) SendButtons(ctx context.Context, chatID int64, text string, buttons []Button) (int64, error) {
+	return c.SendKeyboard(ctx, chatID, text, [][]Button{buttons})
+}
+
+// SendKeyboard sends text with rows of buttons under it, and returns the message's ID.
+func (c *Client) SendKeyboard(ctx context.Context, chatID int64, text string, rows [][]Button) (int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	if r := []rune(text); len(r) > maxMessageRunes {
@@ -112,7 +117,7 @@ func (c *Client) SendButtons(ctx context.Context, chatID int64, text string, but
 	}
 	var m Message
 	err := c.call(ctx, "sendMessage", map[string]any{"chat_id": chatID, "text": text,
-		"reply_markup": map[string]any{"inline_keyboard": [][]Button{buttons}}}, &m)
+		"reply_markup": map[string]any{"inline_keyboard": rows}}, &m)
 	return m.MessageID, err
 }
 

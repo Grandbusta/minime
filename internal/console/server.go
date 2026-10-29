@@ -63,7 +63,16 @@ type Store interface {
 	JudgmentCases(ctx context.Context, status string, types []string) ([]memory.JudgmentCase, error)
 	ReviewPrinciple(ctx context.Context, id ulid.ULID, status, text string, at time.Time) (bool, error)
 	ReviewCase(ctx context.Context, id ulid.ULID, status, reason string, at time.Time) (bool, error)
+	RecentCalls(ctx context.Context, status string, limit int) ([]memory.Call, error)
+	Agreement(ctx context.Context, n int) ([]memory.Agreement, error)
+	Call(ctx context.Context, id ulid.ULID) (memory.Call, bool, error)
+	AnswerCall(ctx context.Context, c memory.Call, asCase bool) (bool, error)
+	GiveCallReason(ctx context.Context, id ulid.ULID, reason string, at time.Time) error
 }
+
+// agreementOver is how many of the latest answered calls of a type its
+// agreement is measured over.
+const agreementOver = 20
 
 // Info is what the console says about the running agent.
 type Info struct {
@@ -102,6 +111,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/growth", s.growth)
 	mux.HandleFunc("GET /api/judgment", s.judgment)
 	mux.HandleFunc("POST /api/judgment", s.reviewJudgment)
+	mux.HandleFunc("POST /api/judgment/calls", s.gradeCall)
 	return s.auth(headers(mux))
 }
 
@@ -608,7 +618,95 @@ func (s *Server) judgment(w http.ResponseWriter, r *http.Request) {
 		cv[i] = map[string]any{"id": c.ID.String(), "key": c.Key, "type": c.Type, "situation": c.Situation, "options": nonNil(c.Options),
 			"choice": c.Choice, "reason": c.Reason, "status": c.Status, "source": c.Source, "at": c.At}
 	}
-	s.json(w, map[string]any{"principles": pv, "cases": cv})
+	calls, err := s.Store.RecentCalls(r.Context(), "", 60)
+	if s.failed(w, err) {
+		return
+	}
+	agreement, err := s.Store.Agreement(r.Context(), agreementOver)
+	if s.failed(w, err) {
+		return
+	}
+	callv := make([]map[string]any, len(calls))
+	for i, c := range calls {
+		v := map[string]any{"id": c.ID.String(), "type": c.Type, "mode": c.Mode, "situation": c.Situation, "options": nonNil(c.Options),
+			"pick": c.Pick, "why": c.Why, "confidence": c.Confidence, "status": c.Status, "waiting": c.Waiting, "created_at": c.CreatedAt,
+			"answered_by": c.AnsweredBy, "owner_choice": c.OwnerChoice, "owner_reason": c.OwnerReason, "agreed": c.Agreed}
+		if c.Agreed != nil {
+			v["owner_pick"] = c.OwnerPick
+		}
+		callv[i] = v
+	}
+	av := make([]map[string]any, len(agreement))
+	for i, a := range agreement {
+		av[i] = map[string]any{"type": a.Type, "answered": a.Answered, "agreed": a.Agreed}
+	}
+	s.json(w, map[string]any{"principles": pv, "cases": cv, "calls": callv, "agreement": av, "agreement_over": agreementOver})
+}
+
+// gradeCall records what the owner would have chosen on one of its calls
+// that they weren't asked about, or didn't answer in time; or their reason
+// for an answer that has none.
+func (s *Server) gradeCall(w http.ResponseWriter, r *http.Request) {
+	if !fromConsole(w, r) {
+		return
+	}
+	var in struct {
+		ID     string `json:"id"`
+		Option int    `json:"option"` // -1: their own answer, in choice
+		Choice string `json:"choice"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&in); err != nil {
+		http.Error(w, "bad grade", http.StatusBadRequest)
+		return
+	}
+	id, err := ulid.Parse(in.ID)
+	in.Choice, in.Reason = strings.TrimSpace(in.Choice), strings.TrimSpace(in.Reason)
+	if err != nil || len([]rune(in.Choice)) > 1000 || len([]rune(in.Reason)) > 1000 {
+		http.Error(w, "bad grade", http.StatusBadRequest)
+		return
+	}
+	c, ok, err := s.Store.Call(r.Context(), id)
+	if s.failed(w, err) {
+		return
+	}
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	now := time.Now().UTC()
+	switch c.Status {
+	case memory.CallAnswered: // only a reason can be added
+		if in.Reason == "" || c.OwnerReason != "" {
+			http.Error(w, "already answered", http.StatusConflict)
+			return
+		}
+		if s.failed(w, s.Store.GiveCallReason(r.Context(), c.ID, in.Reason, now)) {
+			return
+		}
+	case memory.CallLogged, memory.CallExpired:
+		if in.Option < -1 || in.Option >= len(c.Options) || (in.Option == -1 && in.Choice == "") {
+			http.Error(w, "bad grade", http.StatusBadRequest)
+			return
+		}
+		c.OwnerPick, c.OwnerChoice, c.OwnerReason, c.AnsweredBy, c.AnsweredAt, c.Waiting = in.Option, in.Choice, in.Reason,
+			memory.AnsweredInConsole, now, ""
+		if in.Option >= 0 {
+			c.OwnerChoice = ""
+		}
+		answered, err := s.Store.AnswerCall(r.Context(), c, true)
+		if s.failed(w, err) {
+			return
+		}
+		if !answered {
+			http.Error(w, "already answered", http.StatusConflict)
+			return
+		}
+	default: // asked on Telegram: answered there, where it acts on the answer
+		http.Error(w, "answer it on Telegram", http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // reviewJudgment records the owner's review of a principle or one of their

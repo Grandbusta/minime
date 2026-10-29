@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"minime/internal/decision"
 	"minime/internal/memory"
 	"minime/internal/providers/system2"
+	"minime/internal/self"
 )
 
 // The weekly review: once a week (Day.ReviewAt) it looks back at what it did
@@ -35,22 +37,27 @@ const (
 
 var reviewFormat = &system2.Format{Name: "weekly_review", Schema: map[string]any{
 	"type": "object", "additionalProperties": false,
-	"required": []string{"title", "text", "goals", "new_goals", "projects", "dreams", "retire_lessons", "new_lessons", "plans", "new_resources"},
+	"required": []string{"title", "text", "goals", "new_goals", "projects", "dreams", "retire_lessons", "new_lessons", "plans", "new_resources",
+		"principles"},
 	"properties": map[string]any{
 		"title": map[string]any{"type": "string"},
 		"text":  map[string]any{"type": "string"},
 		"goals": map[string]any{"type": "array", "items": map[string]any{
-			"type": "object", "additionalProperties": false, "required": []string{"goal_id", "progress", "status", "skill"},
+			"type": "object", "additionalProperties": false, "required": []string{"goal_id", "progress", "status", "skill", "confidence"},
 			"properties": map[string]any{
-				"goal_id":  map[string]any{"type": "string"},
-				"skill":    map[string]any{"type": "string", "description": "the skill it grows, if it's about one and doesn't say yet; else empty"},
-				"progress": map[string]any{"type": "string"},
-				"status":   map[string]any{"type": "string", "enum": []string{memory.GoalActive, memory.GoalDone, memory.GoalDropped}},
+				"goal_id":    map[string]any{"type": "string"},
+				"confidence": map[string]any{"type": "number", "description": "dropping it: how sure you are your owner would drop it too, 0 to 1; else 0"},
+				"skill":      map[string]any{"type": "string", "description": "the skill it grows, if it's about one and doesn't say yet; else empty"},
+				"progress":   map[string]any{"type": "string"},
+				"status":     map[string]any{"type": "string", "enum": []string{memory.GoalActive, memory.GoalDone, memory.GoalDropped}},
 			},
 		}},
 		"new_goals": map[string]any{"type": "array", "items": map[string]any{
-			"type": "object", "additionalProperties": false, "required": []string{"dream_id", "text", "done_when", "due", "project_ids", "skill"},
+			"type": "object", "additionalProperties": false,
+			"required": []string{"dream_id", "text", "done_when", "due", "project_ids", "skill", "why", "confidence"},
 			"properties": map[string]any{
+				"why":         map[string]any{"type": "string", "description": "why this goal, now"},
+				"confidence":  map[string]any{"type": "number", "description": "how sure you are your owner would set it too, 0 to 1"},
 				"skill":       map[string]any{"type": "string", "description": "the skill it grows, if it's about one; else empty"},
 				"dream_id":    map[string]any{"type": "string"},
 				"project_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "projects that serve it"},
@@ -89,6 +96,14 @@ var reviewFormat = &system2.Format{Name: "weekly_review", Schema: map[string]any
 			"properties": map[string]any{
 				"skill":  map[string]any{"type": "string"},
 				"lesson": map[string]any{"type": "string"},
+			},
+		}},
+		"principles": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"text", "types", "calls"},
+			"properties": map[string]any{
+				"text":  map[string]any{"type": "string", "description": "a rule of your owner's, in a sentence"},
+				"types": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": self.DecisionTypes}},
+				"calls": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "ids of the calls it comes from"},
 			},
 		}},
 		"dreams": map[string]any{"type": "array", "items": map[string]any{
@@ -189,6 +204,8 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 	fmt.Fprintf(&note, "\n\nWhat you can study with (for new resources):\n%s", m.readingList())
 	fmt.Fprintf(&note, "\n\nYou can have at most %d goals at a time, and %d dreams.", maxActiveGoals, maxActiveDreams)
 	note.WriteString(m.judgmentNote(ctx, reviewJudgment))
+	disagreements, callCases := m.disagreementsNote(ctx, now)
+	note.WriteString(disagreements)
 
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.lifeInstructions(m.Day.ReviewPrompt),
@@ -204,19 +221,27 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 		Title string `json:"title"`
 		Text  string `json:"text"`
 		Goals []struct {
-			GoalID   string `json:"goal_id"`
-			Progress string `json:"progress"`
-			Status   string `json:"status"`
-			Skill    string `json:"skill"`
+			GoalID     string  `json:"goal_id"`
+			Progress   string  `json:"progress"`
+			Status     string  `json:"status"`
+			Skill      string  `json:"skill"`
+			Confidence float64 `json:"confidence"`
 		} `json:"goals"`
 		NewGoals []struct {
-			DreamID  string   `json:"dream_id"`
-			Text     string   `json:"text"`
-			DoneWhen string   `json:"done_when"`
-			Due      string   `json:"due"`
-			Projects []string `json:"project_ids"`
-			Skill    string   `json:"skill"`
+			DreamID    string   `json:"dream_id"`
+			Text       string   `json:"text"`
+			DoneWhen   string   `json:"done_when"`
+			Due        string   `json:"due"`
+			Projects   []string `json:"project_ids"`
+			Skill      string   `json:"skill"`
+			Why        string   `json:"why"`
+			Confidence float64  `json:"confidence"`
 		} `json:"new_goals"`
+		Principles []struct {
+			Text  string   `json:"text"`
+			Types []string `json:"types"`
+			Calls []string `json:"calls"`
+		} `json:"principles"`
 		Plans []struct {
 			PlanID    string `json:"plan_id"`
 			StageDone bool   `json:"stage_done"`
@@ -262,7 +287,9 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 		if g.Skill == "" {
 			g.Skill = m.skillNamed(ctx, u.Skill)
 		}
-		if u.Status == memory.GoalDone || u.Status == memory.GoalDropped {
+		if u.Status == memory.GoalDropped && m.goalCall(ctx, memory.CallDropGoal, g, u.Progress, u.Confidence, now) {
+			changes = append(changes, "asked to drop goal: "+g.Text) // it stays until its owner answers
+		} else if u.Status == memory.GoalDone || u.Status == memory.GoalDropped {
 			g.Status = u.Status
 			delete(activeGoals, g.ID.String())
 			changes = append(changes, fmt.Sprintf("goal %s: %s", u.Status, g.Text))
@@ -271,6 +298,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 			m.Log.Error("save goal", "err", err)
 		}
 	}
+	proposed := map[string]memory.Goal{} // new goals waiting for its owner's answer
 	activeDreams := map[string]memory.Dream{}
 	for _, dr := range dreams {
 		activeDreams[dr.ID.String()] = dr
@@ -279,19 +307,35 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 		due, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(ng.Due), m.Zone)
 		_, dreamOK := activeDreams[strings.TrimSpace(ng.DreamID)]
 		text := strings.TrimSpace(ng.Text)
-		if err != nil || !dreamOK || text == "" || !due.After(now) || due.Sub(now) > goalHorizon || len(activeGoals) >= maxActiveGoals {
+		if err != nil || !dreamOK || text == "" || !due.After(now) || due.Sub(now) > goalHorizon || len(activeGoals)+len(proposed) >= maxActiveGoals {
 			m.Log.Warn("dropped a new goal", "text", ng.Text, "due", ng.Due, "dream", ng.DreamID, "err", err)
 			continue
 		}
 		g := memory.Goal{ID: ulid.Make(), DreamID: ulid.MustParse(strings.TrimSpace(ng.DreamID)), Text: text, Skill: m.skillNamed(ctx, ng.Skill),
 			DoneWhen: strings.TrimSpace(ng.DoneWhen), Due: due.Add(23*time.Hour + 59*time.Minute).UTC(), Status: memory.GoalActive,
 			CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
+		if m.Calls.On {
+			g.Status = memory.GoalProposed // set once its owner answers
+		}
 		if err := m.Store.SaveGoal(ctx, g); err != nil {
 			m.Log.Error("save goal", "err", err)
 			continue
 		}
-		activeGoals[g.ID.String()] = g
-		changes = append(changes, "new goal: "+text)
+		switch {
+		case g.Status == memory.GoalProposed && m.goalCall(ctx, memory.CallNewGoal, g, ng.Why, ng.Confidence, now):
+			proposed[g.ID.String()] = g
+			changes = append(changes, "asked to set goal: "+text)
+		default:
+			if g.Status != memory.GoalActive {
+				g.Status = memory.GoalActive
+				if err := m.Store.SaveGoal(ctx, g); err != nil {
+					m.Log.Error("save goal", "err", err)
+					continue
+				}
+			}
+			activeGoals[g.ID.String()] = g
+			changes = append(changes, "new goal: "+text)
+		}
 		for _, pid := range ng.Projects {
 			out.Projects = append(out.Projects, struct {
 				ProjectID string `json:"project_id"`
@@ -306,6 +350,9 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 	for _, link := range out.Projects {
 		p, ok := byID[strings.TrimSpace(link.ProjectID)]
 		g, gok := activeGoals[strings.TrimSpace(link.GoalID)]
+		if !gok {
+			g, gok = proposed[strings.TrimSpace(link.GoalID)]
+		}
 		if !ok || !gok || p.GoalID == g.ID {
 			continue
 		}
@@ -378,6 +425,29 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 				}
 			}
 		}
+	}
+	for _, pr := range out.Principles {
+		text := strings.TrimSpace(pr.Text)
+		var types, keys []string
+		for _, t := range pr.Types {
+			if slices.Contains(self.DecisionTypes, t) && !slices.Contains(types, t) {
+				types = append(types, t)
+			}
+		}
+		for _, id := range pr.Calls {
+			if k, ok := callCases[strings.TrimSpace(id)]; ok {
+				keys = append(keys, k)
+			}
+		}
+		if text == "" || len(keys) == 0 { // a principle comes from its owner's own choices
+			continue
+		}
+		if err := m.Store.SavePrinciple(ctx, memory.Principle{ID: ulid.Make(), Text: text, Types: types, Cases: keys,
+			Status: memory.JudgmentProposed, Source: memory.JudgmentFromReview, CreatedAt: now.UTC()}); err != nil {
+			m.Log.Error("save principle", "err", err)
+			continue
+		}
+		changes = append(changes, "proposed a principle: "+text)
 	}
 	for _, dc := range out.Dreams {
 		if change := m.wantDreamChange(ctx, activeDreams, dc.Action, strings.TrimSpace(dc.DreamID), strings.TrimSpace(dc.Text),

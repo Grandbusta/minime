@@ -29,6 +29,7 @@ type Config struct {
 	DailyLife     DailyLife     `yaml:"daily_life"`
 	Console       Console       `yaml:"console"`
 	Autonomy      Autonomy      `yaml:"autonomy"`
+	Judgment      Judgment      `yaml:"judgment"`
 	Search        Search        `yaml:"search"`
 	// Pricing per model, used to record what each decision cost.
 	Pricing map[string]pricing.Price `yaml:"pricing"`
@@ -169,6 +170,17 @@ func (d DailyLife) AbilityNames() []string {
 	return DefaultAbilities
 }
 
+// Judgment is how it learns its owner's judgment from its own decisions:
+// it predicts what they'd choose, asks some on Telegram, and the rest wait
+// to be graded in the console.
+type Judgment struct {
+	Calls      bool `yaml:"calls"`        // off: it makes no calls, and sets and drops goals on its own
+	AsksPerDay int  `yaml:"asks_per_day"` // day-plan calls asked a day; goal calls are always asked
+	// ReplyWindow is how long after the owner picks differently their next
+	// message is taken as why.
+	ReplyWindow time.Duration `yaml:"reply_window"`
+}
+
 // Autonomy is what the agent may do on its own (see package action).
 type Autonomy struct {
 	// Owner approves what it asks to do, e.g. "telegram:123". Empty: the
@@ -293,6 +305,7 @@ func Load(path string) (*Config, error) {
 			Web: Web{Searches: 10, Pages: 15}},
 		Search:   Search{Provider: "openai"},
 		Autonomy: Autonomy{AskExpires: 24 * time.Hour},
+		Judgment: Judgment{Calls: true, AsksPerDay: 3, ReplyWindow: 30 * time.Minute},
 		Log:      Log{Level: "info"},
 	}
 	if err := yaml.Unmarshal([]byte(os.ExpandEnv(string(raw))), cfg); err != nil {
