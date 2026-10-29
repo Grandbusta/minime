@@ -3,6 +3,7 @@ package self
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -76,5 +77,30 @@ family:
 func TestShippedLifeStoryLoads(t *testing.T) {
 	if _, err := Load("../../self/life.yaml"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMakes(t *testing.T) {
+	l, err := Load(write(t, "name: Amara\nstory: [Amara paints.]\nmakes:\n  - {kind: ' poem ', about: ' a short poem '}\n  - {kind: painting_study, about: a study for a painting}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, c := range l.Crafts() {
+		kinds = append(kinds, c.Kind)
+	}
+	if got := strings.Join(kinds, ","); got != "notes,writing,poem,painting_study" || l.Makes[0].About != "a short poem" {
+		t.Errorf("crafts = %s, makes %+v", got, l.Makes)
+	}
+	for name, makes := range map[string]string{
+		"no about": "  - {kind: poem}\n",
+		"bad kind": "  - {kind: Big Poem, about: x}\n",
+		"built in": "  - {kind: notes, about: x}\n",
+		"reserved": "  - {kind: journal, about: x}\n",
+		"twice":    "  - {kind: poem, about: x}\n  - {kind: poem, about: y}\n",
+	} {
+		if _, err := Load(write(t, "name: Amara\nstory: [x]\nmakes:\n"+makes)); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
 	}
 }

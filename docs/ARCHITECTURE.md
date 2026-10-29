@@ -636,12 +636,28 @@ everything it says it read or made exists, so its profile's Work section is hone
   is a real choice to make, like competing promises.) System 2 does it, with only safe tools:
   reading and writing its own memory, and fetching from an allow-list (`internal/library`:
   gutenberg.org for public-domain books, en.wikipedia.org for articles).
-  - Reading: the plan can start a book (`read_kind` book, found through Gutenberg's own OPDS search), continue
-    one (its project keeps the book and how far it got), or look up a topic (`read_kind`
-    article). A sitting is one passage of about 12,000 bytes, cut at a paragraph; an article
+  - **Abilities** (`internal/ability`): what an activity can do beyond writing from what it
+    knows. The steps of every activity are the mind's (wait if busy, miss if late or over
+    budget, System 2 writes, keep the work and facts); an ability only gets the material it
+    works from (`Prepare`), and may move its project on or fix the work's kind. An intention
+    names its ability with `ability` and `args` (e.g. `read_book`, `{"query": "Pride and
+    Prejudice Austen"}`); the planner is told each one's `Describe` line and may choose it.
+    A project can carry its ability on (a book being read) without naming it. Each declares
+    its `Risk` (private, reads the web; later writes and spends) for the autonomy gate.
+    Adding one, like web search, is a package and a line in `cmd/minime`.
+    `daily_life.abilities` in the config lists those switched on; the journal always is.
+  - **What it makes** is the agent's own, not the code's: `makes` in `self/life.yaml` lists
+    its crafts (Daniel's: lyrics, beat ideas), each a kind and what a good one is. Every
+    agent also writes notes and short pieces; reading notes and the journal are filed by
+    their abilities. The prompts get them as `{makes}` and `{kinds}`, and the activity's
+    `kind` must be one of them, so a clone changes only YAML.
+  - Reading (`internal/ability/reading`, `read_book` and `read_article`): the plan can start a
+    book (found through Gutenberg's own OPDS search), continue one (its project keeps the book
+    and how far it got), or look up a topic on Wikipedia. A sitting is one passage of about 12,000 bytes, cut at a paragraph; an article
     is read at once. Texts are stored once (`sources`) and passed to System 2 fenced off as
     material to read, never instructions. It writes reading notes in its own words.
-  - Writing: a journal, lyrics, beat ideas and arrangements, notes on what it learned.
+  - Journal (`internal/ability/journal`): planned every night; its material is what the day held.
+  - Writing: lyrics, beat ideas and arrangements, notes on what it learned.
   - Making actual audio needs a music model: **TBD**.
 - **Projects:** what takes days (a book, a beat, learning a topic) keeps its progress, so
   tomorrow continues from today.
@@ -765,7 +781,8 @@ mini-me/
       activities (journal, lyrics, ideas), evening journal; results as facts and works.
       `minime day` shows what it planned and made.
    2. ✅ Reading and learning from real sources: an allow-listed fetcher for Gutenberg and
-      Wikipedia, books read a passage at a time with progress kept per project.
+      Wikipedia, books read a passage at a time with progress kept per project. Reading and
+      the journal are abilities (`internal/ability`), so new ones (web search) plug in.
    3. Promises from chat: commitments become its own intentions and are delivered when done.
    4. Work on its profile: a Work section from the works it decides are public.
    - Later: the same machinery takes jobs from other sources (chat, email, a job board); audio

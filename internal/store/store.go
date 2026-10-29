@@ -328,16 +328,20 @@ func (s *Store) queryFacts(ctx context.Context, sql string, args ...any) ([]memo
 	return out, rows.Err()
 }
 
-const intentionColumns = `id, subject, kind, percept_id, project_id, text, read_kind, read_query, due_at, status,
+const intentionColumns = `id, subject, kind, percept_id, project_id, text, ability, args, due_at, status,
 	coalesce(result, ''), created_at, done_at`
 
 // SaveIntention stores something the agent means to do later.
 func (s *Store) SaveIntention(ctx context.Context, i memory.Intention) error {
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO intentions (id, subject, kind, percept_id, project_id, text, read_kind, read_query, due_at, status,
+	args, err := json.Marshal(orEmpty(i.Args))
+	if err != nil {
+		return fmt.Errorf("save intention: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO intentions (id, subject, kind, percept_id, project_id, text, ability, args, due_at, status,
 		                        result, created_at, done_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-		i.ID.String(), i.Subject, i.Kind, nullULID(i.PerceptID), nullULID(i.ProjectID), i.Text, i.ReadKind, i.ReadQuery,
+		i.ID.String(), i.Subject, i.Kind, nullULID(i.PerceptID), nullULID(i.ProjectID), i.Text, i.Ability, args,
 		i.DueAt, i.Status, nullString(i.Result), i.CreatedAt, nullTime(i.DoneAt))
 	if err != nil {
 		return fmt.Errorf("save intention: %w", err)
@@ -367,6 +371,13 @@ func (s *Store) FinishIntention(ctx context.Context, id ulid.ULID, status, resul
 	return nil
 }
 
+func orEmpty(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
+}
+
 // PostponeIntention moves a pending intention to a later time.
 func (s *Store) PostponeIntention(ctx context.Context, id ulid.ULID, due time.Time) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE intentions SET due_at = $2 WHERE id = $1`, id.String(), due); err != nil {
@@ -388,8 +399,9 @@ func (s *Store) queryIntentions(ctx context.Context, sql string, args ...any) ([
 			id                   string
 			perceptID, projectID *string
 			doneAt               *time.Time
+			args                 []byte
 		)
-		if err := rows.Scan(&id, &i.Subject, &i.Kind, &perceptID, &projectID, &i.Text, &i.ReadKind, &i.ReadQuery,
+		if err := rows.Scan(&id, &i.Subject, &i.Kind, &perceptID, &projectID, &i.Text, &i.Ability, &args,
 			&i.DueAt, &i.Status, &i.Result, &i.CreatedAt, &doneAt); err != nil {
 			return nil, err
 		}
@@ -404,6 +416,12 @@ func (s *Store) queryIntentions(ctx context.Context, sql string, args ...any) ([
 		}
 		if doneAt != nil {
 			i.DoneAt = *doneAt
+		}
+		if err := json.Unmarshal(args, &i.Args); err != nil {
+			return nil, fmt.Errorf("intention %s args: %w", id, err)
+		}
+		if len(i.Args) == 0 {
+			i.Args = nil
 		}
 		out = append(out, i)
 	}

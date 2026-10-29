@@ -3,14 +3,18 @@ package mind
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 
+	"minime/internal/ability"
+	"minime/internal/ability/journal"
 	"minime/internal/memory"
 	"minime/internal/providers/system2"
+	"minime/internal/self"
 )
 
 // at is a time on a day in October 2026, in the agent's zone (lagos, UTC+1).
@@ -23,6 +27,7 @@ func lifeMind(s2 *fakeSystem2) (*Mind, *fakeStore) {
 	m.Day = Day{PlanAt: 8 * time.Hour, JournalAt: 22 * time.Hour, MaxActivities: 3, BudgetUSD: 0.05,
 		PlanPrompt:     Prompt{Ref: "plan@test", Text: "You are {name}. Routine:\n{routine}\nUp to {max}."},
 		ActivityPrompt: Prompt{Ref: "activity@test", Text: "You are {name}, doing something."}}
+	m.Abilities = ability.NewSet(journal.Journal{Store: s})
 	return m, s
 }
 
@@ -184,7 +189,7 @@ func TestJournalLooksBackAtTheDay(t *testing.T) {
 	s.intentions[0].Status, s.intentions[0].Result = memory.IntentionDone, "Lagos Rain, verse 2"
 	s.works = append(s.works, memory.Work{ID: ulid.Make(), Kind: "lyrics", Title: "Lagos Rain, verse 2", CreatedAt: at(29, 10, 5)})
 	journal := memory.Intention{ID: ulid.Make(), Subject: memory.SubjectSelf, Kind: memory.IntentionActivity,
-		Text: journalText, DueAt: at(29, 22, 0), Status: memory.IntentionPending}
+		Text: journalText, Ability: journal.Name, DueAt: at(29, 22, 0), Status: memory.IntentionPending}
 	s.intentions = append(s.intentions, journal)
 	s2.formats["activity"] = `{"title":"29 Oct","kind":"notes","text":"Wrote verse 2 today.","project_notes":"","project_done":false,"remember":[]}`
 
@@ -231,5 +236,45 @@ func TestFailedActivityIsRetriedWithItsOwnPercept(t *testing.T) {
 	last := s.decisions[len(s.decisions)-1]
 	if s.facts[0].PerceptID != s.percepts[1].ID || last.PerceptID != s.percepts[1].ID {
 		t.Errorf("the retry's fact and decision don't point at its saved percept")
+	}
+}
+
+func TestWhatItMakesComesFromItsLife(t *testing.T) {
+	m, _, s2, _, _ := activityMind()
+	m.Life.Makes = []self.Craft{{Kind: "poem", About: "a short poem"}}
+	m.Day.ActivityPrompt.Text = "You make:\n{makes}\nkind: one of {kinds}."
+	m.tick(context.Background(), at(29, 10, 0))
+
+	req := s2.requests[0]
+	if !strings.Contains(req.Instructions, "- poem: a short poem") || !strings.Contains(req.Instructions, "kind: one of notes, writing, poem.") {
+		t.Errorf("instructions:\n%s", req.Instructions)
+	}
+	kinds := req.Format.Schema["properties"].(map[string]any)["kind"].(map[string]any)["enum"].([]string)
+	if strings.Join(kinds, ",") != "notes,writing,poem" {
+		t.Errorf("kinds = %v", kinds)
+	}
+}
+
+func TestShippedLifePromptsAreFilledIn(t *testing.T) {
+	life, err := self.Load("../../self/life.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := lifeMind(&fakeSystem2{})
+	m.Life = life
+	for _, path := range []string{"../../prompts/plan.md", "../../prompts/activity.md"} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := m.lifeInstructions(Prompt{Text: string(raw)})
+		if i := strings.IndexAny(got, "{}"); i >= 0 {
+			t.Errorf("%s: placeholder left at %q", path, got[max(0, i-20):min(len(got), i+20)])
+		}
+		for _, c := range life.Crafts() {
+			if !strings.Contains(got, "- "+c.Kind+": "+c.About) {
+				t.Errorf("%s doesn't say it makes %s", path, c.Kind)
+			}
+		}
 	}
 }

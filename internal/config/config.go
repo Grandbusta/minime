@@ -105,14 +105,33 @@ func (c Console) Local() bool {
 
 // DailyLife is the agent's own day: it plans it, does things, and journals.
 type DailyLife struct {
-	Enabled        bool    `yaml:"enabled"`
-	Reading        bool    `yaml:"reading"`    // read Gutenberg books and Wikipedia articles
+	Enabled bool `yaml:"enabled"`
+	// Abilities are what it can do beyond writing, by name, e.g. read_book;
+	// the journal is always on. Unset: the default abilities.
+	Abilities []string `yaml:"abilities"`
+	// Reading is the old switch for read_book and read_article, used only
+	// when Abilities is unset. Deprecated: list abilities instead.
+	Reading        *bool   `yaml:"reading"`
 	PlanAt         string  `yaml:"plan_at"`    // "HH:MM" in its time zone
 	JournalAt      string  `yaml:"journal_at"` // "HH:MM" in its time zone
 	Activities     int     `yaml:"activities"` // things it plans a day, besides the journal
 	BudgetUSD      float64 `yaml:"budget_usd"` // most its own day may cost
 	PlanPrompt     string  `yaml:"plan_prompt"`
 	ActivityPrompt string  `yaml:"activity_prompt"`
+}
+
+// DefaultAbilities are on unless the config lists its own.
+var DefaultAbilities = []string{"read_book", "read_article"}
+
+// AbilityNames are the abilities switched on, besides the journal.
+func (d DailyLife) AbilityNames() []string {
+	switch {
+	case d.Abilities != nil:
+		return d.Abilities
+	case d.Reading != nil && !*d.Reading:
+		return nil
+	}
+	return DefaultAbilities
 }
 
 // Times are PlanAt and JournalAt as times of day: the time since midnight.
@@ -195,7 +214,7 @@ func Load(path string) (*Config, error) {
 		Memory:        Memory{RecallCandidates: 30},
 		Portfolio:     Portfolio{Prompt: "prompts/profile.md", UpdateAt: "00:00"},
 		Initiative:    Initiative{Timezone: "UTC", Quiet: 4 * time.Hour},
-		DailyLife: DailyLife{Reading: true, PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
+		DailyLife: DailyLife{PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
 			PlanPrompt: "prompts/plan.md", ActivityPrompt: "prompts/activity.md"},
 		Log: Log{Level: "info"},
 	}

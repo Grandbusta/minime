@@ -59,13 +59,13 @@ type Fact struct {
 // for itself (Subject SubjectSelf), an activity of its own day.
 type Intention struct {
 	ID        ulid.ULID
-	Subject   string    // SubjectSelf, or who it is for, e.g. "telegram:123"
-	Kind      string    // IntentionRemind, IntentionTask or IntentionActivity
-	PerceptID ulid.ULID // the message it came from; zero if the agent planned it itself
-	ProjectID ulid.ULID // the project it is part of; zero if none
-	Text      string    // what to do, e.g. "call mum", "write the hook for Lagos Rain"
-	ReadKind  string    // what it means to read: "", ReadBook or ReadArticle
-	ReadQuery string    // what to look for, e.g. "Pride and Prejudice", "polyrhythm"
+	Subject   string            // SubjectSelf, or who it is for, e.g. "telegram:123"
+	Kind      string            // IntentionRemind, IntentionTask or IntentionActivity
+	PerceptID ulid.ULID         // the message it came from; zero if the agent planned it itself
+	ProjectID ulid.ULID         // the project it is part of; zero if none
+	Text      string            // what to do, e.g. "call mum", "write the hook for Lagos Rain"
+	Ability   string            // the ability an activity uses, e.g. "read_book"; "" if it only writes
+	Args      map[string]string // what the plan gave the ability, e.g. {"query": "polyrhythm"}
 	DueAt     time.Time
 	Status    string // IntentionPending, IntentionDone, IntentionMissed or IntentionCancelled
 	Result    string // what came of it, e.g. the title of what it made; "" until done
@@ -98,6 +98,14 @@ type Project struct {
 	Source    *Reading  // about that book, when loaded with the project; nil if none
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// PercentRead is how far it is through the book it follows; 0 if none.
+func (p Project) PercentRead() int {
+	if p.Source == nil || p.Source.Chars <= 0 {
+		return 0
+	}
+	return min(100, p.Position*100/p.Source.Chars)
 }
 
 // What the agent reads from.

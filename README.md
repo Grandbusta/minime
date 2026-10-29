@@ -41,6 +41,39 @@ knows. Design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
   decision that handed it over.
 - **Not built yet:** reminders, and forgetting or correcting facts.
 
+## Make your own
+
+The agent in this repository is Daniel, but nothing about him is in the code. To make your
+own person, clone it and change these files; then follow [Run locally](#run-locally).
+
+| File | What you change |
+|---|---|
+| [self/life.yaml](self/life.yaml) | **Who they are:** `name`, `story` (their life, one fact per line, third person), `personality` (how they are with people), `routine` (how their days go), `makes` (what they make in their own day), `family` (who they're born knowing, including you). |
+| [configs/minime.yaml](configs/minime.yaml) | **Where they live and what they can do:** `initiative.timezone` and `check_ins`, `daily_life` (when they plan and journal, a daily `budget_usd`, and `abilities`), the profile page and console addresses. |
+| `.env` (from [.env.example](.env.example)) | **Secrets and accounts:** the Telegram bot token and your Telegram user ID, the Postgres URL, the OpenAI key and model. |
+
+`makes` is what they create, in writing, for real. Each entry is a `kind` (snake_case; their
+works are filed under it) and `about` (what it is and what a good one has):
+
+```yaml
+makes:
+  - {kind: poem, about: "a short poem, usually free verse, about something from the day"}
+  - {kind: painting_study, about: "a study for a painting: subject, composition, palette, light"}
+```
+
+Every agent can also write `notes` and short `writing`, and keeps a journal. Leave `makes`
+out and they make only those.
+
+`abilities` (in `daily_life`) is what they can do beyond writing from what they know:
+`read_book` (public-domain books from Project Gutenberg, a passage a day) and `read_article`
+(Wikipedia). The journal is always on.
+
+You shouldn't need to edit the prompts ([prompts/](prompts)) or the questions System 1 asks
+([decisions/](decisions)). They're written for any person and get filled in from
+`life.yaml`. New abilities, like web search, are code: a package under
+[internal/ability](internal/ability) and one line in `abilityMakers` in
+[cmd/minime/main.go](cmd/minime/main.go).
+
 ## Run locally
 
 You need:
@@ -138,13 +171,16 @@ as `remind` and `check_in`.
 ### Its own day
 
 The agent lives a day of its own. At `plan_at` it plans a few things to do, mostly
-continuing its projects (a song, a beat, something it's learning), steered by the optional
-`routine` lines in [self/life.yaml](self/life.yaml). Through the day it does them for real,
-in writing: lyrics, beat ideas, notes. It also reads, for real: public-domain books from
-Project Gutenberg, a passage per sitting over many days, and Wikipedia articles on what it's
-learning, and writes reading notes. It fetches only from those two sites; set
-`daily_life.reading: false` to turn reading off. At `journal_at` (22:00) it writes a journal
-entry.
+continuing its projects (for Daniel: a song, a beat, something he's learning), steered by
+the optional `routine` lines in [self/life.yaml](self/life.yaml). Through the day it does
+them for real, in writing: the things its `makes` lists (Daniel's are lyrics and beat
+ideas), notes and short pieces. With its abilities it also reads, for real: public-domain
+books from Project Gutenberg, a passage per sitting over many days, and Wikipedia articles
+on what it's learning, and writes reading notes. It fetches only from those two sites;
+`daily_life.abilities` lists the ones switched on. At `journal_at` (22:00) it writes a
+journal entry. Reading and the journal are *abilities* ([internal/ability](internal/ability)):
+the activity steps are shared, and an ability only gets what the activity works from, so a
+new one (web search, say) is a small package and a line in `cmd/minime`.
 What it makes is kept; what it did becomes facts about itself, so it can tell you about it.
 If you're chatting when something is due, it waits 30 minutes; past `budget_usd` a day,
 the rest waits for tomorrow. Settings are under `daily_life:` in

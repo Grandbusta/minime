@@ -61,9 +61,12 @@ initiative:
 # Times are in initiative.timezone.
 daily_life:
   enabled: true
-  # It can read public-domain books (Project Gutenberg, a passage at a time)
-  # and Wikipedia articles; nothing else on the web.
-  reading: true
+  # What it can do beyond writing; its journal is always on. Remove one to
+  # switch it off, or use [] for none.
+  #   read_book     public-domain books from Project Gutenberg, a passage a day
+  #   read_article  Wikipedia articles, to learn about a topic
+  # These are the only sites it fetches from.
+  abilities: [read_book, read_article]
   plan_at: "06:00"
   journal_at: "22:00"
   activities: 4      # things it plans a day, besides the journal

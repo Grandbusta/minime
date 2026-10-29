@@ -511,7 +511,12 @@ const eeg = (() => {
 /* ---------- shared bits ---------- */
 
 const FAMILY_COLOR = { system1: "var(--s1)", system2: "var(--s2)", reflex: "var(--rx)", life: "var(--lf)" };
-const KIND_COLOR = { journal: "#b48cff", lyrics: "#7cff6b", beat_idea: "#ffc35c", notes: "#5be7ff", reading_notes: "#8affd6", writing: "#ff9de2" };
+// Colours for kinds of work and projects: the built-in ones fixed, the ones an
+// agent makes (from its life.yaml) picked from the palette by name.
+const PALETTE = ["#7cff6b", "#ffc35c", "#ff9de2", "#5be7ff", "#8affd6", "#ff8a6b", "#c9ff5c", "#6b9dff"];
+const hashColor = (s) => PALETTE[[...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % PALETTE.length];
+const KIND_FIXED = { journal: "#b48cff", notes: "#5be7ff", reading_notes: "#8affd6", writing: "#ff9de2" };
+const kindColor = (k) => KIND_FIXED[k] || hashColor(k);
 const AREA_COLORS = ["#5be7ff", "#7cff6b", "#ffc35c", "#b48cff", "#ff9de2", "#8affd6", "#ff8a6b", "#c7ff6b"];
 const areaColor = (a) => {
   if (!a) return "#8a94a6";
@@ -797,7 +802,8 @@ $("#factSearch").addEventListener("input", renderFacts);
 /* ---------- day ---------- */
 
 let dayOffset = 0;
-const PROJECT_COLOR = { music: "#7cff6b", writing: "#ff9de2", learning: "#5be7ff", reading: "#ffc35c" };
+const PROJECT_FIXED = { writing: "#ff9de2", learning: "#5be7ff", reading: "#ffc35c" };
+const projectColor = (k) => PROJECT_FIXED[k] || hashColor(k);
 async function loadDay() {
   const d = new Date(Date.now() + dayOffset * 86400000);
   const date = new Intl.DateTimeFormat("en-CA", { timeZone: info.timezone }).format(d);
@@ -809,7 +815,7 @@ async function loadDay() {
   for (const i of day.intentions) {
     if (!marked && new Date(i.due_at) > now) { html += `<div class="now-mark"></div>`; marked = true; }
     html += `<div class="tl st-${esc(i.status)}"><div class="tl-top"><time>${fmtTime(i.due_at)}</time><span class="st st-${esc(i.status)}">${esc(i.status)}</span>
-      <span class="tag">${esc(i.kind)}${i.subject !== "self" ? " · for " + esc(i.subject) : ""}</span></div>
+      <span class="tag">${esc(i.kind)}${i.subject !== "self" ? " · for " + esc(i.subject) : ""}</span>${i.ability ? `<span class="tag" title="${esc(i.query)}">${esc(i.ability)}${i.query ? ": " + esc(i.query) : ""}</span>` : ""}</div>
       <p>${esc(i.text)}</p>${i.result ? `<div class="res">${esc(i.result)}</div>` : ""}</div>`;
   }
   if (!marked && day.intentions.length) html += `<div class="now-mark"></div>`;
@@ -817,7 +823,7 @@ async function loadDay() {
   $("#dayWorks").innerHTML = day.works.length ? "" : `<div class="empty">nothing made</div>`;
   day.works.forEach((w) => $("#dayWorks").appendChild(workButton(w, "wk")));
   $("#projects").innerHTML = day.projects.length ? day.projects.map((p) =>
-    `<div class="pj" style="--c:${PROJECT_COLOR[p.kind] || "#b48cff"}"><b>${esc(p.title)}</b><span>${esc(p.kind)} · ${esc(p.status)} · since ${fmtTime(p.created_at, true)}</span>
+    `<div class="pj" style="--c:${projectColor(p.kind)}"><b>${esc(p.title)}</b><span>${esc(p.kind)} · ${esc(p.status)} · since ${fmtTime(p.created_at, true)}</span>
      ${p.reading ? `<div class="progress"><div class="progress-h"><span>${esc(p.reading.title)}${p.reading.author ? " · " + esc(p.reading.author) : ""}</span><b>${p.reading.percent}%</b></div><div class="progress-bar"><i style="width:${p.reading.percent}%"></i></div></div>` : ""}
      <p>${esc(p.notes || "no notes yet")}</p></div>`).join("") : `<div class="empty">no projects yet</div>`;
 }
@@ -828,7 +834,7 @@ $("#dayNext").onclick = () => { dayOffset = Math.min(0, dayOffset + 1); loadDay(
 
 let workFilter = "all", worksCache = [];
 function workButton(w, cls) {
-  const b = document.createElement("button"), col = KIND_COLOR[w.kind] || "#7cff6b";
+  const b = document.createElement("button"), col = kindColor(w.kind);
   b.className = cls;
   b.style.setProperty("--c", col);
   b.innerHTML = cls === "wk" ? `<b>${esc(w.title)}</b><span>${esc(w.kind)} · ${fmtTime(w.created_at)} · ${w.words} words</span>`
@@ -843,14 +849,14 @@ async function loadWorks() {
 }
 function renderWorks() {
   const kinds = ["all", ...new Set(worksCache.map((w) => w.kind))];
-  $("#workChips").innerHTML = kinds.map((k) => `<button class="chip ${k === workFilter ? "on" : ""}" data-k="${esc(k)}" style="${k !== "all" ? "color:" + (KIND_COLOR[k] || "#7cff6b") : ""}">${esc(k.replace("_", " "))}</button>`).join("");
+  $("#workChips").innerHTML = kinds.map((k) => `<button class="chip ${k === workFilter ? "on" : ""}" data-k="${esc(k)}" style="${k !== "all" ? "color:" + kindColor(k) : ""}">${esc(k.replace("_", " "))}</button>`).join("");
   $("#workChips").querySelectorAll(".chip").forEach((c) => (c.onclick = () => { workFilter = c.dataset.k; renderWorks(); }));
   const grid = $("#works"), ws = worksCache.filter((w) => workFilter === "all" || w.kind === workFilter);
   grid.innerHTML = ws.length ? "" : `<div class="card empty">nothing made yet: its first activity will show up here</div>`;
   ws.forEach((w) => grid.appendChild(workButton(w, "card work-card")));
 }
 async function openWork(id) {
-  const w = await api("/api/works/" + id), col = KIND_COLOR[w.kind] || "#7cff6b";
+  const w = await api("/api/works/" + id), col = kindColor(w.kind);
   openDrawer(w.kind.replace("_", " ").toUpperCase(), `<h2 style="margin:0 0 4px;font:600 24px var(--sans)">${esc(w.title)}</h2>
     <div style="font:11px var(--mono);color:var(--muted);margin-bottom:18px"><span style="color:${col}">●</span> ${fmtTime(w.created_at, true)} · ${w.words} words</div>
     <div class="reader">${esc(w.text)}</div>`);

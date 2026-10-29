@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -79,5 +80,24 @@ func TestValidateAgentRequiresToken(t *testing.T) {
 	}
 	if err := cfg.ValidateAgent(); err == nil {
 		t.Fatal("expected error for missing telegram.token")
+	}
+}
+
+func TestAbilityNames(t *testing.T) {
+	for body, want := range map[string]string{
+		"":                           "read_book,read_article",
+		"\n  abilities: [read_book]": "read_book",
+		"\n  abilities: []":          "",
+		"\n  reading: false":         "",
+		"\n  reading: true":          "read_book,read_article",
+		"\n  reading: false\n  abilities: [read_article]": "read_article",
+	} {
+		cfg, err := Load(writeConfig(t, "database: {url: x}\ndaily_life:\n  enabled: true"+body+"\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(cfg.DailyLife.AbilityNames(), ","); got != want {
+			t.Errorf("%q: abilities = %q, want %q", body, got, want)
+		}
 	}
 }

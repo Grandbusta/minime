@@ -532,12 +532,12 @@ func TestSourcesAndReadingProgress(t *testing.T) {
 	}
 
 	i := memory.Intention{ID: ulid.Make(), Subject: memory.SubjectSelf, Kind: memory.IntentionActivity, Text: "learn",
-		ReadKind: memory.ReadArticle, ReadQuery: "polyrhythm", DueAt: now.AddDate(0, 0, -50), Status: memory.IntentionPending, CreatedAt: now}
+		Ability: "read_article", Args: map[string]string{"query": "polyrhythm"}, DueAt: now.AddDate(0, 0, -50), Status: memory.IntentionPending, CreatedAt: now}
 	if err := s.SaveIntention(ctx, i); err != nil {
 		t.Fatal(err)
 	}
 	is, err := s.IntentionsDue(ctx, i.DueAt, i.DueAt.Add(time.Second))
-	if err != nil || len(is) != 1 || is[0].ReadKind != memory.ReadArticle || is[0].ReadQuery != "polyrhythm" {
+	if err != nil || len(is) != 1 || is[0].Ability != "read_article" || is[0].Args["query"] != "polyrhythm" {
 		t.Errorf("intention = %+v, %v", is, err)
 	}
 	if err := s.FinishIntention(ctx, i.ID, memory.IntentionDone, "", now); err != nil {

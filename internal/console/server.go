@@ -237,11 +237,13 @@ type intentionView struct {
 	Status    string    `json:"status"`
 	Result    string    `json:"result"`
 	ProjectID string    `json:"project_id"`
+	Ability   string    `json:"ability"` // e.g. "read_book"; "" if it only writes
+	Query     string    `json:"query"`
 }
 
 func (s *Server) intention(i memory.Intention) intentionView {
 	v := intentionView{ID: i.ID.String(), Subject: i.Subject, Kind: i.Kind, Text: i.Text, DueAt: i.DueAt,
-		Status: i.Status, Result: i.Result}
+		Status: i.Status, Result: i.Result, Ability: i.Ability, Query: i.Args["query"]}
 	if !i.ProjectID.IsZero() {
 		v.ProjectID = i.ProjectID.String()
 	}
@@ -445,11 +447,7 @@ func projectViews(ps []memory.Project) []map[string]any {
 		v := map[string]any{"id": p.ID.String(), "title": p.Title, "kind": p.Kind, "status": p.Status,
 			"notes": p.Notes, "created_at": p.CreatedAt, "updated_at": p.UpdatedAt}
 		if p.Source != nil {
-			pct := 0
-			if p.Source.Chars > 0 {
-				pct = min(100, p.Position*100/p.Source.Chars)
-			}
-			v["reading"] = map[string]any{"title": p.Source.Title, "author": p.Source.Author, "percent": pct}
+			v["reading"] = map[string]any{"title": p.Source.Title, "author": p.Source.Author, "percent": p.PercentRead()}
 		}
 		out[i] = v
 	}

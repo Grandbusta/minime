@@ -13,9 +13,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -25,6 +27,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"minime/internal/ability"
+	"minime/internal/ability/journal"
+	"minime/internal/ability/reading"
 	"minime/internal/bus"
 	"minime/internal/channel/telegram"
 	"minime/internal/config"
@@ -200,9 +205,14 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		return err
 	}
 	ticks := make(chan time.Time)
-	var lib mind.Library // a nil interface, not a nil *library.Client, when reading is off
-	if cfg.DailyLife.Enabled && cfg.DailyLife.Reading {
-		lib = library.New("", "")
+	// What it can do in its day beyond writing: the journal, and those switched on.
+	var names []string
+	if cfg.DailyLife.Enabled {
+		names = cfg.DailyLife.AbilityNames()
+	}
+	abilitySet, err := newAbilities(names, st)
+	if err != nil {
+		return err
 	}
 	var day mind.Day
 	if dl := cfg.DailyLife; dl.Enabled {
@@ -229,8 +239,8 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		FactRelevance: factRelevance, OpenThreads: openThreads, RecallCandidates: cfg.Memory.RecallCandidates,
 		Working: mind.WorkingMemory{Turns: cfg.WorkingMemory.Turns, Window: cfg.WorkingMemory.Window},
 		Ticks:   ticks, Zone: zone, CheckIns: mind.CheckIns{Times: checkIns, Quiet: cfg.Initiative.Quiet}, Day: day,
-		Library: lib,
-		Log:     log.With("component", "mind"),
+		Abilities: abilitySet,
+		Log:       log.With("component", "mind"),
 	})
 	sensor := telegram.NewSensor(tg, cfg.Telegram.OwnerIDs, cfg.Telegram.PollTimeoutSeconds, percepts,
 		log.With("component", "telegram"))
@@ -239,7 +249,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		"system1", cfg.Decision.Provider.Provider, "question_set", incoming.Ref(), "follow_up", followUp.Ref(),
 		"life_area", lifeArea.Ref(), "person_circle", personCircle.Ref(), "fact_relevance", factRelevance.Ref(),
 		"open_threads", openThreads.Ref(), "timezone", zone.String(), "check_ins", cfg.Initiative.CheckIns,
-		"daily_life", cfg.DailyLife.Enabled, "reading", lib != nil, "routine_lines", len(life.Routine),
+		"daily_life", cfg.DailyLife.Enabled, "abilities", abilitySet.Names(), "routine_lines", len(life.Routine), "makes", len(life.Makes),
 		"system2", cfg.Reasoning.Provider.Provider+"/"+cfg.Reasoning.Model, "effort", cfg.Reasoning.Effort, "prompt", replyPrompt.Ref)
 	started := time.Now()
 	g, ctx := errgroup.WithContext(ctx)
@@ -502,4 +512,40 @@ func newLogger(level string) (*slog.Logger, error) {
 		return nil, fmt.Errorf("config: log.level: %w", err)
 	}
 	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: l})), nil
+}
+
+// abilityMakers builds each ability by the name config uses for it. A new
+// ability is a package under internal/ability and a line here.
+var abilityMakers = map[string]func(st *store.Store, lib func() *library.Client) ability.Ability{
+	reading.BookName: func(st *store.Store, lib func() *library.Client) ability.Ability {
+		return reading.Book{Library: lib(), Store: st}
+	},
+	reading.ArticleName: func(st *store.Store, lib func() *library.Client) ability.Ability {
+		return reading.Article{Library: lib(), Store: st}
+	},
+}
+
+// newAbilities builds the journal and the abilities named in config.
+func newAbilities(names []string, st *store.Store) (*ability.Set, error) {
+	var client *library.Client
+	lib := func() *library.Client { // one client, made only if an ability reads
+		if client == nil {
+			client = library.New("", "")
+		}
+		return client
+	}
+	abilities := []ability.Ability{journal.Journal{Store: st}}
+	seen := map[string]bool{journal.Name: true}
+	for _, name := range names {
+		build, ok := abilityMakers[name]
+		if !ok {
+			known := slices.Sorted(maps.Keys(abilityMakers))
+			return nil, fmt.Errorf("config: daily_life.abilities: no ability %q; there are %s (the journal is always on)", name, strings.Join(known, ", "))
+		}
+		if !seen[name] {
+			seen[name] = true
+			abilities = append(abilities, build(st, lib))
+		}
+	}
+	return ability.NewSet(abilities...), nil
 }
