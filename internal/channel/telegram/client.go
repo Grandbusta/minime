@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -74,13 +75,38 @@ func (c *Client) GetUpdates(ctx context.Context, offset int64, timeoutSeconds in
 	return updates, err
 }
 
+// SendMessage sends text, as several messages if it is longer than Telegram allows.
 func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) error {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	if r := []rune(text); len(r) > maxMessageRunes {
-		text = string(r[:maxMessageRunes-1]) + "…"
+	for _, part := range split(text, maxMessageRunes) {
+		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		err := c.call(ctx, "sendMessage", map[string]any{"chat_id": chatID, "text": part}, nil)
+		cancel()
+		if err != nil {
+			return err
+		}
 	}
-	return c.call(ctx, "sendMessage", map[string]any{"chat_id": chatID, "text": text}, nil)
+	return nil
+}
+
+// split cuts text into parts of at most max runes, at a paragraph break if
+// there is one in the second half of a part, else a line break or a space.
+func split(text string, max int) []string {
+	var parts []string
+	r := []rune(text)
+	for len(r) > max {
+		cut := max
+		for _, sep := range []string{"\n\n", "\n", " "} {
+			if i := strings.LastIndex(string(r[:max]), sep); i >= 0 {
+				if at := len([]rune(string(r[:max])[:i])); at >= max/2 {
+					cut = at
+					break
+				}
+			}
+		}
+		parts = append(parts, strings.TrimSpace(string(r[:cut])))
+		r = []rune(strings.TrimLeft(string(r[cut:]), " \n"))
+	}
+	return append(parts, string(r))
 }
 
 func (c *Client) call(ctx context.Context, method string, params, result any) error {

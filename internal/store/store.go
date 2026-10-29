@@ -190,9 +190,10 @@ func (s *Store) RecentExchanges(ctx context.Context, source, thread string, sinc
 			ORDER BY d.at DESC LIMIT 1
 		) r ON true
 		WHERE p.source = $1 AND p.thread = $2 AND p.at >= $3 AND p.id <> $4
-		  AND (p.text <> '' OR p.kind IN ($6, $7))
+		  AND (p.text <> '' OR p.kind IN ($6, $7, $8))
 		ORDER BY p.at DESC, p.id DESC
-		LIMIT $5`, source, thread, since, exclude.String(), limit, perception.KindReminder, perception.KindCheckIn)
+		LIMIT $5`, source, thread, since, exclude.String(), limit, perception.KindReminder, perception.KindCheckIn,
+		perception.KindDelivery)
 	if err != nil {
 		return nil, fmt.Errorf("query recent exchanges: %w", err)
 	}
@@ -359,6 +360,12 @@ func (s *Store) DueIntentions(ctx context.Context, now time.Time, limit int) ([]
 func (s *Store) IntentionsDue(ctx context.Context, from, to time.Time) ([]memory.Intention, error) {
 	return s.queryIntentions(ctx, `SELECT `+intentionColumns+` FROM intentions
 		WHERE due_at >= $1 AND due_at < $2 ORDER BY due_at, id`, from, to)
+}
+
+// OpenIntentions returns the pending intentions of kind for subject, earliest due first.
+func (s *Store) OpenIntentions(ctx context.Context, subject, kind string) ([]memory.Intention, error) {
+	return s.queryIntentions(ctx, `SELECT `+intentionColumns+` FROM intentions
+		WHERE subject = $1 AND kind = $2 AND status = $3 ORDER BY due_at, id`, subject, kind, memory.IntentionPending)
 }
 
 // FinishIntention records how an intention ended (done, missed, cancelled) and what came of it.
@@ -543,6 +550,16 @@ func (s *Store) ProjectWorks(ctx context.Context, project ulid.ULID, limit int) 
 		WHERE project_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2`, project.String(), limit)
 	slices.Reverse(ws)
 	return ws, err
+}
+
+// IntentionWork returns the work made for an intention, and whether there is one.
+func (s *Store) IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error) {
+	ws, err := s.queryWorks(ctx, `SELECT `+workColumns+` FROM works
+		WHERE intention_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, intention.String())
+	if err != nil || len(ws) == 0 {
+		return memory.Work{}, false, err
+	}
+	return ws[0], true, nil
 }
 
 // LatestWork returns the newest work of kind, and whether there is one.

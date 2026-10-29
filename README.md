@@ -34,12 +34,12 @@ knows. Design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
     life, and whether it asks about one of you in general. Recall looks in the right areas
     first, skips memory for general questions, and hands over everything for "Tell me
     about yourself" or "What do you know about me?".
-  - **Remind** is recognized, but not acted on yet.
+  - **Remind** sets a reminder (see below).
   - **Answers to the agent's own questions** go to System 2 as part of the conversation.
 - Every message is stored in Postgres, along with the decisions it led to: answers,
   provider, version, cost and latency. A System 2 decision is linked to the System 1
   decision that handed it over.
-- **Not built yet:** reminders, and forgetting or correcting facts.
+- **Not built yet:** forgetting or correcting facts.
 
 ## Make your own
 
@@ -148,13 +148,17 @@ System 2 is chosen the same way, under `reasoning:`.
 Edit [prompts/reply.md](prompts/reply.md) and restart. The decision log records each
 version as `reply@<hash>`.
 
+It never uses em dashes (—). The prompts ask for none, and anything System 2 writes anyway
+(replies, what it makes and remembers, its profile page) has them rewritten as commas or
+spaces before it is used ([internal/providers/system2/dashes.go](internal/providers/system2/dashes.go)).
+
 ### Changing what it asks
 
 Edit [decisions/incoming_message.yaml](decisions/incoming_message.yaml): its questions,
 choices and thresholds. Bump `version`, then restart. Every decision records which version
 decided, so you can compare versions in the decision log.
 
-### Reminders and check-ins
+### Reminders, promises and check-ins
 
 The agent can message you first. Ask it to remind you of something ("remind me tomorrow
 at 9 to call the bank") and it will message you at that time, in its own words. Times are
@@ -167,6 +171,16 @@ System 1 picks what's worth asking about. It checks in at most once a day, only 
 conversation has been quiet for `quiet` (4h), and never asks about the same thing twice.
 Set `check_ins: []` to turn this off. Reminders and check-ins show up in the decision log
 as `remind` and `check_in`.
+
+It also keeps its promises. Ask it to make you something ("can you write me a verse about
+Sunday mornings tonight?") and if it agrees, it promises a time. Up to 30 minutes before
+then it makes it, the way it makes its own things (with an ability if it needs one, like
+reading up on a topic first), following anything you added after it promised ("make it
+funny"), and at that time it sends it to you with a few words of its own. It never promises what it
+can't do in writing, keeps at most three promises open with a person, and promises nothing
+to strangers. A promise isn't put off by a conversation or the day's budget; if it can't be
+kept within 24 hours, it is missed. In the decision log, making it is `task` and sending it
+is `deliver`; long messages are split for Telegram.
 
 ### Its own day
 

@@ -51,8 +51,9 @@ const (
 	worksInContext = 3
 )
 
-// lifeActions are the decisions its own day is made of, for the budget.
-var lifeActions = []string{"plan_day", "activity"}
+// lifeActions are the decisions its own day is made of, for the budget:
+// promises count, though they are kept even past it.
+var lifeActions = []string{"plan_day", "activity", "task"}
 
 func (m *Mind) dayOn() bool { return m.Day.PlanPrompt.Text != "" && m.Day.ActivityPrompt.Text != "" }
 
@@ -306,43 +307,56 @@ func (m *Mind) doActivity(ctx context.Context, i memory.Intention, now time.Time
 		m.finish(ctx, i, memory.IntentionMissed, "over budget", now)
 		return
 	}
+	if w, ok := m.makeWork(ctx, i, "activity", "What you planned to do now: "+i.Text, now); ok {
+		m.finish(ctx, i, memory.IntentionDone, w.Title, now)
+	}
+}
+
+// makeWork does an intention for real: its ability (if any) gets what it
+// works from, System 2 writes it, and the work, its project and what it
+// learned are kept. what tells System 2 what it is doing. If it can't be done
+// the intention is finished as missed or cancelled; if System 2 fails, it
+// stays pending and is tried again on the next tick. It reports whether a
+// work was made.
+func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what string, now time.Time) (memory.Work, bool) {
+	log := m.Log.With("intention", i.ID.String())
 
 	// What it does is a percept of its own life, so facts and decisions point
 	// at it: a new one for each attempt, since a failed attempt is tried again.
 	pid := ulid.Make()
-	p := perception.Percept{ID: pid, Source: lifeSource, ExternalID: "activity:" + i.ID.String() + ":" + pid.String(),
-		Kind: "activity", Text: i.Text, At: now.UTC()}
+	p := perception.Percept{ID: pid, Source: lifeSource, ExternalID: action + ":" + i.ID.String() + ":" + pid.String(),
+		Kind: action, Text: i.Text, At: now.UTC()}
 	if _, err := m.Store.SavePercept(ctx, p); err != nil {
 		log.Error("save percept", "err", err)
-		return
+		return memory.Work{}, false
 	}
 	start := time.Now()
 	d := newDecision(p, nil, start)
-	d.Tier, d.SetID, d.Action = decision.TierSystem2, m.Day.ActivityPrompt.Ref, "activity"
+	d.Tier, d.SetID, d.Action = decision.TierSystem2, m.Day.ActivityPrompt.Ref, action
 
-	note, project, ok := m.activityNote(ctx, i, now)
+	note, project, ok := m.activityNote(ctx, i, what, now)
 	if !ok {
 		m.finish(ctx, i, memory.IntentionCancelled, "project not found", now)
 		m.finishLife(ctx, d, start, decision.OutcomeFailed, "project not found")
-		return
+		return memory.Work{}, false
 	}
 	// Its ability, if it uses one, gets what it works from: a passage, an article, its day.
 	var material ability.Material
 	ab, ok := m.Abilities.For(i, project)
 	if !ok {
-		log.Warn("activity needs an ability it doesn't have; missed", "ability", i.Ability)
+		log.Warn("needs an ability it doesn't have; missed", "ability", i.Ability)
 		m.finish(ctx, i, memory.IntentionMissed, "can't "+i.Ability+" now", now)
 		m.finishLife(ctx, d, start, decision.OutcomeFailed, "no ability "+i.Ability)
-		return
+		return memory.Work{}, false
 	}
 	if ab != nil {
 		var err error
 		material, err = ab.Prepare(ctx, ability.Act{Intention: i, Project: project, Now: now, Zone: m.Zone})
 		if err != nil {
-			log.Warn("ability failed; activity missed", "ability", ab.Name(), "query", i.Args["query"], "err", err)
+			log.Warn("ability failed; missed", "ability", ab.Name(), "query", i.Args["query"], "err", err)
 			m.finish(ctx, i, memory.IntentionMissed, "couldn't get "+orDefault(i.Args["query"], "what it needed"), now)
 			m.finishLife(ctx, d, start, decision.OutcomeFailed, ab.Name()+": "+err.Error())
-			return
+			return memory.Work{}, false
 		}
 		note += material.Note
 		project = material.Project
@@ -353,9 +367,9 @@ func (m *Mind) doActivity(ctx context.Context, i memory.Intention, now time.Time
 		Format:       activityFormat(m.Life.Crafts()),
 	})
 	if err != nil {
-		log.Error("activity failed", "err", err)
+		log.Error(action+" failed", "err", err)
 		m.finishLife(ctx, d, start, decision.OutcomeFailed, err.Error()) // still pending: tried again next tick
-		return
+		return memory.Work{}, false
 	}
 	d.Provider, d.CostUSD = resp.Provider, resp.CostUSD
 	var out struct {
@@ -369,7 +383,7 @@ func (m *Mind) doActivity(ctx context.Context, i memory.Intention, now time.Time
 	if err := json.Unmarshal([]byte(resp.Text), &out); err != nil || strings.TrimSpace(out.Text) == "" {
 		m.finish(ctx, i, memory.IntentionMissed, "nothing came of it", now)
 		m.finishLife(ctx, d, start, decision.OutcomeFailed, fmt.Sprintf("no work in the answer (%v)", err))
-		return
+		return memory.Work{}, false
 	}
 
 	title := orDefault(out.Title, i.Text)
@@ -402,19 +416,19 @@ func (m *Mind) doActivity(ctx context.Context, i memory.Intention, now time.Time
 			log.Error("save fact", "err", err)
 		}
 	}
-	m.finish(ctx, i, memory.IntentionDone, title, now)
 	d.Reply = title + "\n\n" + w.Text
 	m.finishLife(ctx, d, start, decision.OutcomeOK, fmt.Sprintf("made %s %q", w.Kind, title))
-	log.Info("did something of its own", "ability", i.Ability, "kind", w.Kind, "title", title, "cost_usd", d.CostUSD)
+	log.Info("made something", "action", action, "ability", i.Ability, "kind", w.Kind, "title", title, "cost_usd", d.CostUSD)
+	return w, true
 }
 
-// activityNote tells System 2 what it planned to do and where it got to: the
-// project and its latest works. It returns the project (nil if none), and
+// activityNote tells System 2 what it is doing (what) and where it got to:
+// the project and its latest works. It returns the project (nil if none), and
 // false if the project is gone.
-func (m *Mind) activityNote(ctx context.Context, i memory.Intention, now time.Time) (string, *memory.Project, bool) {
+func (m *Mind) activityNote(ctx context.Context, i memory.Intention, what string, now time.Time) (string, *memory.Project, bool) {
 	var b strings.Builder
 	b.WriteString(m.now(now))
-	fmt.Fprintf(&b, "\n\nWhat you planned to do now: %s", i.Text)
+	b.WriteString("\n\n" + what)
 	if i.ProjectID.IsZero() {
 		return b.String(), nil, true
 	}
@@ -461,11 +475,31 @@ func (m *Mind) overBudget(ctx context.Context, now time.Time) bool {
 	return spent >= m.Day.BudgetUSD
 }
 
+// makesList is what it makes, for a prompt: one "- kind: about" line each.
+func (m *Mind) makesList() string {
+	var lines []string
+	for _, c := range m.Life.Crafts() {
+		lines = append(lines, "- "+c.Kind+": "+c.About)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// abilitiesList is what it can do beyond writing, for a prompt.
+func (m *Mind) abilitiesList() string {
+	var lines []string
+	for _, a := range m.Abilities.Planned() {
+		lines = append(lines, "- "+a.Name()+": "+a.Describe())
+	}
+	if len(lines) == 0 {
+		return "- (none: you can only write)"
+	}
+	return strings.Join(lines, "\n")
+}
+
 // lifeInstructions renders a prompt about its own day: who it is and what it makes.
 func (m *Mind) lifeInstructions(p Prompt) string {
-	var crafts, kinds []string
+	var kinds []string
 	for _, c := range m.Life.Crafts() {
-		crafts = append(crafts, c.Kind+": "+c.About)
 		kinds = append(kinds, c.Kind)
 	}
 	list := func(lines []string, none string) string {
@@ -477,7 +511,7 @@ func (m *Mind) lifeInstructions(p Prompt) string {
 	return strings.NewReplacer("{name}", m.Life.Name, "{life_story}", list(m.Life.Story, "- (none)"),
 		"{personality}", list(m.Life.Personality, "- Be yourself."),
 		"{routine}", list(m.Life.Routine, "- No fixed routine: plan as you like."),
-		"{max}", fmt.Sprint(m.Day.MaxActivities), "{makes}", list(crafts, ""), "{kinds}", strings.Join(kinds, ", ")).Replace(p.Text)
+		"{max}", fmt.Sprint(m.Day.MaxActivities), "{makes}", m.makesList(), "{kinds}", strings.Join(kinds, ", ")).Replace(p.Text)
 }
 
 func (m *Mind) finishLife(ctx context.Context, d *decision.Decision, start time.Time, status decision.OutcomeStatus, detail string) {

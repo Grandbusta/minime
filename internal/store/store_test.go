@@ -485,6 +485,29 @@ func TestProjectsWorksAndOwnIntentions(t *testing.T) {
 	if j, ok, err := s.LatestWork(ctx, "journal"); err != nil || !ok || j.ID != journal.ID || !j.ProjectID.IsZero() {
 		t.Errorf("latest journal = %+v, %v, %v", j, ok, err)
 	}
+	if w, ok, err := s.IntentionWork(ctx, own.ID); err != nil || !ok || w.Title != "verse 2" {
+		t.Errorf("intention work = %+v, %v, %v", w, ok, err)
+	}
+	if _, ok, err := s.IntentionWork(ctx, ulid.Make()); err != nil || ok {
+		t.Errorf("work for an intention without one: %v, %v", ok, err)
+	}
+
+	// Promises to a person: only the pending tasks for them.
+	person := "test:" + ulid.Make().String()
+	task := func(text, status string) memory.Intention {
+		return memory.Intention{ID: ulid.Make(), Subject: person, Kind: memory.IntentionTask, Text: text,
+			Ability: "read_article", Args: map[string]string{"query": "afrobeat"}, DueAt: base.Add(time.Hour), Status: status, CreatedAt: base}
+	}
+	for _, i := range []memory.Intention{task("open", memory.IntentionPending), task("kept", memory.IntentionDone),
+		{ID: ulid.Make(), Subject: person, Kind: memory.IntentionRemind, Text: "a reminder", DueAt: base, Status: memory.IntentionPending, CreatedAt: base}} {
+		if err := s.SaveIntention(ctx, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if open, err := s.OpenIntentions(ctx, person, memory.IntentionTask); err != nil || len(open) != 1 || open[0].Text != "open" ||
+		open[0].Args["query"] != "afrobeat" {
+		t.Errorf("open promises = %+v, %v", open, err)
+	}
 
 	d := decision.Decision{ID: ulid.Make(), At: base, SetID: "activity@1", Tier: decision.TierSystem2, Action: "activity",
 		Gate: decision.GateAuto, CostUSD: 0.0021}

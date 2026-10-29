@@ -278,6 +278,9 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 }
 
 // runClock ticks once a minute, on the minute, so the mind can speak first.
+// Each tick is the minute it was due, not when the timer fired: a timer may
+// fire a hair before the wall clock reaches the minute, and something due at
+// 17:50 must count as due at the 17:50 tick.
 func runClock(ctx context.Context, ticks chan<- time.Time) error {
 	for {
 		now := time.Now()
@@ -285,9 +288,9 @@ func runClock(ctx context.Context, ticks chan<- time.Time) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case t := <-time.After(next.Sub(now)):
+		case <-time.After(next.Sub(now)):
 			select {
-			case ticks <- t:
+			case ticks <- next:
 			case <-ctx.Done():
 				return nil
 			}
@@ -369,7 +372,7 @@ func newDecisionModel(c config.Provider, prices map[string]pricing.Price, log *s
 func newReasoner(c config.Reasoning, prices map[string]pricing.Price, log *slog.Logger) (system2.Reasoner, error) {
 	switch c.Provider.Provider {
 	case "openai":
-		return s2openai.New(c.APIKey, c.Model, c.BaseURL, priceFor(c.Model, prices, log), c.Effort), nil
+		return system2.WithoutEmDashes(s2openai.New(c.APIKey, c.Model, c.BaseURL, priceFor(c.Model, prices, log), c.Effort)), nil
 	default:
 		return nil, fmt.Errorf("unknown reasoning provider %q (want openai)", c.Provider.Provider)
 	}

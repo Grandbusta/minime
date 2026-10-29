@@ -17,7 +17,8 @@ type Request struct {
 	MaxOutputTokens int    // 0: the provider's default
 	// CollectFacts asks for the lasting facts to remember, each about the
 	// agent itself or the person speaking, alongside the reply
-	// (Response.Remember), plus any reminders it agreed to set (Response.Reminders).
+	// (Response.Remember), plus any reminders it agreed to set (Response.Reminders)
+	// and things it promised to make (Response.Promises).
 	CollectFacts bool
 	// Format, when set, asks for JSON that matches it instead of plain text;
 	// Response.Text is then that JSON. Not used together with CollectFacts.
@@ -49,6 +50,14 @@ type Reminder struct {
 	What string // e.g. "call mum"
 }
 
+// Promise is something the agent agreed to make for the speaker and send later.
+type Promise struct {
+	By      string // when it will send it, local time, "2006-01-02T15:04"
+	What    string // what it will make, e.g. "Daniel writes Sam a verse about Sunday mornings"
+	Ability string // the ability it needs, e.g. "read_article"; "" if it only writes
+	Query   string // what the ability is to look for; "" if none
+}
+
 type Role string
 
 const (
@@ -70,8 +79,10 @@ type Response struct {
 	WhoTheyAre string
 	// Reminders, with CollectFacts: what the speaker asked to be reminded of.
 	Reminders []Reminder
-	Usage     Usage
-	CostUSD   float64 // 0 when no price is configured
+	// Promises, with CollectFacts: what the agent agreed to make for the speaker.
+	Promises []Promise
+	Usage    Usage
+	CostUSD  float64 // 0 when no price is configured
 }
 
 type Usage struct {

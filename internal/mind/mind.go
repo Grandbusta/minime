@@ -59,6 +59,8 @@ type Store interface {
 	IntentionsDue(ctx context.Context, from, to time.Time) ([]memory.Intention, error)
 	FinishIntention(ctx context.Context, id ulid.ULID, status, result string, at time.Time) error
 	PostponeIntention(ctx context.Context, id ulid.ULID, due time.Time) error
+	OpenIntentions(ctx context.Context, subject, kind string) ([]memory.Intention, error)
+	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
 	SaveProject(ctx context.Context, p memory.Project) error
 	Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error)
 	ActiveProjects(ctx context.Context, limit int) ([]memory.Project, error)
@@ -510,7 +512,7 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.instructions(ctx, person, n),
 		History:      turns(recent),
-		Note:         m.now(p.At) + "\n\n" + m.system2Note(parent, why, facts, n),
+		Note:         m.now(p.At) + "\n\n" + m.system2Note(parent, why, facts, n) + m.promisesNote(ctx, p, person, n),
 		Message:      p.Text,
 		CollectFacts: true,
 	})
@@ -543,7 +545,75 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	// It may also have learned who the speaker is to it ("I'm your cousin").
 	d.CostUSD += m.learnRelation(ctx, p, person, resp.WhoTheyAre)
 	m.saveReminders(ctx, p, resp.Reminders)
+	m.savePromises(ctx, p, person, resp.Promises)
 	return resp.Text
+}
+
+// canPromise reports whether the agent may promise person things: not a
+// stranger, whose requests could be anything.
+func canPromise(p perception.Percept, person memory.Person) bool {
+	return p.Speaker != "" && person.Circle != memory.CircleStranger
+}
+
+// promisesNote tells System 2 what it already promised the speaker and hasn't
+// sent yet, or that it can't promise them anything.
+func (m *Mind) promisesNote(ctx context.Context, p perception.Percept, person memory.Person, n names) string {
+	if !canPromise(p, person) {
+		return fmt.Sprintf("\n\nYou don't know %s well yet: don't promise to make them anything; leave promises empty.", n.speaker)
+	}
+	open, err := m.Store.OpenIntentions(ctx, p.Speaker, memory.IntentionTask)
+	if err != nil || len(open) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n\nWhat you've promised %s and not sent yet (at most %d at a time). If they add to one, just say you'll work it in; "+
+		"don't make it now:", n.speaker, maxOpenPromises)
+	for _, i := range open {
+		fmt.Fprintf(&b, "\n- by %s: %s", i.DueAt.In(m.Zone).Format("Mon 2 Jan 15:04"), i.Text)
+	}
+	return b.String()
+}
+
+// savePromises keeps what System 2 promised to make for the speaker, as tasks
+// due when it said it would send them. One in the past, with a bad time, past
+// maxOpenPromises, or to a stranger is dropped; an ability it doesn't have is
+// left out.
+func (m *Mind) savePromises(ctx context.Context, p perception.Percept, person memory.Person, ps []system2.Promise) {
+	if len(ps) == 0 {
+		return
+	}
+	log := m.Log.With("percept", p.ID.String(), "person", p.Speaker)
+	if !canPromise(p, person) {
+		log.Warn("dropped promises to a stranger", "promises", len(ps))
+		return
+	}
+	open, err := m.Store.OpenIntentions(ctx, p.Speaker, memory.IntentionTask)
+	if err != nil {
+		log.Error("loading open promises failed; dropped", "err", err)
+		return
+	}
+	count := len(open)
+	for _, pr := range ps {
+		due, err := time.ParseInLocation("2006-01-02T15:04", pr.By, m.Zone)
+		if err != nil || !due.After(p.At) || count >= maxOpenPromises {
+			log.Warn("dropped a promise", "by", pr.By, "what", pr.What, "open", count, "err", err)
+			continue
+		}
+		i := memory.Intention{ID: ulid.Make(), Subject: p.Speaker, Kind: memory.IntentionTask, PerceptID: p.ID, Text: pr.What,
+			DueAt: due.UTC(), Status: memory.IntentionPending, CreatedAt: time.Now().UTC()}
+		if ab, ok := m.Abilities.Get(pr.Ability); ok && ab.Describe() != "" {
+			i.Ability = ab.Name()
+			if pr.Query != "" {
+				i.Args = map[string]string{"query": pr.Query}
+			}
+		}
+		if err := m.Store.SaveIntention(ctx, i); err != nil {
+			log.Error("save promise", "err", err)
+			continue
+		}
+		count++
+		log.Info("promised", "due", due.Format(time.RFC3339), "what", pr.What, "ability", i.Ability)
+	}
 }
 
 // saveReminders keeps the reminders System 2 agreed to set, in the agent's
@@ -580,7 +650,8 @@ func (m *Mind) instructions(ctx context.Context, person memory.Person, n names) 
 		personality = "- " + strings.Join(m.Life.Personality, "\n- ")
 	}
 	return strings.NewReplacer("{name}", n.agent, "{speaker}", n.speaker, "{life_story}", story,
-		"{personality}", personality, "{who_they_are}", m.whoTheyAre(ctx, person, n)).Replace(m.ReplyPrompt.Text)
+		"{personality}", personality, "{who_they_are}", m.whoTheyAre(ctx, person, n),
+		"{makes}", m.makesList(), "{abilities}", m.abilitiesList()).Replace(m.ReplyPrompt.Text)
 }
 
 // turns lays recalled exchanges out as a conversation for System 2.

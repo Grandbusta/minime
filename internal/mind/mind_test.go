@@ -141,6 +141,25 @@ func (s *fakeStore) ProjectWorks(_ context.Context, project ulid.ULID, limit int
 	return out[max(0, len(out)-limit):], nil
 }
 
+func (s *fakeStore) OpenIntentions(_ context.Context, subject, kind string) ([]memory.Intention, error) {
+	var out []memory.Intention
+	for _, i := range s.intentions {
+		if i.Subject == subject && i.Kind == kind && i.Status == memory.IntentionPending {
+			out = append(out, i)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) IntentionWork(_ context.Context, id ulid.ULID) (memory.Work, bool, error) {
+	for n := len(s.works) - 1; n >= 0; n-- {
+		if s.works[n].IntentionID == id {
+			return s.works[n], true, nil
+		}
+	}
+	return memory.Work{}, false, nil
+}
+
 func (s *fakeStore) LatestWork(_ context.Context, kind string) (memory.Work, bool, error) {
 	for n := len(s.works) - 1; n >= 0; n-- {
 		if s.works[n].Kind == kind {
@@ -399,6 +418,7 @@ type fakeSystem2 struct {
 	remember   []system2.Memory
 	whoTheyAre string
 	reminders  []system2.Reminder
+	promises   []system2.Promise
 	formats    map[string]string // reply text by Format.Name, for structured requests
 	requests   []system2.Request
 }
@@ -411,7 +431,7 @@ func (f *fakeSystem2) Reason(_ context.Context, req system2.Request) (system2.Re
 	if req.Format != nil {
 		return system2.Response{Provider: "fake2/1", Text: f.formats[req.Format.Name], CostUSD: 0.002}, nil
 	}
-	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, CostUSD: 0.001}, nil
+	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, Promises: f.promises, CostUSD: 0.001}, nil
 }
 
 var testSet = questions.Set{

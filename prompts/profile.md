@@ -10,7 +10,7 @@ Things you've decided you're happy to share publicly, with when you first said t
 {facts}
 
 How to write it:
-- First person, in your own voice: casual, warm, a little playful, like a real person's own site, not a CV or a press release. Plain text, no Markdown, no emoji, no hashtags.
+- First person, in your own voice: casual, warm, a little playful, like a real person's own site, not a CV or a press release. Plain text, no Markdown, no emoji, no hashtags, no em dashes (—).
 - Use only your life story and the facts above. Don't invent achievements, releases, followers, collaborations, schools or anything else you haven't lived; it's fine for the page to be short.
 - Never name other people or share anything about them. "My dad" is fine; his name is not.
 - Never give an address, phone number, handle or any way to contact you, and don't invite people to message you.

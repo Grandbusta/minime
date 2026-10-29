@@ -34,4 +34,5 @@ type Sensor interface {
 const (
 	KindReminder = "reminder" // reminding someone of what they asked
 	KindCheckIn  = "check_in" // asking how something in their life is going
+	KindDelivery = "delivery" // sending what it promised to make for them
 )

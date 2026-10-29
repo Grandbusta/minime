@@ -505,7 +505,7 @@ autonomy:
 | Working     | ✅ The recent conversation: the last `working_memory.turns` exchanges (the person's message + the agent's reply) in the same thread, within `working_memory.window` (30 min; 2 h pulled finished topics into new ones). Given to System 2 as chat turns | Recalled facts |
 | Episodic    | Percepts & decisions (Postgres)      | Summaries |
 | Semantic    | ✅ Facts (`facts` table), each with a **subject**: `self` (the agent) or a person's key (e.g. `telegram:123`). Saved two ways: verbatim, as a fact about the speaker, when System 1 confidently reads *remember*; and by System 2, which returns facts tagged *self* or *speaker* alongside its reply (Structured Outputs). These are lasting facts it heard about the speaker ("It is 2027" after a passport question → "Sam's passport expires in 2027") and facts it **decided about itself** ("Tobi's favourite colour is forest green"). Recall only considers the agent's own facts and the current speaker's. Every fact is **filed by life area** when saved (see below). Before each System 2 reply, System 1 checks the newest `memory.recall_candidates` facts with one yes/no question each ([fact_relevance](../decisions/fact_relevance.yaml)) and passes the relevant ones on. The check is recorded as its own decision between the read and the reply | A cheap pre-filter (pgvector embeddings or full-text) once there are too many facts to check them all; updating and forgetting facts |
-| Prospective | ✅ Intentions (`intentions` table): reminders people ask for (set by System 2, sent by the clock in the agent's own words), and the activities of its own day (planned each morning, done through the day). Check-ins on what people told it, each fact asked about once (`facts.asked_at`). Projects carry its work over from day to day; works keep what it made | Listing and cancelling reminders; repeating ones; promises to people (step 6.3); event-triggered intentions |
+| Prospective | ✅ Intentions (`intentions` table): reminders people ask for (set by System 2, sent by the clock in the agent's own words), and the activities of its own day (planned each morning, done through the day). Check-ins on what people told it, each fact asked about once (`facts.asked_at`). Projects carry its work over from day to day; works keep what it made. Promises to people (`task` intentions, made and sent when due) | Listing and cancelling reminders and promises; repeating ones; event-triggered intentions |
 
 ### 4.6 Safety & control
 - Kill switch and pause (API + SIGTERM-safe shutdown).
@@ -664,9 +664,19 @@ everything it says it read or made exists, so its profile's Work section is hone
 - **Remembering:** what it did becomes facts about itself ("Daniel finished chapter 3 of
   Things Fall Apart"); what it made is kept as a work (title, kind, text, project). Both are
   recalled in conversation, so "what have you been up to?" gets a true answer.
-- **Promises:** System 2 returns commitments it makes in chat ("I'll send you a verse by
-  Friday") as `task` intentions, split into steps when useful; when one is done, it delivers
-  it in that conversation.
+- **Promises** (✅): System 2 returns commitments it makes in chat ("I'll send you a verse by
+  Friday") in `promises` (when, what, and an ability if it needs one), saved as `task`
+  intentions for that person. The reply prompt lists what it makes (`{makes}`) and its
+  abilities (`{abilities}`), so it only promises what it can do, and the note lists what it
+  already promised. At most three open per person; none to strangers. It is made ahead,
+  within 30 minutes of its time but not in the 5 minutes after it was promised (unless due
+  sooner), so details added in the next message reach it: like an activity (`makeWork`,
+  action `task`), with what was said around the promise. When due, it is sent in that
+  conversation with a few words of its own (`deliver`, percept kind `delivery`), whatever
+  the conversation or budget; made but unsent, it is sent on the next tick without being
+  made again. The clock's ticks carry the exact minute, so something due at 17:50 goes out
+  at the 17:50 tick. Splitting a
+  promise into steps over days is for later.
 - **Evening journal:** a short look back, which also feeds the next morning's plan.
 - **On its profile:** "Lately" fills from its public facts; a new **Work** section shows
   finished works that System 1 decides are public (like facts, `public_profile`).
@@ -783,7 +793,7 @@ mini-me/
    2. ✅ Reading and learning from real sources: an allow-listed fetcher for Gutenberg and
       Wikipedia, books read a passage at a time with progress kept per project. Reading and
       the journal are abilities (`internal/ability`), so new ones (web search) plug in.
-   3. Promises from chat: commitments become its own intentions and are delivered when done.
+   3. ✅ Promises from chat: commitments become `task` intentions, made and delivered when due.
    4. Work on its profile: a Work section from the works it decides are public.
    - Later: the same machinery takes jobs from other sources (chat, email, a job board); audio
      for its music is TBD.

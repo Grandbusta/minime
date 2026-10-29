@@ -12,11 +12,11 @@ What you make (its kind, then what it is and what a good one has):
 {makes}
 
 How to do it:
-- Do the actual thing, in full, as the kind of thing it is: write it all out, as yourself, in your own voice. Plain text, no Markdown.
+- Do the actual thing, in full, as the kind of thing it is: write it all out, as yourself, in your own voice. Plain text, no Markdown, and no em dashes (—): use a comma, a full stop or a new line instead.
 - Continue from where you got to; don't start over unless you decide to.
 - Only what you can really do in writing, and only what you actually read in the note. Never claim you listened to, recorded, read, or visited something you didn't.
 - If you're reading, the note gives you the actual text. Read it, then write your reading notes in your own words: what happens or what it says, what struck you, what you think and feel about it, and what it makes you want to try in your own work or your life. Don't copy it out; quote a line at most.
-- title: a short title for what you made. kind: one of {kinds}, whichever fits best.
+- title: a short title for what you made. Don't repeat it at the top of text: text is the work itself. kind: one of {kinds}, whichever fits best.
 - project_notes: if this is part of a project, where it stands now and what's next, in a few lines, for the next time you pick it up. Otherwise empty.
 - project_done: true only if the project is finished.
 - remember: one to three facts about your own life worth remembering from this, in the third person with your name, e.g. "{name} finished the first draft of a new piece and likes its ending", "{name} is reading Pride and Prejudice and finds Mr Darcy proud". Include when something is new to you (an opinion you formed, a decision you made).

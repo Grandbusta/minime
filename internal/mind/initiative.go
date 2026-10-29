@@ -16,8 +16,9 @@ import (
 
 // Initiative: the agent speaks first, the way a person does. A clock ticks
 // into the mind's loop; on each tick it sends the reminders that are due,
-// and at the check-in times of day it considers checking in on the people
-// it talks with, about what is going on in their lives.
+// keeps the promises that are due (makes what it promised and sends it), and
+// at the check-in times of day it considers checking in on the people it
+// talks with, about what is going on in their lives.
 
 // CheckIns is when the agent considers checking in on people.
 type CheckIns struct {
@@ -34,11 +35,28 @@ const (
 	// reminderGiveUp is how late a reminder may still be sent, e.g. after
 	// the agent was down; later, it is marked missed.
 	reminderGiveUp = 24 * time.Hour
+	// promiseGiveUp is how late a promise may still be kept.
+	promiseGiveUp = 24 * time.Hour
+	// maxOpenPromises is how many promises it keeps open with one person.
+	maxOpenPromises = 3
+	// What was said around a promise, for making it: from promiseTalkBefore
+	// it was made to promiseTalkAfter, at most promiseTalkTurns exchanges.
+	promiseTalkBefore = 10 * time.Minute
+	promiseTalkAfter  = 30 * time.Minute
+	promiseTalkTurns  = 12
+	// A promise is made ahead and sent when due: within promiseLead of
+	// its time, but not before promiseSettle after it was made, so details
+	// added in the next breath reach it, unless it is due within
+	// promiseMakeAhead, the time making it may take.
+	promiseLead      = 30 * time.Minute
+	promiseSettle    = 5 * time.Minute
+	promiseMakeAhead = time.Minute
 )
 
 func (m *Mind) tick(ctx context.Context, now time.Time) {
 	m.planDay(ctx, now)
 	m.doDueIntentions(ctx, now)
+	m.preparePromises(ctx, now)
 	if m.checkInTime(now) {
 		m.checkIn(ctx, now)
 	}
@@ -58,6 +76,8 @@ func (m *Mind) doDueIntentions(ctx context.Context, now time.Time) {
 			m.remind(ctx, i, now)
 		case memory.IntentionActivity:
 			m.doActivity(ctx, i, now)
+		case memory.IntentionTask:
+			m.keepPromise(ctx, i, now)
 		default:
 			m.Log.Warn("intention of unknown kind; cancelled", "intention", i.ID.String(), "kind", i.Kind)
 			m.finish(ctx, i, memory.IntentionCancelled, "", now)
@@ -94,10 +114,132 @@ func (m *Mind) remind(ctx context.Context, r memory.Intention, now time.Time) {
 	note := fmt.Sprintf("You are messaging %s first: it's time for the reminder %s asked you for on %s: %s. "+
 		"Remind them now, in your own words, briefly, like a friend would.",
 		n.speaker, n.speaker, r.CreatedAt.In(m.Zone).Format("Monday 2 January at 15:04"), n.fill(r.Text))
-	if m.speakFirst(ctx, p, person, nil, "remind", note) {
+	if m.speakFirst(ctx, p, person, nil, "remind", note, "", nil) {
 		m.finish(ctx, r, memory.IntentionDone, "", now)
 	}
 	// Not sent: still pending, so the next tick tries again.
+}
+
+// keepPromise sends what it promised a person when it is due, with a few
+// words of its own: made ahead by preparePromises, or now if that failed.
+// It isn't put off by a conversation or the day's budget: a promise is kept.
+// Made but not sent (sending failed), it is sent on the next tick without
+// being made again.
+func (m *Mind) keepPromise(ctx context.Context, i memory.Intention, now time.Time) {
+	log := m.Log.With("intention", i.ID.String(), "person", i.Subject)
+	conv, ok := m.conversationWith(ctx, i.Subject)
+	if !ok || now.Sub(i.DueAt) > promiseGiveUp {
+		log.Warn("promise could not be kept", "due", i.DueAt)
+		m.finish(ctx, i, memory.IntentionMissed, "too late", now)
+		return
+	}
+	person := m.person(ctx, i.Subject)
+	w, made, err := m.Store.IntentionWork(ctx, i.ID)
+	if err != nil {
+		log.Error("loading the work failed", "err", err)
+		return
+	}
+	if !made { // not made ahead, e.g. it failed then
+		if w, made = m.makePromise(ctx, i, conv, person, now); !made {
+			return // missed, or tried again next tick
+		}
+	}
+	promised := i.CreatedAt.In(m.Zone).Format("Monday 2 January at 15:04")
+	p := outgoing(conv, person, perception.KindDelivery, now)
+	n := m.namesFor(p)
+	note := fmt.Sprintf("You are messaging %s first: on %s you promised to make this for them: %s. You made it; this is "+
+		"it, and it goes right after your message, word for word:\n\n%s\n\nWrite only the one or two short sentences "+
+		"you send with it, the way a friend would (\"here's that verse I promised\"). Don't write anything of your own "+
+		"in its place, and don't repeat it.", n.speaker, promised, i.Text, titled(w))
+	if m.speakFirst(ctx, p, person, nil, "deliver", note, titled(w), firstParagraph) {
+		m.finish(ctx, i, memory.IntentionDone, w.Title, now)
+	}
+	// Not sent: still pending, and the work is kept, so the next tick sends it.
+}
+
+// preparePromises makes what it promised ahead, so it is ready to send on
+// time: promises due within promiseLead, once they have settled (see
+// promiseSettle). One that fails is tried again next tick, and at the latest
+// when it is due.
+func (m *Mind) preparePromises(ctx context.Context, now time.Time) {
+	soon, err := m.Store.DueIntentions(ctx, now.Add(promiseLead), intentionsPerTick)
+	if err != nil {
+		m.Log.Warn("loading promises due soon failed", "err", err)
+		return
+	}
+	for _, i := range soon {
+		if i.Kind != memory.IntentionTask || !i.DueAt.After(now) {
+			continue // not a promise, or due now: kept by keepPromise
+		}
+		if now.Before(i.CreatedAt.Add(promiseSettle)) && now.Before(i.DueAt.Add(-promiseMakeAhead)) {
+			continue // just promised: more may still be said about it
+		}
+		if _, made, err := m.Store.IntentionWork(ctx, i.ID); err != nil || made {
+			continue
+		}
+		conv, ok := m.conversationWith(ctx, i.Subject)
+		if !ok {
+			continue // missed when due
+		}
+		m.makePromise(ctx, i, conv, m.person(ctx, i.Subject), now)
+	}
+}
+
+// makePromise makes what it promised person, with what was said about it.
+func (m *Mind) makePromise(ctx context.Context, i memory.Intention, conv memory.Conversation, person memory.Person,
+	now time.Time) (memory.Work, bool) {
+	who := orDefault(person.Name, fallbackName)
+	what := fmt.Sprintf("You promised %s, on %s, to make this for them by %s: %s. Make it now, in full; you'll send it to them then.",
+		who, i.CreatedAt.In(m.Zone).Format("Monday 2 January at 15:04"), i.DueAt.In(m.Zone).Format("Monday 15:04"), i.Text)
+	return m.makeWork(ctx, i, "task", what+m.promiseTalk(ctx, conv, i, who), now)
+}
+
+// promiseTalk is what was said around a promise, from a little before it to
+// a while after, so details added once it was made ("funny, please") reach
+// the work.
+func (m *Mind) promiseTalk(ctx context.Context, conv memory.Conversation, i memory.Intention, who string) string {
+	exchanges, err := m.Store.RecentExchanges(ctx, conv.Source, conv.Thread, i.CreatedAt.Add(-promiseTalkBefore), ulid.ULID{}, promiseTalkTurns)
+	if err != nil {
+		m.Log.Warn("loading what was said around a promise failed", "intention", i.ID.String(), "err", err)
+		return ""
+	}
+	var b strings.Builder
+	for _, e := range exchanges {
+		if e.At.After(i.CreatedAt.Add(promiseTalkAfter)) {
+			break
+		}
+		if e.Message != "" {
+			fmt.Fprintf(&b, "\n%s: %s", who, e.Message)
+		}
+		if e.Reply != "" {
+			fmt.Fprintf(&b, "\n%s: %s", m.Life.Name, e.Reply)
+		}
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return "\n\nWhat you and " + who + " said about it (follow any details they added):" + b.String()
+}
+
+// titled is a work as it is sent: its title, then its text, unless the text
+// already starts with the title.
+func titled(w memory.Work) string {
+	text := strings.TrimSpace(w.Text)
+	if first, _, _ := strings.Cut(text, "\n"); strings.EqualFold(strings.Trim(first, " *#\"'"), strings.TrimSpace(w.Title)) {
+		return text
+	}
+	return w.Title + "\n\n" + text
+}
+
+// firstParagraph keeps the words sent with a delivery to their first
+// paragraph, in case System 2 wrote more than it was asked to (like its own
+// version of what is attached).
+func firstParagraph(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.Index(s, "\n\n"); i > 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return s
 }
 
 func (m *Mind) finish(ctx context.Context, i memory.Intention, status, result string, now time.Time) {
@@ -156,7 +298,7 @@ func (m *Mind) checkIn(ctx context.Context, now time.Time) {
 			fmt.Fprintf(&b, "\n- %s: %s", f.At.Format("2 Jan 2006"), n.fact(f))
 		}
 		b.WriteString("\nAsk how one of them is going, the way a friend texts out of the blue: short and warm, one question at most.")
-		if !m.speakFirst(ctx, p, person, root, "check_in", b.String()) {
+		if !m.speakFirst(ctx, p, person, root, "check_in", b.String(), "", nil) {
 			continue
 		}
 		ids := make([]ulid.ULID, len(kept))
@@ -170,10 +312,12 @@ func (m *Mind) checkIn(ctx context.Context, now time.Time) {
 }
 
 // speakFirst has System 2 write what the agent says first to person, as a
-// child of root (nil: none), and sends it in the conversation p places it in.
-// The note says why it is speaking. It reports whether the message was sent.
+// child of root (nil: none), and sends it in the conversation p places it in,
+// followed by attachment (e.g. what it promised them) if any. The note says
+// why it is speaking; trim, if set, shortens what System 2 wrote. It reports
+// whether the message was sent.
 func (m *Mind) speakFirst(ctx context.Context, p perception.Percept, person memory.Person,
-	root *decision.Decision, action, note string) bool {
+	root *decision.Decision, action, note, attachment string, trim func(string) string) bool {
 	log := m.Log.With("percept", p.ID.String(), "person", p.Speaker, "action", action)
 	if _, err := m.Store.SavePercept(ctx, p); err != nil {
 		log.Error("save percept", "err", err)
@@ -204,8 +348,14 @@ func (m *Mind) speakFirst(ctx context.Context, p perception.Percept, person memo
 		d.Outcome = &decision.Outcome{Status: decision.OutcomeFailed, Detail: err.Error(), At: time.Now().UTC()}
 	default:
 		d.Provider, d.CostUSD, d.Reply = resp.Provider, resp.CostUSD, resp.Text
+		if trim != nil {
+			d.Reply = trim(d.Reply)
+		}
+		if attachment != "" {
+			d.Reply += "\n\n" + attachment
+		}
 		d.Outcome = &decision.Outcome{Status: decision.OutcomeOK, At: time.Now().UTC()}
-		if err := m.Replier.Reply(ctx, p, resp.Text); err != nil {
+		if err := m.Replier.Reply(ctx, p, d.Reply); err != nil {
 			log.Warn("sending failed", "err", err)
 			d.Outcome = &decision.Outcome{Status: decision.OutcomeFailed, Detail: err.Error(), At: time.Now().UTC()}
 		} else {

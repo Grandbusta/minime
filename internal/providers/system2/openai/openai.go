@@ -58,7 +58,7 @@ type wireFormat struct {
 var replyWithFacts = &wireText{Format: wireFormat{
 	Type: "json_schema", Name: "reply_with_facts", Strict: true,
 	Schema: map[string]any{
-		"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders"},
+		"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises"},
 		"properties": map[string]any{
 			"reply":        map[string]any{"type": "string"},
 			"who_they_are": map[string]any{"type": "string"},
@@ -67,6 +67,15 @@ var replyWithFacts = &wireText{Format: wireFormat{
 				"properties": map[string]any{
 					"when": map[string]any{"type": "string", "description": "local time, YYYY-MM-DDTHH:MM"},
 					"what": map[string]any{"type": "string"},
+				},
+			}},
+			"promises": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object", "additionalProperties": false, "required": []string{"by", "what", "ability", "query"},
+				"properties": map[string]any{
+					"by":      map[string]any{"type": "string", "description": "local time, YYYY-MM-DDTHH:MM"},
+					"what":    map[string]any{"type": "string"},
+					"ability": map[string]any{"type": "string", "description": "an ability it needs, or empty"},
+					"query":   map[string]any{"type": "string", "description": "what the ability is to look for, or empty"},
 				},
 			}},
 			"remember": map[string]any{"type": "array", "items": map[string]any{
@@ -181,6 +190,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		remember   []system2.Memory
 		whoTheyAre string
 		reminders  []system2.Reminder
+		promises   []system2.Promise
 	)
 	switch {
 	case refusal.Len() > 0:
@@ -197,6 +207,12 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 				When string `json:"when"`
 				What string `json:"what"`
 			} `json:"reminders"`
+			Promises []struct {
+				By      string `json:"by"`
+				What    string `json:"what"`
+				Ability string `json:"ability"`
+				Query   string `json:"query"`
+			} `json:"promises"`
 		}
 		if err := json.Unmarshal([]byte(reply), &out); err != nil {
 			return system2.Response{}, fmt.Errorf("openai responses: reply is not the requested JSON: %w", err)
@@ -212,6 +228,12 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		for _, r := range out.Reminders {
 			if when, what := strings.TrimSpace(r.When), strings.TrimSpace(r.What); when != "" && what != "" {
 				reminders = append(reminders, system2.Reminder{When: when, What: what})
+			}
+		}
+		for _, p := range out.Promises {
+			if by, what := strings.TrimSpace(p.By), strings.TrimSpace(p.What); by != "" && what != "" {
+				promises = append(promises, system2.Promise{By: by, What: what, Ability: strings.TrimSpace(p.Ability),
+					Query: strings.TrimSpace(p.Query)})
 			}
 		}
 	}
@@ -230,6 +252,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		Remember:   remember,
 		WhoTheyAre: whoTheyAre,
 		Reminders:  reminders,
+		Promises:   promises,
 		Usage:      system2.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, ReasoningTokens: u.OutputTokensDetails.ReasoningTokens},
 		CostUSD: c.price.Cost(pricing.Usage{
 			InputTokens: u.InputTokens, CachedTokens: u.InputTokensDetails.CachedTokens,

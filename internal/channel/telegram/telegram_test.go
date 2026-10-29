@@ -99,3 +99,26 @@ func TestSensorKeepsOnlyOwnerMessages(t *testing.T) {
 		t.Fatal("update without message kept")
 	}
 }
+
+func TestSplitLongMessages(t *testing.T) {
+	para := strings.Repeat("word ", 300) // 1,500 runes
+	text := "Here it is.\n\n" + para + "\n\n" + para + "\n\n" + para + "end"
+	parts := split(text, 4096)
+	if len(parts) != 2 || strings.Join(strings.Fields(strings.Join(parts, " ")), " ") != strings.Join(strings.Fields(text), " ") {
+		t.Errorf("%d parts, or words lost", len(parts))
+	}
+	for _, p := range parts {
+		if n := len([]rune(p)); n > 4096 || n == 0 {
+			t.Errorf("part of %d runes", n)
+		}
+	}
+	if !strings.HasPrefix(parts[1], "word") || !strings.HasSuffix(parts[0], "word") {
+		t.Errorf("not cut at a paragraph: %q / %q", parts[0][len(parts[0])-10:], parts[1][:10])
+	}
+	if got := split("short", 4096); len(got) != 1 || got[0] != "short" {
+		t.Errorf("short = %q", got)
+	}
+	if got := split(strings.Repeat("é", 10000), 4096); len(got) != 3 || len([]rune(got[0])) != 4096 {
+		t.Errorf("no breaks: %d parts", len(got))
+	}
+}

@@ -28,7 +28,7 @@ const ago = (ms) => {
 
 // family groups a decision for colour: fast, slow, reflex, or its own life.
 function family(e) {
-  if (["plan_day", "activity"].includes(e.action) || e.source === "life") return "life";
+  if (["plan_day", "activity", "task"].includes(e.action) || e.source === "life") return "life";
   return e.tier || "reflex";
 }
 const setName = (set) => (set || "").split(",")[0].split("@")[0];
@@ -39,7 +39,7 @@ const ACTIONS = {
   small_talk: "small talk", other: "other", continue: "continued a thread", ask: "fairly sure → System 2",
   escalate: "unsure → System 2", reply: "replied", recall: "recalled facts", recall_all: "recalled everything",
   recall_open: "looked for open threads", check_in: "check-in", no_check_in: "nothing to check in on",
-  plan_day: "planned the day", activity: "did something", decide_public: "chose what's public",
+  plan_day: "planned the day", activity: "did something", task: "made what it promised", deliver: "sent what it promised", decide_public: "chose what's public",
   write_profile: "wrote the profile page", error: "error",
 };
 const actionText = (a) => ACTIONS[a] || a;
@@ -58,7 +58,8 @@ function primary(e) {
 function pathFor(e) {
   const set = setName(e.set), a = e.action;
   if (a === "plan_day") return ["clock", "life", "system2", "intentions"];
-  if (a === "activity") return ["intentions", "life", "system2", "facts"];
+  if (a === "activity" || a === "task") return ["intentions", "life", "system2", "facts"];
+  if (a === "deliver") return ["clock", "intentions", "system2", "senses"];
   if (a === "remind") return e.tier === "system2" ? ["clock", "intentions", "system2", "senses"] : ["senses", "system1", "router"];
   if (a === "check_in" || a === "no_check_in") return e.tier === "system2" ? ["clock", "system2", "senses"] : ["clock", "system1", "facts"];
   if (a === "decide_public") return ["facts", "system1", "profile"];
@@ -80,7 +81,7 @@ const COLORS = { system1: "#5be7ff", system2: "#b48cff", reflex: "#8a94a6", life
 const NODES = {
   system2:    { x: -0.70, y: -0.20, z: 0.30, lobe: "frontal", label: "System 2", about: "Slow reasoning: writes every reply, plans the day, does the work." },
   working:    { x: -0.42, y: -0.56, z: 0.25, lobe: "frontal", label: "Working memory", about: "The conversation so far: the last exchanges in this thread." },
-  intentions: { x: -0.10, y: -0.70, z: 0.20, lobe: "frontal", label: "Intentions", about: "What it means to do: reminders, its own activities." },
+  intentions: { x: -0.10, y: -0.70, z: 0.20, lobe: "frontal", label: "Intentions", about: "What it means to do: reminders, promises, its own activities." },
   life:       { x: 0.36, y: -0.58, z: 0.25, lobe: "parietal", label: "Daily life", about: "Its own day: the plan, projects, what it makes." },
   senses:     { x: 0.76, y: -0.20, z: 0.20, lobe: "occipital", label: "Senses", about: "Telegram in and out: what it hears and says." },
   router:     { x: 0.10, y: -0.04, z: 0.00, lobe: "deep", label: "Router", about: "How sure is System 1? Act, ask, or escalate." },
@@ -681,7 +682,7 @@ function renderLog() {
     if (logFilter !== "all" && !g.some((e) => family(e) === logFilter)) continue;
     const head = g[0], last = g[g.length - 1], cost = g.reduce((s, e) => s + e.cost_usd, 0);
     const reply = [...g].reverse().find((e) => e.reply);
-    const what = head.text ? esc(head.text) : head.kind === "reminder" || head.kind === "check_in" ? `<span class="muted">spoke first</span>` : `<span class="muted">${esc(actionText(head.action))}</span>`;
+    const what = head.text ? esc(head.text) : ["reminder", "check_in", "delivery"].includes(head.kind) ? `<span class="muted">spoke first</span>` : `<span class="muted">${esc(actionText(head.action))}</span>`;
     const b = document.createElement("button");
     b.className = "chain";
     b.innerHTML = `<div class="when">${fmtTime(head.at)}<small>${fmtTime(head.at, true).split(",")[0] || ""}</small></div>
