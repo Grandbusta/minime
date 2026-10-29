@@ -316,6 +316,16 @@ reading and learning 5). After the first start they're its own:
   days follow the current stage, mixing studying and practising, and its Sunday review moves
   it to the next stage once what it made meets the stage's "done when", and adds what to
   study next. The Growth view shows each plan, its current stage and its resources.
+- **It finds things on the open web.** `web_search` searches the web (OpenAI's built-in
+  web search, with the System 2 key: `search:` in the config, switchable to another
+  provider later) and reads the best page; `read_page` reads a page one of its searches
+  found. It studies how others do things (guides, examples) and writes notes in its own
+  words; what it takes from them become lessons "from others". Safety: a search keeps only
+  pages it actually retrieved (never a URL a model wrote), it reads only https pages on
+  public addresses (never your network), a page can only be read if its own search found
+  it (so a link can't send it anywhere), what it reads is marked as material and never
+  instructions, and `daily_life.web` caps it at 10 searches and 15 pages a day. It's the
+  `read_web` class of the autonomy gate, so you can switch it off by chat.
 
 The console's Growth view shows its dreams, goals with their projects, skills with their
 recent scores, and the last review. From the terminal:

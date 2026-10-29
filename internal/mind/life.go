@@ -180,6 +180,7 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 	}
 	note.WriteString(m.growthNote(ctx, now))
 	note.WriteString(m.plansNote(ctx, false))
+	note.WriteString(m.foundNote(ctx))
 	if j, ok, err := m.Store.LatestWork(ctx, "journal"); err == nil && ok {
 		fmt.Fprintf(&note, "\n\nYour last journal entry (%s):\n%s", j.CreatedAt.In(m.Zone).Format("Monday 2 Jan"), j.Text)
 	}
@@ -473,7 +474,15 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	d.Reply = title + "\n\n" + w.Text
 	m.finishLife(ctx, d, start, decision.OutcomeOK, fmt.Sprintf("made %s %q", w.Kind, title))
 	m.scoreWork(ctx, w, p.ID, &d.ID)
-	m.learnFromWork(ctx, w, out.Lessons)
+	source := memory.LessonFromSelf
+	if ab != nil && ab.Risk() == ability.ReadsWeb {
+		source = memory.LessonFromOthers // it read how others do it
+	}
+	var skills []string
+	if sk := m.workingOn(ctx, i, project); sk != "" {
+		skills = []string{sk}
+	}
+	m.learnFromWork(ctx, w, out.Lessons, source, skills)
 	m.studied(ctx, i, w, now)
 	if out.AskForReview && action == "activity" { // not what it made for someone else
 		m.askForReview(ctx, w, strings.TrimSpace(out.ReviewQuestion), now)

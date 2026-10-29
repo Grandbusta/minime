@@ -2,27 +2,38 @@ package main
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/oklog/ulid/v2"
 
+	"minime/internal/config"
 	"minime/internal/memory"
 )
 
 func TestNewAbilities(t *testing.T) {
-	set, err := newAbilities([]string{"read_article", "read_book", "read_article"}, nil)
+	set, err := newAbilities([]string{"read_article", "read_book", "read_article"}, abilityDeps{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(set.Names(), ","); got != "journal,read_article,read_book" {
 		t.Errorf("abilities = %s", got)
 	}
-	if set, err := newAbilities(nil, nil); err != nil || strings.Join(set.Names(), ",") != "journal" {
+	if set, err := newAbilities(nil, abilityDeps{}); err != nil || strings.Join(set.Names(), ",") != "journal" {
 		t.Errorf("none listed: %v, %v", set.Names(), err)
 	}
-	if _, err := newAbilities([]string{"web_search"}, nil); err == nil || !strings.Contains(err.Error(), "read_article, read_book") {
+	if _, err := newAbilities([]string{"fly"}, abilityDeps{}); err == nil || !strings.Contains(err.Error(), "read_article, read_book, read_page, web_search") {
 		t.Errorf("unknown ability: %v", err)
+	}
+	if _, err := newAbilities([]string{"web_search"}, abilityDeps{}); err == nil || !strings.Contains(err.Error(), "search.provider") {
+		t.Errorf("web search without a provider: %v", err)
+	}
+	set, err = newAbilities([]string{"web_search", "read_page"}, abilityDeps{search: config.Search{Provider: "openai"},
+		log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil || strings.Join(set.Names(), ",") != "journal,web_search,read_page" {
+		t.Errorf("web abilities = %v, %v", set.Names(), err)
 	}
 }
 

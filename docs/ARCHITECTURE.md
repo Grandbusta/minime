@@ -756,8 +756,15 @@ Who the agent wants to become, and how good it is getting.
   resources and can name one (`resource_id`), which becomes an activity with that ability
   and is marked studied when done. The weekly review marks stages done, adds resources, and
   ends a plan with its goal.
-- **Next in the learning loop:** the open web (`internal/search`, OpenAI web search first, switchable to
-  TinyFish; `web_search` and `read_page` abilities, fenced and capped; comparison notes).
+- **The open web** (stage 3, migration 00013): `internal/search` has a `Searcher` and a
+  `Fetcher`. The OpenAI searcher uses the Responses API's `web_search` tool and keeps only
+  listed pages that are among the search's own sources (`web_search_call.action.sources`)
+  or citations; the fetcher reads https only, connects only to public addresses (checked
+  at dial time, so redirects and DNS can't reach private ones), caps size and time, and
+  strips pages to their readable text. The `web_search` and `read_page` abilities
+  (`internal/ability/web`) fence what they read, count against daily caps (`web_log`), and
+  `read_page` reads only pages its searches found (`web_found`). Lessons from reading are
+  "from others", filed under the skill it was studying (its plan's, or its goal's).
 - **Later (phase B):** skill packs (a skill's crafts, tools and guidance), and a wishlist of
   tools it lacks; then new tools (web search, code, audio), each an ability behind the gate.
 ## 5. Technology
@@ -866,8 +873,8 @@ mini-me/
       own page; the owner can hide or show any with `minime work`.
    5. ✅ Growth, phase A (§4.12): dreams, goals and skills; skills scored from works and the
       owner's feedback; a weekly review; plans that work toward goals.
-   6. Learning loop: ✅ lessons and asking the owner for review; ✅ learning plans; next, the
-      open web.
+   6. Learning loop: ✅ lessons and asking the owner for review; ✅ learning plans; ✅ the
+      open web (OpenAI web search; TinyFish can be added as another Searcher/Fetcher).
    - Later: the same machinery takes jobs from other sources (chat, email, a job board); audio
      for its music is TBD.
 7. ✅ **Autonomy gate:** action classes and a config policy (auto, ask, forbid); asking the

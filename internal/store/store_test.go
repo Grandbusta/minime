@@ -13,6 +13,7 @@ import (
 	"minime/internal/decision"
 	"minime/internal/memory"
 	"minime/internal/perception"
+	"minime/internal/search"
 )
 
 // openTestStore runs only when MINIME_TEST_DATABASE_URL points at a disposable database.
@@ -969,5 +970,35 @@ func TestLearningPlans(t *testing.T) {
 	}
 	if p := mine(); p.Status != memory.PlanDone {
 		t.Errorf("after the last stage = %+v", p)
+	}
+}
+
+func TestWeb(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond).AddDate(1, 0, 0) // after other tests' searches
+	url := "https://example.com/" + ulid.Make().String()
+	if err := s.SaveFound(ctx, "hooks", []search.Result{{Title: "Hooks", URL: url, Snippet: "a guide"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveFound(ctx, "again", []search.Result{{Title: "Renamed", URL: url}}, now); err != nil { // kept as first found
+		t.Fatal(err)
+	}
+	if r, ok, err := s.Found(ctx, url); err != nil || !ok || r.Title != "Hooks" || r.Snippet != "a guide" {
+		t.Errorf("found = %+v, %v, %v", r, ok, err)
+	}
+	if _, ok, _ := s.Found(ctx, "https://never.example/"); ok {
+		t.Error("found a page no search found")
+	}
+	if rs, err := s.RecentFound(ctx, 1); err != nil || len(rs) != 1 || rs[0].URL != url {
+		t.Errorf("recent = %+v, %v", rs, err)
+	}
+	for _, kind := range []string{"search", "page", "page"} {
+		if err := s.LogWeb(ctx, kind, "x", 0.001, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := s.WebSince(ctx, "page", now.Add(-time.Minute)); err != nil || n != 2 {
+		t.Errorf("pages = %d, %v", n, err)
 	}
 }

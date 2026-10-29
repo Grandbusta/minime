@@ -65,8 +65,13 @@ daily_life:
   # switch it off, or use [] for none.
   #   read_book     public-domain books from Project Gutenberg, a passage a day
   #   read_article  Wikipedia articles, to learn about a topic
-  # These are the only sites it fetches from.
-  abilities: [read_book, read_article]
+  #   web_search    search the open web (search: below) and read the best page
+  #   read_page     read a page one of its own searches found
+  # Reading the web is the read_web class of the autonomy gate.
+  abilities: [read_book, read_article, web_search, read_page]
+  web: # how much of the open web it may use a day
+    searches_per_day: 10
+    pages_per_day: 15
   plan_at: "06:00"
   journal_at: "22:00"
   review_at: "Sun 20:00" # its weekly review: goals checked, new ones set, dreams revisited
@@ -87,6 +92,11 @@ daily_life:
 #   publish           putting a work on its public page
 #   dream             adding, rewording or dropping one of its dreams
 #   spend, external_message   money, and email or posts outside the chat (later)
+# What its web searches use. openai: the Responses API's web search, with the
+# System 2 key and model (or model: below); billed per search on that account.
+search:
+  provider: openai
+
 autonomy:
   # owner: telegram:123   # who approves; default: the first of telegram.owner_ids
   classes:

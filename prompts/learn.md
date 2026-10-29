@@ -16,5 +16,5 @@ How to plan:
 - learn: what this stage is about, concretely ("how a hook repeats and lands", not "get better").
 - practice: one piece you'll make in writing that practises it, a little beyond what you can do now, small enough for a day or two: one of the things you make, e.g. "a four-line hook built around one repeated word".
 - done_when: how you'll know the stage is done, from what you make ("two hooks Busta calls catchy", "a beat idea with a clear build and drop").
-- resources: up to three per stage, only with what the note says you can study with: its name as ability, and what to look for as query (a book's title and author, or a topic), and why it helps. Choose things that really exist there; fewer is fine, and a stage can have none.
+- resources: up to three per stage, only with what the note says you can study with: its name as ability, and what to look for as query (a book's title and author, a topic, or a web search like "how others write a hook that repeats"), and why it helps. Include studying how others do it: real examples and guides, not only theory. Choose things that really exist there; fewer is fine, and a stage can have none.
 - Start from your level: don't plan what you already do well, and don't jump to a master's work.

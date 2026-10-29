@@ -20,6 +20,7 @@ import (
 	"minime/internal/perception"
 	"minime/internal/providers/system1"
 	"minime/internal/providers/system2"
+	"minime/internal/search"
 	"minime/internal/self"
 )
 
@@ -53,6 +54,7 @@ type fakeStore struct {
 	reviewAsked    map[ulid.ULID]time.Time
 	plans          []memory.LearningPlan
 	resources      []memory.Resource
+	found          []search.Result
 	public         map[ulid.ULID]string // works set public: "true by owner", ...
 }
 
@@ -265,6 +267,8 @@ func (s *fakeStore) FinishResource(_ context.Context, id, work ulid.ULID, title 
 	}
 	return nil
 }
+
+func (s *fakeStore) RecentFound(context.Context, int) ([]search.Result, error) { return s.found, nil }
 
 func (s *fakeStore) AwaitIntention(_ context.Context, id ulid.ULID) error {
 	for n := range s.intentions {

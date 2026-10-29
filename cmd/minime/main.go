@@ -32,6 +32,7 @@ import (
 	"minime/internal/ability"
 	"minime/internal/ability/journal"
 	"minime/internal/ability/reading"
+	"minime/internal/ability/web"
 	"minime/internal/bus"
 	"minime/internal/channel/telegram"
 	"minime/internal/config"
@@ -49,6 +50,7 @@ import (
 	"minime/internal/providers/system2"
 	s2openai "minime/internal/providers/system2/openai"
 	"minime/internal/replay"
+	"minime/internal/search"
 	"minime/internal/self"
 	"minime/internal/store"
 )
@@ -277,7 +279,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	if err != nil {
 		return err
 	}
-	abilitySet, err := newAbilities(names, st)
+	abilitySet, err := newAbilities(names, depsFor(cfg, st, log))
 	if err != nil {
 		return err
 	}
@@ -444,7 +446,7 @@ func growthMind(cfg *config.Config, life self.Life, st *store.Store, log *slog.L
 	if err != nil {
 		return nil, err
 	}
-	abilities, err := newAbilities(cfg.DailyLife.AbilityNames(), st) // so it knows what it can study with
+	abilities, err := newAbilities(cfg.DailyLife.AbilityNames(), depsFor(cfg, st, log)) // so it knows what it can study with
 	if err != nil {
 		return nil, err
 	}
@@ -814,19 +816,42 @@ func newLogger(level string) (*slog.Logger, error) {
 	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: l})), nil
 }
 
+// abilityDeps is what abilities are built from.
+type abilityDeps struct {
+	st     *store.Store
+	search config.Search
+	s2     config.Reasoning // the OpenAI key the search provider uses
+	prices map[string]pricing.Price
+	web    web.Limits
+	log    *slog.Logger
+}
+
 // abilityMakers builds each ability by the name config uses for it. A new
 // ability is a package under internal/ability and a line here.
-var abilityMakers = map[string]func(st *store.Store, lib func() *library.Client) ability.Ability{
-	reading.BookName: func(st *store.Store, lib func() *library.Client) ability.Ability {
-		return reading.Book{Library: lib(), Store: st}
+var abilityMakers = map[string]func(d abilityDeps, lib func() *library.Client, net func() (search.Searcher, search.Fetcher, error)) (ability.Ability, error){
+	reading.BookName: func(d abilityDeps, lib func() *library.Client, _ func() (search.Searcher, search.Fetcher, error)) (ability.Ability, error) {
+		return reading.Book{Library: lib(), Store: d.st}, nil
 	},
-	reading.ArticleName: func(st *store.Store, lib func() *library.Client) ability.Ability {
-		return reading.Article{Library: lib(), Store: st}
+	reading.ArticleName: func(d abilityDeps, lib func() *library.Client, _ func() (search.Searcher, search.Fetcher, error)) (ability.Ability, error) {
+		return reading.Article{Library: lib(), Store: d.st}, nil
+	},
+	web.SearchName: func(d abilityDeps, _ func() *library.Client, net func() (search.Searcher, search.Fetcher, error)) (ability.Ability, error) {
+		s, f, err := net()
+		return web.Search{Searcher: s, Fetcher: f, Store: d.st, Limits: d.web}, err
+	},
+	web.PageName: func(d abilityDeps, _ func() *library.Client, net func() (search.Searcher, search.Fetcher, error)) (ability.Ability, error) {
+		_, f, err := net()
+		return web.Page{Fetcher: f, Store: d.st, Limits: d.web}, err
 	},
 }
 
+func depsFor(cfg *config.Config, st *store.Store, log *slog.Logger) abilityDeps {
+	return abilityDeps{st: st, search: cfg.Search, s2: cfg.Reasoning, prices: cfg.Pricing,
+		web: web.Limits{Searches: cfg.DailyLife.Web.Searches, Pages: cfg.DailyLife.Web.Pages}, log: log}
+}
+
 // newAbilities builds the journal and the abilities named in config.
-func newAbilities(names []string, st *store.Store) (*ability.Set, error) {
+func newAbilities(names []string, d abilityDeps) (*ability.Set, error) {
 	var client *library.Client
 	lib := func() *library.Client { // one client, made only if an ability reads
 		if client == nil {
@@ -834,7 +859,24 @@ func newAbilities(names []string, st *store.Store) (*ability.Set, error) {
 		}
 		return client
 	}
-	abilities := []ability.Ability{journal.Journal{Store: st}}
+	var (
+		searcher search.Searcher
+		fetcher  search.Fetcher
+	)
+	net := func() (search.Searcher, search.Fetcher, error) { // one of each, made only if an ability uses the web
+		if searcher == nil {
+			switch d.search.Provider {
+			case "openai":
+				model := orDefault(d.search.Model, d.s2.Model)
+				searcher = search.NewOpenAI(d.s2.APIKey, model, d.s2.BaseURL, priceFor(model, d.prices, d.log))
+			default:
+				return nil, nil, fmt.Errorf("config: search.provider %q isn't one it has (want openai)", d.search.Provider)
+			}
+			fetcher = search.NewFetcher()
+		}
+		return searcher, fetcher, nil
+	}
+	abilities := []ability.Ability{journal.Journal{Store: d.st}}
 	seen := map[string]bool{journal.Name: true}
 	for _, name := range names {
 		build, ok := abilityMakers[name]
@@ -844,7 +886,11 @@ func newAbilities(names []string, st *store.Store) (*ability.Set, error) {
 		}
 		if !seen[name] {
 			seen[name] = true
-			abilities = append(abilities, build(st, lib))
+			a, err := build(d, lib, net)
+			if err != nil {
+				return nil, err
+			}
+			abilities = append(abilities, a)
 		}
 	}
 	return ability.NewSet(abilities...), nil

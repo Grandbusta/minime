@@ -57,12 +57,21 @@ func (m *Mind) lessonsNote(ctx context.Context) string {
 	return "\n\nThings you've learned the hard way (use them, when they apply):" + b.String()
 }
 
-// learnFromWork keeps the lessons it took from a work of its own, under each
-// skill the work shows.
-func (m *Mind) learnFromWork(ctx context.Context, w memory.Work, lessons []string) {
-	skills, err := m.Store.Skills(ctx)
-	if err != nil {
-		return
+// learnFromWork keeps the lessons it took from a work of its own: from its
+// own mistakes, or from studying others when the work is notes on what it
+// read (source). They go under the skill it was working on (skills); with
+// none, under each skill the work's kind shows.
+func (m *Mind) learnFromWork(ctx context.Context, w memory.Work, lessons []string, source string, skills []string) {
+	if len(skills) == 0 {
+		all, err := m.Store.Skills(ctx)
+		if err != nil {
+			return
+		}
+		for _, sk := range all {
+			if slices.Contains(sk.ShownBy, w.Kind) {
+				skills = append(skills, sk.Name)
+			}
+		}
 	}
 	n := 0
 	for _, text := range lessons {
@@ -71,11 +80,37 @@ func (m *Mind) learnFromWork(ctx context.Context, w memory.Work, lessons []strin
 		}
 		n++
 		for _, sk := range skills {
-			if slices.Contains(sk.ShownBy, w.Kind) {
-				m.saveLesson(ctx, memory.Lesson{Skill: sk.Name, Text: text, Source: memory.LessonFromSelf, WorkID: w.ID})
+			m.saveLesson(ctx, memory.Lesson{Skill: sk, Text: text, Source: source, WorkID: w.ID})
+		}
+	}
+}
+
+// workingOn is the skill an activity works on: its learning plan's (the
+// resource it studies), or its project's goal's; "" if neither says.
+func (m *Mind) workingOn(ctx context.Context, i memory.Intention, project *memory.Project) string {
+	if id := i.Args["resource"]; id != "" {
+		if plans, err := m.Store.Plans(ctx, false); err == nil {
+			for _, p := range plans {
+				if rs, err := m.Store.Resources(ctx, p.ID); err == nil {
+					for _, r := range rs {
+						if r.ID.String() == id {
+							return p.Skill
+						}
+					}
+				}
 			}
 		}
 	}
+	if project != nil && !project.GoalID.IsZero() {
+		if goals, err := m.Store.Goals(ctx, false); err == nil {
+			for _, g := range goals {
+				if g.ID == project.GoalID {
+					return g.Skill
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func (m *Mind) saveLesson(ctx context.Context, l memory.Lesson) bool {

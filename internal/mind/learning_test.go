@@ -8,6 +8,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"minime/internal/memory"
+	"minime/internal/search"
 )
 
 const planJSON = `{"stages":[
@@ -127,5 +128,37 @@ func TestTheReviewMovesTheLearningPlanOn(t *testing.T) {
 	}
 	if s.plans[0].Status != memory.PlanDone {
 		t.Errorf("plan = %s, want done with its goal", s.plans[0].Status)
+	}
+}
+
+func TestLessonsFromReadingAreStudyingOthersForThePlansSkill(t *testing.T) {
+	m, s, s2, _ := learningPlanMind()
+	plan := memory.LearningPlan{ID: ulid.Make(), GoalID: ulid.Make(), Skill: "lyric writing", Status: memory.PlanActive,
+		Stages: []memory.Stage{{N: 0, Learn: "hooks", Practice: "a hook"}}}
+	res := memory.Resource{ID: ulid.Make(), PlanID: plan.ID, Ability: "look_up", Query: "hook (music)", Status: memory.ResourceTodo}
+	s.plans, s.resources = []memory.LearningPlan{plan}, []memory.Resource{res}
+	s.skills = append(s.skills, memory.Skill{Name: "reading and learning", Level: 5, ShownBy: []string{"reading_notes"}})
+	s2.formats["activity"] = `{"title":"Hook notes","kind":"notes","text":"Hooks repeat.","project_notes":"","project_done":false,"remember":[],
+		"lessons":["Repeat the hook's last word"],"ask_for_review":false,"review_question":""}`
+	s.intentions = []memory.Intention{{ID: ulid.Make(), Subject: memory.SubjectSelf, Kind: memory.IntentionActivity, Text: "Read about hooks",
+		Ability: "look_up", Args: map[string]string{"query": "hook (music)", "resource": res.ID.String()}, DueAt: at(29, 10, 0),
+		Status: memory.IntentionPending}}
+	m.tick(context.Background(), at(29, 10, 0))
+	if l := s.lessons[len(s.lessons)-1]; len(s.lessons) != 2 || l.Text != "Repeat the hook's last word" || l.Skill != "lyric writing" ||
+		l.Source != memory.LessonFromOthers {
+		t.Errorf("lessons = %+v; want one, studying others, under the plan's skill", s.lessons)
+	}
+}
+
+func TestThePlanSeesPagesItsSearchesFound(t *testing.T) {
+	page := &fakeAbility{name: "read_page", describe: "read a page"}
+	m, s, _ := abilityMind(page)
+	s.found = []search.Result{{Title: "Writing Hooks", URL: "https://b.example/hooks"}}
+	if note := m.foundNote(context.Background()); !strings.Contains(note, "- Writing Hooks: https://b.example/hooks") {
+		t.Errorf("note = %q", note)
+	}
+	m.Abilities = nil
+	if note := m.foundNote(context.Background()); note != "" {
+		t.Errorf("without read_page: %q", note)
 	}
 }

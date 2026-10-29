@@ -37,6 +37,7 @@ import (
 	"minime/internal/perception"
 	"minime/internal/providers/system1"
 	"minime/internal/providers/system2"
+	"minime/internal/search"
 	"minime/internal/self"
 )
 
@@ -96,6 +97,7 @@ type Store interface {
 	SaveResource(ctx context.Context, r memory.Resource) error
 	Resources(ctx context.Context, plan ulid.ULID) ([]memory.Resource, error)
 	FinishResource(ctx context.Context, id, work ulid.ULID, title string, at time.Time) error
+	RecentFound(ctx context.Context, limit int) ([]search.Result, error)
 	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
 	SaveProject(ctx context.Context, p memory.Project) error
 	Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error)

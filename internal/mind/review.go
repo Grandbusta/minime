@@ -153,6 +153,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 	note.WriteString(m.now(now) + " It's time for your weekly review.")
 	note.WriteString(m.growthNote(ctx, now))
 	note.WriteString(m.plansNote(ctx, true))
+	note.WriteString(m.foundNote(ctx))
 	if len(projects) > 0 {
 		note.WriteString("\n\nWhat you're in the middle of:")
 		for _, p := range projects {

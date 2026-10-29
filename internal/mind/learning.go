@@ -285,3 +285,22 @@ func (m *Mind) skillNamed(ctx context.Context, name string) string {
 	}
 	return ""
 }
+
+// foundNote is the pages its web searches found lately, which it can read
+// with read_page, for a plan or a review; "" if it can't read pages.
+func (m *Mind) foundNote(ctx context.Context) string {
+	ab, ok := m.Abilities.Get("read_page")
+	if !ok || !m.allowed(ab) {
+		return ""
+	}
+	found, err := m.Store.RecentFound(ctx, 8)
+	if err != nil || len(found) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\nPages your web searches found, which you can read with read_page (their address as query):")
+	for _, r := range found {
+		fmt.Fprintf(&b, "\n- %s: %s", r.Title, r.URL)
+	}
+	return b.String()
+}

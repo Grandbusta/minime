@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,6 +21,7 @@ import (
 	"minime/internal/decision"
 	"minime/internal/memory"
 	"minime/internal/perception"
+	"minime/internal/search"
 )
 
 //go:embed migrations/*.sql
@@ -1480,4 +1482,64 @@ func (s *Store) ReadingProject(ctx context.Context, source ulid.ULID) (memory.Pr
 		return memory.Project{}, false, err
 	}
 	return ps[0], true, nil
+}
+
+// SaveFound remembers pages a search found, so it may read them later.
+func (s *Store) SaveFound(ctx context.Context, query string, rs []search.Result, at time.Time) error {
+	for _, r := range rs {
+		if _, err := s.pool.Exec(ctx, `INSERT INTO web_found (url, title, snippet, query, found_at) VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (url) DO NOTHING`, r.URL, r.Title, r.Snippet, query, at); err != nil {
+			return fmt.Errorf("save found page: %w", err)
+		}
+	}
+	return nil
+}
+
+// Found returns a page one of its searches found, and whether one did.
+func (s *Store) Found(ctx context.Context, url string) (search.Result, bool, error) {
+	var r search.Result
+	err := s.pool.QueryRow(ctx, `SELECT url, title, snippet FROM web_found WHERE url = $1`, strings.TrimSpace(url)).
+		Scan(&r.URL, &r.Title, &r.Snippet)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return search.Result{}, false, nil
+	}
+	if err != nil {
+		return search.Result{}, false, fmt.Errorf("found page: %w", err)
+	}
+	return r, true, nil
+}
+
+// RecentFound returns up to limit of the newest pages its searches found.
+func (s *Store) RecentFound(ctx context.Context, limit int) ([]search.Result, error) {
+	rows, err := s.pool.Query(ctx, `SELECT url, title, snippet FROM web_found ORDER BY found_at DESC, url LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query found pages: %w", err)
+	}
+	defer rows.Close()
+	var out []search.Result
+	for rows.Next() {
+		var r search.Result
+		if err := rows.Scan(&r.URL, &r.Title, &r.Snippet); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// LogWeb records a search or a page read.
+func (s *Store) LogWeb(ctx context.Context, kind, what string, costUSD float64, at time.Time) error {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO web_log (kind, what, cost_usd, at) VALUES ($1, $2, $3, $4)`, kind, what, costUSD, at); err != nil {
+		return fmt.Errorf("log web: %w", err)
+	}
+	return nil
+}
+
+// WebSince counts the searches or pages (kind) since a time.
+func (s *Store) WebSince(ctx context.Context, kind string, since time.Time) (int, error) {
+	var n int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM web_log WHERE kind = $1 AND at >= $2`, kind, since).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count web: %w", err)
+	}
+	return n, nil
 }

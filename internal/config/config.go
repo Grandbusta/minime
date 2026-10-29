@@ -29,6 +29,7 @@ type Config struct {
 	DailyLife     DailyLife     `yaml:"daily_life"`
 	Console       Console       `yaml:"console"`
 	Autonomy      Autonomy      `yaml:"autonomy"`
+	Search        Search        `yaml:"search"`
 	// Pricing per model, used to record what each decision cost.
 	Pricing map[string]pricing.Price `yaml:"pricing"`
 	Log     Log                      `yaml:"log"`
@@ -125,6 +126,20 @@ type DailyLife struct {
 	ActivityPrompt string  `yaml:"activity_prompt"`
 	ReviewPrompt   string  `yaml:"review_prompt"`
 	LearnPrompt    string  `yaml:"learn_prompt"` // how it plans to learn a skill for a goal
+	Web            Web     `yaml:"web"`          // how much of the web it may use a day
+}
+
+// Web is how much of the open web it may use in a day.
+type Web struct {
+	Searches int `yaml:"searches_per_day"`
+	Pages    int `yaml:"pages_per_day"`
+}
+
+// Search is the provider its web abilities search with. The OpenAI provider
+// uses the System 2 key (reasoning.api_key).
+type Search struct {
+	Provider string `yaml:"provider"` // openai; later tinyfish
+	Model    string `yaml:"model"`    // empty: the System 2 model
 }
 
 // ReviewTime is ReviewAt as a weekday and a time of day.
@@ -271,7 +286,9 @@ func Load(path string) (*Config, error) {
 		Initiative:    Initiative{Timezone: "UTC", Quiet: 4 * time.Hour},
 		DailyLife: DailyLife{PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
 			PlanPrompt: "prompts/plan.md", ActivityPrompt: "prompts/activity.md",
-			ReviewAt: "Sun 20:00", ReviewPrompt: "prompts/review.md", LearnPrompt: "prompts/learn.md"},
+			ReviewAt: "Sun 20:00", ReviewPrompt: "prompts/review.md", LearnPrompt: "prompts/learn.md",
+			Web: Web{Searches: 10, Pages: 15}},
+		Search:   Search{Provider: "openai"},
 		Autonomy: Autonomy{AskExpires: 24 * time.Hour},
 		Log:      Log{Level: "info"},
 	}
