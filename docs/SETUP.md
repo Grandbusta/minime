@@ -1,7 +1,7 @@
 # Setup and configuration
 
-Everything about getting a person running, and every setting there is. For what minime is
-and what living with them is like, see the [README](../README.md); for how it works inside,
+Everything about getting a person running, and every setting there is. For what minime is,
+see the [README](../README.md); for living with them day to day, [GUIDE.md](GUIDE.md); for how it works inside,
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
 - [Quick start](#quick-start)
