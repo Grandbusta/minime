@@ -13,10 +13,10 @@ import (
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/shared"
 
-	"minime/internal/decision"
-	"minime/internal/pricing"
-	"minime/internal/providers/openaiclient"
-	"minime/internal/providers/system1"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/pricing"
+	"github.com/Grandbusta/minime/internal/providers/openaiclient"
+	"github.com/Grandbusta/minime/internal/providers/system1"
 )
 
 const (

@@ -8,9 +8,9 @@ import (
 
 	"github.com/openai/openai-go/v3"
 
-	"minime/internal/pricing"
-	"minime/internal/providers/embed"
-	"minime/internal/providers/openaiclient"
+	"github.com/Grandbusta/minime/internal/pricing"
+	"github.com/Grandbusta/minime/internal/providers/embed"
+	"github.com/Grandbusta/minime/internal/providers/openaiclient"
 )
 
 const requestTimeout = 30 * time.Second

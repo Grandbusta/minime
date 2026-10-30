@@ -9,11 +9,11 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/ability"
-	"minime/internal/ability/journal"
-	"minime/internal/action"
-	"minime/internal/memory"
-	"minime/internal/perception"
+	"github.com/Grandbusta/minime/internal/ability"
+	"github.com/Grandbusta/minime/internal/ability/journal"
+	"github.com/Grandbusta/minime/internal/action"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/perception"
 )
 
 // callsMind is a mind that makes calls, with an owner to ask.

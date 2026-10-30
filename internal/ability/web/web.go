@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"minime/internal/ability"
-	"minime/internal/library"
-	"minime/internal/search"
+	"github.com/Grandbusta/minime/internal/ability"
+	"github.com/Grandbusta/minime/internal/library"
+	"github.com/Grandbusta/minime/internal/search"
 )
 
 const (

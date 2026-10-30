@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/memory"
 )
 
 type fake struct{ name, describe string }

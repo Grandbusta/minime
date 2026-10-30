@@ -10,9 +10,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"minime/internal/decision"
-	"minime/internal/pricing"
-	"minime/internal/providers/system1"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/pricing"
+	"github.com/Grandbusta/minime/internal/providers/system1"
 )
 
 var questions = []system1.Question{

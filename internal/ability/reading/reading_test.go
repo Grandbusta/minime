@@ -9,9 +9,9 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/ability"
-	"minime/internal/library"
-	"minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/ability"
+	"github.com/Grandbusta/minime/internal/library"
+	"github.com/Grandbusta/minime/internal/memory"
 )
 
 type fakeLibrary struct {

@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"minime/internal/pricing"
+	"github.com/Grandbusta/minime/internal/pricing"
 )
 
 func TestEmbed(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/ability"
-	"minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/ability"
+	"github.com/Grandbusta/minime/internal/memory"
 )
 
 type fakeStore struct {

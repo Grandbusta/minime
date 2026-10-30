@@ -14,7 +14,7 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"minime/internal/self"
+	"github.com/Grandbusta/minime/internal/self"
 )
 
 type fakeTelegram struct{ waited int }

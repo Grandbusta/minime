@@ -24,7 +24,7 @@ import (
 const (
 	GutenbergURL = "https://www.gutenberg.org"
 	WikipediaURL = "https://en.wikipedia.org"
-	userAgent    = "minime/1.0 (https://github.com/Grandbusta/minime)"
+	userAgent    = "github.com/Grandbusta/minime/1.0 (https://github.com/Grandbusta/minime)"
 )
 
 // ErrNotFound means a search found nothing to read.

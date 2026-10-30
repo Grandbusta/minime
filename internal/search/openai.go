@@ -11,8 +11,8 @@ import (
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 
-	"minime/internal/pricing"
-	"minime/internal/providers/openaiclient"
+	"github.com/Grandbusta/minime/internal/pricing"
+	"github.com/Grandbusta/minime/internal/providers/openaiclient"
 )
 
 // OpenAI searches with the Responses API's built-in web search tool.

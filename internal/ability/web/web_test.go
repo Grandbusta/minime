@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"minime/internal/ability"
-	"minime/internal/memory"
-	"minime/internal/search"
+	"github.com/Grandbusta/minime/internal/ability"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/search"
 )
 
 type fakeSearcher struct {

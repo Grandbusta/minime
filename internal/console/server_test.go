@@ -15,9 +15,9 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/decision"
-	"minime/internal/memory"
-	"minime/internal/store"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/store"
 )
 
 type fakeStore struct {

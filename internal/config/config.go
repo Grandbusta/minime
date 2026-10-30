@@ -15,8 +15,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"minime/internal/action"
-	"minime/internal/pricing"
+	"github.com/Grandbusta/minime/internal/action"
+	"github.com/Grandbusta/minime/internal/pricing"
 )
 
 type Config struct {

@@ -10,8 +10,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/memory"
-	"minime/internal/providers/embed"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/providers/embed"
 )
 
 // Judgment: how its owner decides, so it can learn to decide the way they

@@ -12,10 +12,10 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/decision"
-	"minime/internal/memory"
-	"minime/internal/perception"
-	"minime/internal/search"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/perception"
+	"github.com/Grandbusta/minime/internal/search"
 )
 
 // openTestStore runs only when MINIME_TEST_DATABASE_URL points at a disposable database.

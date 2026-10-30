@@ -18,10 +18,10 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/pressly/goose/v3"
 
-	"minime/internal/decision"
-	"minime/internal/memory"
-	"minime/internal/perception"
-	"minime/internal/search"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/perception"
+	"github.com/Grandbusta/minime/internal/search"
 )
 
 //go:embed migrations/*.sql

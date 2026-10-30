@@ -11,11 +11,11 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/ability"
-	"minime/internal/ability/journal"
-	"minime/internal/memory"
-	"minime/internal/providers/system2"
-	"minime/internal/self"
+	"github.com/Grandbusta/minime/internal/ability"
+	"github.com/Grandbusta/minime/internal/ability/journal"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/self"
 )
 
 // at is a time on a day in October 2026, in the agent's zone (lagos, UTC+1).

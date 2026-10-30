@@ -3,15 +3,15 @@ package mind
 import (
 	"context"
 	"fmt"
-	"minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/providers/system2"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/memory"
-	"minime/internal/search"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/search"
 )
 
 const planJSON = `{"stages":[

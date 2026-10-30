@@ -5,7 +5,7 @@ package system1
 import (
 	"context"
 
-	"minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/decision"
 )
 
 // DecisionModel answers typed questions about a state in a single call.

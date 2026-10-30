@@ -20,7 +20,7 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"minime/internal/self"
+	"github.com/Grandbusta/minime/internal/self"
 )
 
 // Telegram is what setup needs from a bot (telegram.Client, per token).

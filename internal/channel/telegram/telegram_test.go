@@ -14,8 +14,8 @@ import (
 
 	"github.com/go-telegram/bot/models"
 
-	"minime/internal/bus"
-	"minime/internal/perception"
+	"github.com/Grandbusta/minime/internal/bus"
+	"github.com/Grandbusta/minime/internal/perception"
 )
 
 const testToken = "123:SECRET"

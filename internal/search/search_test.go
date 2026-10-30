@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"minime/internal/pricing"
+	"github.com/Grandbusta/minime/internal/pricing"
 )
 
 func TestReadable(t *testing.T) {

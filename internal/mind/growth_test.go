@@ -8,13 +8,13 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/action"
-	"minime/internal/decision"
-	"minime/internal/decision/questions"
-	"minime/internal/memory"
-	"minime/internal/providers/system1"
-	"minime/internal/providers/system2"
-	"minime/internal/self"
+	"github.com/Grandbusta/minime/internal/action"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/decision/questions"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/providers/system1"
+	"github.com/Grandbusta/minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/self"
 )
 
 var testSkillLevel = questions.Set{ID: "skill_level", Version: 1,

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"minime/internal/channel/telegram"
-	"minime/internal/setup"
-	"minime/internal/store"
+	"github.com/Grandbusta/minime/internal/channel/telegram"
+	"github.com/Grandbusta/minime/internal/setup"
+	"github.com/Grandbusta/minime/internal/store"
 )
 
 // newPerson is `minime new`: it starts a person from one of the lives, and

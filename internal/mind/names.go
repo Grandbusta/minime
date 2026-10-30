@@ -3,8 +3,8 @@ package mind
 import (
 	"strings"
 
-	"minime/internal/memory"
-	"minime/internal/perception"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/perception"
 )
 
 // fallbackName is what the agent calls someone whose name it does not know.

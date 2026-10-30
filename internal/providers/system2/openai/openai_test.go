@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"minime/internal/pricing"
-	"minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/pricing"
+	"github.com/Grandbusta/minime/internal/providers/system2"
 )
 
 func newTestClient(t *testing.T, price pricing.Price, h http.HandlerFunc) *Client {

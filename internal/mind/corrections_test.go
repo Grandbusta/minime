@@ -7,11 +7,11 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/action"
-	"minime/internal/decision"
-	"minime/internal/memory"
-	"minime/internal/perception"
-	"minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/action"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/perception"
+	"github.com/Grandbusta/minime/internal/providers/system2"
 )
 
 func from(speaker string) perception.Percept {

@@ -10,11 +10,11 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/ability"
-	"minime/internal/ability/journal"
-	"minime/internal/memory"
-	"minime/internal/perception"
-	"minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/ability"
+	"github.com/Grandbusta/minime/internal/ability/journal"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/perception"
+	"github.com/Grandbusta/minime/internal/providers/system2"
 )
 
 func promiseMind(r *fakeReplier, s2 *fakeSystem2) (*Mind, *fakeStore) {

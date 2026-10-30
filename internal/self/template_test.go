@@ -1,7 +1,7 @@
 package self
 
 import (
-	"minime/internal/config"
+	"github.com/Grandbusta/minime/internal/config"
 	"os"
 	"path/filepath"
 	"strings"

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/memory"
 )
 
 func TestNameNote(t *testing.T) {

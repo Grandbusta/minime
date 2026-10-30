@@ -11,11 +11,11 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/action"
-	"minime/internal/decision"
-	"minime/internal/memory"
-	"minime/internal/providers/system2"
-	"minime/internal/self"
+	"github.com/Grandbusta/minime/internal/action"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/self"
 )
 
 // The weekly review: once a week (Day.ReviewAt) it looks back at what it did

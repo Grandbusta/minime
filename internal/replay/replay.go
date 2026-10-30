@@ -12,10 +12,10 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"minime/internal/decision"
-	"minime/internal/decision/questions"
-	"minime/internal/providers/system1"
-	"minime/internal/store"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/decision/questions"
+	"github.com/Grandbusta/minime/internal/providers/system1"
+	"github.com/Grandbusta/minime/internal/store"
 )
 
 // Store has the labelled examples.

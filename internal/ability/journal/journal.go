@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"minime/internal/ability"
-	"minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/ability"
+	"github.com/Grandbusta/minime/internal/memory"
 )
 
 // Name is the journal's ability; its intention is planned every day.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/decision"
 )
 
 func TestShippedSetsAreValid(t *testing.T) {

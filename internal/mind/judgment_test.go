@@ -8,9 +8,9 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/memory"
-	"minime/internal/providers/embed"
-	"minime/internal/self"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/providers/embed"
+	"github.com/Grandbusta/minime/internal/self"
 )
 
 func TestJudgment(t *testing.T) {

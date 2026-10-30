@@ -14,9 +14,9 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 
-	"minime/internal/pricing"
-	"minime/internal/providers/openaiclient"
-	"minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/pricing"
+	"github.com/Grandbusta/minime/internal/providers/openaiclient"
+	"github.com/Grandbusta/minime/internal/providers/system2"
 )
 
 const (

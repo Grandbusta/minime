@@ -15,14 +15,14 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/decision"
-	"minime/internal/decision/questions"
-	"minime/internal/memory"
-	"minime/internal/perception"
-	"minime/internal/providers/system1"
-	"minime/internal/providers/system2"
-	"minime/internal/search"
-	"minime/internal/self"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/decision/questions"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/perception"
+	"github.com/Grandbusta/minime/internal/providers/system1"
+	"github.com/Grandbusta/minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/search"
+	"github.com/Grandbusta/minime/internal/self"
 )
 
 type fakeStore struct {

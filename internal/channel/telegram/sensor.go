@@ -14,8 +14,8 @@ import (
 	"github.com/go-telegram/bot/models"
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/bus"
-	"minime/internal/perception"
+	"github.com/Grandbusta/minime/internal/bus"
+	"github.com/Grandbusta/minime/internal/perception"
 )
 
 // Source is the percept source name for Telegram.

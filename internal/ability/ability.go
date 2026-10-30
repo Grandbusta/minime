@@ -13,7 +13,7 @@ import (
 	"context"
 	"time"
 
-	"minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/memory"
 )
 
 // Ability is something the agent can do.

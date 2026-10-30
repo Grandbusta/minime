@@ -21,7 +21,7 @@ import (
 const (
 	maxPageBytes = 2 << 20 // what it downloads at most
 	maxTextBytes = 60000   // what it keeps of a page's text
-	userAgent    = "minime/1.0 (https://github.com/Grandbusta/minime)"
+	userAgent    = "github.com/Grandbusta/minime/1.0 (https://github.com/Grandbusta/minime)"
 )
 
 // HTTPFetcher reads public https pages as plain text.

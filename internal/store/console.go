@@ -7,8 +7,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/decision"
-	"minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/memory"
 )
 
 // Queries for the owner's console: everything about the agent, read-only.

@@ -9,8 +9,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/config"
-	"minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/config"
+	"github.com/Grandbusta/minime/internal/memory"
 )
 
 func TestNewAbilities(t *testing.T) {

@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"minime/internal/memory"
-	"minime/internal/perception"
-	"minime/internal/providers/system1"
-	"minime/internal/self"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/perception"
+	"github.com/Grandbusta/minime/internal/providers/system1"
+	"github.com/Grandbusta/minime/internal/self"
 )
 
 // People live in memory, like they do for a person: the agent is born knowing

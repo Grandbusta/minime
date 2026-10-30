@@ -1,4 +1,4 @@
-module minime
+module github.com/Grandbusta/minime
 
 go 1.27.2
 

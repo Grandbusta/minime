@@ -24,14 +24,14 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/action"
-	"minime/internal/decision"
-	"minime/internal/decision/questions"
-	"minime/internal/memory"
-	"minime/internal/mind"
-	"minime/internal/providers/system1"
-	"minime/internal/providers/system2"
-	"minime/internal/self"
+	"github.com/Grandbusta/minime/internal/action"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/decision/questions"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/mind"
+	"github.com/Grandbusta/minime/internal/providers/system1"
+	"github.com/Grandbusta/minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/self"
 )
 
 // Page is the profile as the agent wrote it, first person.

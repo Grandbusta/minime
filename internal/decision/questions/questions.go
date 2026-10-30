@@ -11,8 +11,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"minime/internal/decision"
-	"minime/internal/providers/system1"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/providers/system1"
 )
 
 type Set struct {

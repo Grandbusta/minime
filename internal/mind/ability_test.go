@@ -8,9 +8,9 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/ability"
-	"minime/internal/ability/journal"
-	"minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/ability"
+	"github.com/Grandbusta/minime/internal/ability/journal"
+	"github.com/Grandbusta/minime/internal/memory"
 )
 
 // fakeAbility looks things up from a map; with continues, it also carries on

@@ -9,14 +9,14 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"minime/internal/ability"
-	"minime/internal/ability/journal"
-	"minime/internal/action"
-	"minime/internal/decision"
-	"minime/internal/memory"
-	"minime/internal/perception"
-	"minime/internal/providers/system2"
-	"minime/internal/self"
+	"github.com/Grandbusta/minime/internal/ability"
+	"github.com/Grandbusta/minime/internal/ability/journal"
+	"github.com/Grandbusta/minime/internal/action"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/perception"
+	"github.com/Grandbusta/minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/self"
 )
 
 // A day of its own, like a person: in the morning it plans a few things from
