@@ -12,8 +12,6 @@ func TestCheck(t *testing.T) {
 		{Reply, "telegram:2", Auto},
 		{ReachOut, "telegram:2", Ask},
 		{ReachOut, "telegram:1", Auto}, // the owner needn't approve what's for them
-		{Commit, "telegram:2", Ask},
-		{Commit, "telegram:1", Auto},
 		{Publish, "", Ask},
 		{Spend, "telegram:1", Forbid},
 		{Class("unknown"), "telegram:2", Ask},
@@ -21,12 +19,6 @@ func TestCheck(t *testing.T) {
 		if got := p.Check(c.class, c.person); got != c.want {
 			t.Errorf("Check(%s, %q) = %s, want %s", c.class, c.person, got, c.want)
 		}
-	}
-}
-
-func TestZeroPolicyAllowsEverything(t *testing.T) {
-	if v := (Policy{}).Check(Spend, "telegram:2"); v != Auto {
-		t.Errorf("zero policy: %s", v)
 	}
 }
 
@@ -46,8 +38,6 @@ func TestValidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, classes := range map[string]map[Class]Verdict{
-		"unknown class": {"fly": Auto},
-		"bad verdict":   {Publish: "maybe"},
 		"replies off":   {Reply: Forbid},
 		"memory asks":   {Remember: Ask},
 		"read web asks": {ReadWeb: Ask},

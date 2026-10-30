@@ -1,7 +1,6 @@
 package mind
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -11,7 +10,6 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Grandbusta/minime/internal/memory"
-	"github.com/Grandbusta/minime/internal/providers/embed"
 )
 
 // Judgment: how its owner decides. The judgment file seeds it as proposed;
@@ -171,41 +169,21 @@ func (m *Mind) similarCases(ctx context.Context, about string) ([]memory.Judgmen
 	if err != nil || len(cs) == 0 {
 		return nil, false
 	}
-	texts := []string{about}
-	var missing []int
-	for i, c := range cs {
-		if len(c.Embedding) == 0 {
-			texts, missing = append(texts, c.Text()), append(missing, i)
-		}
-	}
-	out, err := m.Embedder.Embed(ctx, texts)
+	ranked, out, err := rankAlike(ctx, m, about, cs, minSimilarity, judgmentCases,
+		func(c *memory.JudgmentCase) *[]float32 { return &c.Embedding }, memory.JudgmentCase.Text,
+		func(c memory.JudgmentCase, model string) error {
+			return m.Store.SaveCaseEmbedding(ctx, c.ID, c.Embedding, model)
+		})
 	if err != nil {
 		m.Log.Warn("embedding failed; taking the newest of its owner's decisions instead", "err", err)
 		return nil, false
 	}
-	for n, i := range missing {
-		cs[i].Embedding = out.Vectors[n+1]
-		if err := m.Store.SaveCaseEmbedding(ctx, cs[i].ID, cs[i].Embedding, out.Model); err != nil {
-			m.Log.Warn("saving an embedding failed", "err", err)
-		}
+	if n := len(out.Vectors) - 1; n > 0 {
+		m.Log.Info("embedded its owner's decisions", "cases", n, "model", out.Model, "cost_usd", out.CostUSD)
 	}
-	if len(missing) > 0 {
-		m.Log.Info("embedded its owner's decisions", "cases", len(missing), "model", out.Model, "cost_usd", out.CostUSD)
-	}
-	type scored struct {
-		c   memory.JudgmentCase
-		sim float64
-	}
-	var best []scored
-	for _, c := range cs {
-		if sim := embed.Similarity(out.Vectors[0], c.Embedding); sim >= minSimilarity {
-			best = append(best, scored{c, sim})
-		}
-	}
-	slices.SortStableFunc(best, func(a, b scored) int { return cmp.Compare(b.sim, a.sim) })
-	var picked []memory.JudgmentCase
-	for i := 0; i < len(best) && i < judgmentCases; i++ {
-		picked = append(picked, best[i].c)
+	picked := make([]memory.JudgmentCase, len(ranked))
+	for i, r := range ranked {
+		picked[i] = r.item
 	}
 	return picked, true
 }

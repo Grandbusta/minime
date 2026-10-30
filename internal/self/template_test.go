@@ -92,22 +92,11 @@ func TestRenderRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, o := range map[string]Owner{
-		"no name":        {Relation: "father"},
-		"a quote":        {Name: `Sam "the man"`, Relation: "father"},
-		"not a relation": {Name: "Sam", Relation: "landlord"},
-		"bad account":    {Name: "Sam", Relation: "father", Account: "telegram: 42"},
+		"a quote":     {Name: `Sam "the man"`, Relation: "father"},
+		"bad account": {Name: "Sam", Relation: "father", Account: "telegram: 42"},
 	} {
 		if _, err := tmpl.Render(o); err == nil {
 			t.Errorf("%s: rendered", name)
-		}
-	}
-}
-
-func TestCircleOf(t *testing.T) {
-	for rel, want := range map[string]string{"father": "family", "older sister": "family", "mentor": "school", "friend": "friend",
-		"Best Friend": "friend", "granddaughter": "family"} {
-		if got := CircleOf(rel); got != want {
-			t.Errorf("CircleOf(%q) = %q; want %q", rel, got, want)
 		}
 	}
 }

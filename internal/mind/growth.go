@@ -84,6 +84,10 @@ func (m *Mind) startingScore(ctx context.Context, skill string, level float64) {
 	}
 }
 
+func workState(w memory.Work) map[string]string {
+	return map[string]string{"title": w.Title, "kind": w.Kind, "text": cutRunes(w.Text, scoreChars)}
+}
+
 func (m *Mind) scoreWork(ctx context.Context, w memory.Work, percept ulid.ULID, parent *ulid.ULID) {
 	if m.SkillLevel.ID == "" || len(m.SkillLevel.Questions) == 0 {
 		return
@@ -93,10 +97,6 @@ func (m *Mind) scoreWork(ctx context.Context, w memory.Work, percept ulid.ULID, 
 		m.Log.Warn("loading skills failed; the work isn't scored", "err", err)
 		return
 	}
-	text := w.Text
-	if r := []rune(text); len(r) > scoreChars {
-		text = string(r[:scoreChars])
-	}
 	for _, sk := range skills {
 		if !slices.Contains(sk.ShownBy, w.Kind) {
 			continue
@@ -105,7 +105,7 @@ func (m *Mind) scoreWork(ctx context.Context, w memory.Work, percept ulid.ULID, 
 		d := &decision.Decision{ID: ulid.Make(), ParentID: parent, At: start.UTC(), PerceptID: percept, Tier: decision.TierSystem1,
 			SetID: m.SkillLevel.Ref(), Action: "score_skill", Gate: decision.GateAuto}
 		resp, err := m.System1.Decide(ctx, system1.Request{
-			State:     map[string]any{"skill": sk.Name, "work": map[string]string{"title": w.Title, "kind": w.Kind, "text": text}},
+			State:     map[string]any{"skill": sk.Name, "work": workState(w)},
 			Questions: m.SkillLevel.Questions,
 		})
 		if err != nil {

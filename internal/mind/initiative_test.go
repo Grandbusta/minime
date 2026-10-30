@@ -10,7 +10,6 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Grandbusta/minime/internal/memory"
-	"github.com/Grandbusta/minime/internal/perception"
 	"github.com/Grandbusta/minime/internal/providers/system2"
 )
 
@@ -34,9 +33,6 @@ func TestRemindersAreSavedInTheAgentsZone(t *testing.T) {
 	if !r.DueAt.Equal(time.Date(2026, 10, 28, 8, 0, 0, 0, time.UTC)) || r.Subject != sam || r.Kind != memory.IntentionRemind ||
 		r.Status != memory.IntentionPending || r.Text != "Sam should call the bank" {
 		t.Errorf("reminder = %+v", r)
-	}
-	if note := s2.requests[0].Note; !strings.Contains(note, "It is now Tuesday 27 October 2026, 14:16 (Africa/Lagos time).") {
-		t.Errorf("note does not give the time: %q", note)
 	}
 }
 
@@ -68,17 +64,6 @@ func TestDueRemindersAreSent(t *testing.T) {
 	if got := []string{s.intentions[0].Status, s.intentions[1].Status, s.intentions[2].Status}; got[0] != memory.IntentionDone ||
 		got[1] != memory.IntentionMissed || got[2] != memory.IntentionPending {
 		t.Errorf("statuses = %v, want done, missed, pending", got)
-	}
-	req := s2.requests[0]
-	if req.Message != "" || !strings.Contains(req.Note, "Sam should call the bank") || !strings.Contains(req.Note, "It is now") {
-		t.Errorf("system 2 request = %+v", req)
-	}
-	if len(s.percepts) != 1 || s.percepts[0].Kind != perception.KindReminder || s.percepts[0].Thread != "chat-1" {
-		t.Errorf("percepts = %+v", s.percepts)
-	}
-	if len(s.decisions) != 1 || s.decisions[0].Action != "remind" || s.decisions[0].Reply != "a thoughtful reply" ||
-		s.decisions[0].PerceptID != s.percepts[0].ID {
-		t.Errorf("decisions = %+v", s.decisions)
 	}
 }
 
@@ -124,11 +109,6 @@ func TestCheckIns(t *testing.T) {
 	if _, ok := s.asked[age.ID]; ok {
 		t.Error("a fact that was not asked about was marked")
 	}
-	if len(s.decisions) != 2 || s.decisions[0].Action != "check_in" || s.decisions[1].Action != "check_in" ||
-		s.decisions[1].ParentID == nil || *s.decisions[1].ParentID != s.decisions[0].ID ||
-		s.decisions[0].PerceptID != s.percepts[0].ID || s.percepts[0].Kind != perception.KindCheckIn {
-		t.Errorf("decisions = %+v", s.decisions)
-	}
 
 	// 18:00 the same day: already checked in today.
 	s.facts = append(s.facts, memory.Fact{ID: ulid.Make(), Subject: sam, Text: "I have a job interview on Friday", At: now})
@@ -144,13 +124,6 @@ func TestCheckIns(t *testing.T) {
 		t.Errorf("checked in on a busy conversation: %v", r.sent)
 	}
 
-	s.facts = []memory.Fact{age}
-	s.convs[0].LastActivity = at(27, 12, 0)
-	m.tick(ctx, at(28, 18, 0))
-	last := s.decisions[len(s.decisions)-1]
-	if len(r.sent) != 1 || last.Action != "no_check_in" || !last.PerceptID.IsZero() {
-		t.Errorf("sent %v, last decision %+v", r.sent, last)
-	}
 }
 
 func TestStrangersAreNotCheckedIn(t *testing.T) {

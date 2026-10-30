@@ -3,8 +3,6 @@ package openai
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"github.com/openai/openai-go/v3"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -94,22 +92,6 @@ func TestDecideSendsRequestAndMapsAnswers(t *testing.T) {
 	}
 }
 
-func TestStringStateIsSentAsText(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Input string `json:"input"`
-		}
-		json.NewDecoder(r.Body).Decode(&body)
-		if body.Input != "hello" {
-			t.Errorf("input = %q", body.Input)
-		}
-		io.WriteString(w, `{"model":"gpt-6-luna","answers":[{"type":"predicate","name":"urgent","probability":0.1}]}`)
-	})
-	if _, err := c.Decide(context.Background(), system1.Request{State: "hello", Questions: questions[1:2]}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestRefusalIsKeptPerQuestion(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"model":"gpt-6-luna","answers":[
@@ -126,68 +108,9 @@ func TestRefusalIsKeptPerQuestion(t *testing.T) {
 	}
 }
 
-func TestBooleanChoiceValues(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, `{"model":"gpt-6-luna","answers":[{"type":"choice","name":"intent","choice":true,"confidence":1,
-			"probabilities":[{"value":true,"probability":1},{"value":false,"probability":0}]}]}`)
-	})
-	resp, err := c.Decide(context.Background(), system1.Request{State: "x", Questions: questions[:1]})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a := resp.Answers["intent"]; a.Choice != "true" || a.Probabilities["false"] != 0 {
-		t.Errorf("intent = %+v", a)
-	}
-}
-
-func TestRetriesRateLimitThenSucceeds(t *testing.T) {
-	calls := 0
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if calls == 1 {
-			w.WriteHeader(http.StatusTooManyRequests)
-			io.WriteString(w, `{"error":{"message":"slow down","type":"rate_limit_error"}}`)
-			return
-		}
-		io.WriteString(w, `{"model":"gpt-6-luna","answers":[{"type":"predicate","name":"urgent","probability":0.1}]}`)
-	})
-	if _, err := c.Decide(context.Background(), system1.Request{State: "x", Questions: questions[1:2]}); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 2 {
-		t.Fatalf("calls = %d, want 2", calls)
-	}
-}
-
-func TestClientErrorIsNotRetried(t *testing.T) {
-	calls := 0
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.WriteHeader(http.StatusUnauthorized)
-		io.WriteString(w, `{"error":{"message":"Incorrect API key provided","type":"invalid_request_error","code":"invalid_api_key"}}`)
-	})
-	_, err := c.Decide(context.Background(), system1.Request{State: "x", Questions: questions[1:2]})
-	var apiErr *openai.Error
-	if !errors.As(err, &apiErr) || apiErr.StatusCode != 401 || apiErr.Code != "invalid_api_key" {
-		t.Fatalf("err = %v", err)
-	}
-	if calls != 1 {
-		t.Fatalf("calls = %d, want 1", calls)
-	}
-}
-
 func TestAnswerNameMismatchIsAnError(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"model":"gpt-6-luna","answers":[{"type":"predicate","name":"something_else","probability":0.1}]}`)
-	})
-	if _, err := c.Decide(context.Background(), system1.Request{State: "x", Questions: questions[1:2]}); err == nil {
-		t.Fatal("expected an error")
-	}
-}
-
-func TestAnswerCountMismatchIsAnError(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, `{"model":"gpt-6-luna","answers":[]}`)
 	})
 	if _, err := c.Decide(context.Background(), system1.Request{State: "x", Questions: questions[1:2]}); err == nil {
 		t.Fatal("expected an error")

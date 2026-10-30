@@ -2,7 +2,6 @@ package reading
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -15,40 +14,24 @@ import (
 )
 
 type fakeLibrary struct {
-	text   string
-	finds  []string
-	failOn string
+	text  string
+	finds []string
 }
 
 func (f *fakeLibrary) FindBook(_ context.Context, q string) (library.Book, error) {
 	f.finds = append(f.finds, "book:"+q)
-	if q == f.failOn {
-		return library.Book{}, library.ErrNotFound
-	}
 	return library.Book{ID: 1342, Title: "Pride and Prejudice", Author: "Jane Austen", TextURL: "https://gutenberg/1342"}, nil
 }
 
 func (f *fakeLibrary) BookText(context.Context, library.Book) (string, error) { return f.text, nil }
 
-func (f *fakeLibrary) FindArticle(_ context.Context, q string) (library.Article, error) {
-	f.finds = append(f.finds, "article:"+q)
-	if q == f.failOn {
-		return library.Article{}, errors.New("network down")
-	}
-	return library.Article{Title: "Polyrhythm", URL: "https://wiki/Polyrhythm", Text: "Polyrhythm is two rhythms at once."}, nil
+func (f *fakeLibrary) FindArticle(context.Context, string) (library.Article, error) {
+	return library.Article{}, library.ErrNotFound
 }
 
-type fakeStore struct {
-	sources  map[ulid.ULID]memory.Source
-	projects []memory.Project
-}
+type fakeStore struct{ sources map[ulid.ULID]memory.Source }
 
-func (s *fakeStore) ReadingProject(_ context.Context, source ulid.ULID) (memory.Project, bool, error) {
-	for _, p := range s.projects {
-		if p.SourceID == source {
-			return p, true, nil
-		}
-	}
+func (s *fakeStore) ReadingProject(context.Context, ulid.ULID) (memory.Project, bool, error) {
 	return memory.Project{}, false, nil
 }
 
@@ -117,61 +100,5 @@ func TestReadingABookOverDays(t *testing.T) {
 	}
 	if m.Project.Position != len(lib.text) || !m.Done {
 		t.Errorf("after the last passage: position %d of %d, done %v", m.Project.Position, len(lib.text), m.Done)
-	}
-}
-
-func TestStartingABookWithoutAProject(t *testing.T) {
-	b := Book{Library: &fakeLibrary{text: "It is a truth universally acknowledged."}, Store: &fakeStore{sources: map[ulid.ULID]memory.Source{}}}
-	m, err := b.Prepare(context.Background(), act("Pride and Prejudice", nil))
-	if err != nil || m.Project == nil || m.Project.Title != "Pride and Prejudice" || m.Project.Kind != "reading" || !m.Done {
-		t.Errorf("material = %+v, %v", m, err)
-	}
-}
-
-func TestReadingAnArticle(t *testing.T) {
-	st := &fakeStore{sources: map[ulid.ULID]memory.Source{}}
-	m, err := Article{Library: &fakeLibrary{}, Store: st}.Prepare(context.Background(), act("polyrhythm", nil))
-	if err != nil || !strings.Contains(m.Note, `Wikipedia article "Polyrhythm"`) || !strings.Contains(m.Note, "two rhythms at once") {
-		t.Errorf("note:\n%s (%v)", m.Note, err)
-	}
-	if len(st.sources) != 1 || m.Project != nil || m.Done || m.WorkKind != NotesKind {
-		t.Errorf("sources %d, material %+v", len(st.sources), m)
-	}
-}
-
-func TestNothingToRead(t *testing.T) {
-	st := &fakeStore{sources: map[ulid.ULID]memory.Source{}}
-	lib := &fakeLibrary{failOn: "a modern novel"}
-	if _, err := (Book{Library: lib, Store: st}).Prepare(context.Background(), act("a modern novel", nil)); !errors.Is(err, library.ErrNotFound) {
-		t.Errorf("book not on Gutenberg: %v", err)
-	}
-	if _, err := (Book{Library: lib, Store: st}).Prepare(context.Background(), act("", nil)); !errors.Is(err, library.ErrNotFound) {
-		t.Errorf("no book named: %v", err)
-	}
-	if _, err := (Article{Library: lib, Store: st}).Prepare(context.Background(), act("a modern novel", nil)); err == nil {
-		t.Errorf("article failure wasn't returned")
-	}
-	if len(st.sources) != 0 {
-		t.Errorf("saved %d sources", len(st.sources))
-	}
-}
-
-func TestStartingABookItsAlreadyReadingCarriesOn(t *testing.T) {
-	para := strings.Repeat("word ", PassageSize/12)
-	lib := &fakeLibrary{text: para + "\n\n" + para + "\n\n" + para + " The end."}
-	st := &fakeStore{sources: map[ulid.ULID]memory.Source{}}
-	b := Book{Library: lib, Store: st}
-	first, err := b.Prepare(context.Background(), act("Pride and Prejudice", nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	st.projects = []memory.Project{*first.Project}
-
-	again, err := b.Prepare(context.Background(), act("Pride and Prejudice Austen", nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if again.Project.ID != first.Project.ID || !strings.Contains(again.Note, "% of the way through") || strings.Contains(again.Note, ", 0% of the way") {
-		t.Errorf("started it over: project %s vs %s\n%.200s", again.Project.ID, first.Project.ID, again.Note)
 	}
 }

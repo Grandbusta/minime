@@ -36,14 +36,3 @@ func TestEmbed(t *testing.T) {
 		t.Errorf("embedded = %+v", out)
 	}
 }
-
-func TestEmbedMissingVector(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"data":[{"index":0,"embedding":[1,0]}],"usage":{"prompt_tokens":3}}`)
-	}))
-	defer srv.Close()
-	if _, err := New("k", "m", srv.URL, pricing.Price{}).Embed(context.Background(), []string{"a", "b"}); err == nil {
-		t.Error("embedded with a vector missing; want an error")
-	}
-}

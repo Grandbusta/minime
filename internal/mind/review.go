@@ -178,11 +178,8 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 		note.WriteString("\n\nWhat you made this week:")
 		for _, w := range works {
 			if w.Kind == "journal" {
-				text := w.Text
-				if r := []rune(text); len(r) > reviewJournalChars {
-					text = string(r[:reviewJournalChars]) + "…"
-				}
-				fmt.Fprintf(&note, "\n- %s, your journal:\n%s", w.CreatedAt.In(m.Zone).Format("Mon 2 Jan"), text)
+				fmt.Fprintf(&note, "\n- %s, your journal:\n%s", w.CreatedAt.In(m.Zone).Format("Mon 2 Jan"),
+					cutRunes(w.Text, reviewJournalChars))
 				continue
 			}
 			fmt.Fprintf(&note, "\n- %s, %s: %s", w.CreatedAt.In(m.Zone).Format("Mon 2 Jan"), strings.ReplaceAll(w.Kind, "_", " "), w.Title)

@@ -348,17 +348,13 @@ func (m *Mind) stageMet(ctx context.Context, p memory.LearningPlan, st memory.St
 	if m.StageCheck.ID == "" || len(m.StageCheck.Questions) == 0 {
 		return true
 	}
-	text := w.Text
-	if r := []rune(text); len(r) > scoreChars {
-		text = string(r[:scoreChars])
-	}
 	start := time.Now()
 	d := &decision.Decision{ID: ulid.Make(), ParentID: parent, At: start.UTC(), PerceptID: percept, Tier: decision.TierSystem1,
 		SetID: m.StageCheck.Ref(), Action: "check_stage", Gate: decision.GateAuto}
 	resp, err := m.System1.Decide(ctx, system1.Request{
 		State: map[string]any{
 			"stage": map[string]string{"skill": p.Skill, "learn": st.Learn, "practice": st.Practice, "done_when": orDefault(st.DoneWhen, st.Practice)},
-			"work":  map[string]string{"title": w.Title, "kind": w.Kind, "text": text},
+			"work":  workState(w),
 		},
 		Questions: m.StageCheck.Questions,
 	})
@@ -366,8 +362,8 @@ func (m *Mind) stageMet(ctx context.Context, p memory.LearningPlan, st memory.St
 		m.Log.Warn("checking a learning stage failed; it stays on this stage", "err", err)
 		return false
 	}
-	a, ok := resp.Answers[m.StageCheck.Questions[0].Name]
-	met := ok && !a.Refused && a.Probability >= m.StageCheck.Thresholds.Act
+	q := m.StageCheck.Questions[0].Name
+	met, a := isYes(m.StageCheck, resp.Answers, q), resp.Answers[q]
 	d.Provider, d.Answers, d.CostUSD, d.Latency = resp.Provider, resp.Answers, resp.CostUSD, time.Since(start)
 	verdict := "not yet"
 	if met {

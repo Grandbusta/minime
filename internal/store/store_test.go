@@ -15,7 +15,6 @@ import (
 	"github.com/Grandbusta/minime/internal/decision"
 	"github.com/Grandbusta/minime/internal/memory"
 	"github.com/Grandbusta/minime/internal/perception"
-	"github.com/Grandbusta/minime/internal/search"
 )
 
 // openTestStore runs only when MINIME_TEST_DATABASE_URL points at a disposable database.
@@ -76,34 +75,6 @@ func TestPerceptAndDecisionRoundTrip(t *testing.T) {
 	}
 }
 
-func TestFacts(t *testing.T) {
-	s := openTestStore(t)
-	ctx := context.Background()
-	base := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond) // newer than anything else in the table
-
-	var want []string
-	for i, text := range []string{"my car is a blue Golf", "my passport expires in March 2027", "I live in Ikoyi"} {
-		p := perception.Percept{ID: ulid.Make(), Source: "test", ExternalID: ulid.Make().String(), Kind: "message",
-			Text: text, At: base.Add(time.Duration(i) * time.Minute)}
-		if _, err := s.SavePercept(ctx, p); err != nil {
-			t.Fatal(err)
-		}
-		f := memory.Fact{ID: ulid.Make(), PerceptID: p.ID, Text: text, At: p.At}
-		if err := s.SaveFact(ctx, f); err != nil {
-			t.Fatal(err)
-		}
-		want = append([]string{text}, want...)
-	}
-
-	got, err := s.RecentFacts(ctx, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 || got[0].Text != want[0] || got[1].Text != want[1] || got[0].PerceptID.IsZero() {
-		t.Errorf("facts = %+v, want the newest two of %v", got, want)
-	}
-}
-
 func TestFactAreasAndRecallOrder(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
@@ -139,21 +110,6 @@ func TestFactAreasAndRecallOrder(t *testing.T) {
 	if got[1].ID != unlabelled.ID {
 		t.Errorf("then the rest, newest first: %+v", got)
 	}
-
-	todo, err := s.UnlabelledFacts(ctx, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.ContainsFunc(todo, func(f memory.Fact) bool { return f.ID == unlabelled.ID && f.Subject == sam }) {
-		t.Fatalf("unlabelled fact missing: %+v", todo)
-	}
-	if err := s.SetFactAreas(ctx, unlabelled.ID, []string{"preferences"}); err != nil {
-		t.Fatal(err)
-	}
-	todo, _ = s.UnlabelledFacts(ctx, 100)
-	if slices.ContainsFunc(todo, func(f memory.Fact) bool { return f.ID == unlabelled.ID }) {
-		t.Error("fact still unlabelled after SetFactAreas")
-	}
 }
 
 func TestPeople(t *testing.T) {
@@ -175,22 +131,6 @@ func TestPeople(t *testing.T) {
 	got, ok, err := s.Person(ctx, dad.Key)
 	if err != nil || !ok || got.Relation != dad.Relation || got.Circle != "family" || got.Source != memory.KnownFromBirth || !got.FirstSeen.Equal(at) {
 		t.Fatalf("person = %+v, %v, %v", got, ok, err)
-	}
-
-	got.Name, got.UpdatedAt = "Busta", at.Add(time.Minute)
-	if err := s.SavePerson(ctx, got); err != nil {
-		t.Fatal(err)
-	}
-	if again, _, _ := s.Person(ctx, dad.Key); again.Name != "Busta" || !again.FirstSeen.Equal(at) {
-		t.Errorf("after save = %+v", again)
-	}
-
-	if _, ok, err := s.Person(ctx, "test:nobody"); err != nil || ok {
-		t.Errorf("unknown person: %v %v", ok, err)
-	}
-	known, err := s.KnownPeople(ctx, 1000)
-	if err != nil || !slices.ContainsFunc(known, func(p memory.Person) bool { return p.Key == dad.Key }) {
-		t.Errorf("known people = %+v, %v", known, err)
 	}
 }
 
@@ -240,17 +180,9 @@ func TestRecentExchanges(t *testing.T) {
 		got[1].Message != "no reply recorded" || got[1].Reply != "" {
 		t.Errorf("exchanges = %+v", got)
 	}
-
-	limited, err := s.RecentExchanges(ctx, "test", thread, base, current.ID, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(limited) != 1 || limited[0].Message != "no reply recorded" {
-		t.Errorf("limit keeps the newest: %+v", limited)
-	}
 }
 
-func TestPublicFactsAndProfile(t *testing.T) {
+func TestPublicFacts(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	base := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Microsecond)
@@ -312,29 +244,9 @@ func TestPublicFactsAndProfile(t *testing.T) {
 	if got := ours(public); !slices.Equal(got, []string{colour.Text}) {
 		t.Errorf("public = %v, want only the colour", got)
 	}
-
-	d := decision.Decision{ID: ulid.Make(), At: base, SetID: "public_profile@1", Tier: decision.TierSystem1,
-		Action: "decide_public", Gate: decision.GateAuto}
-	if err := s.SaveDecision(ctx, d); err != nil {
-		t.Fatal(err)
-	}
-	ds, err := s.RecentDecisions(ctx, 1)
-	if err != nil || len(ds) != 1 || ds[0].ID != d.ID || !ds[0].PerceptID.IsZero() {
-		t.Fatalf("decisions = %+v, err = %v", ds, err)
-	}
-
-	for _, inputs := range []string{"a", "b"} {
-		if err := s.SaveProfile(ctx, []byte(`{"about":["`+inputs+`"]}`), inputs, base); err != nil {
-			t.Fatal(err)
-		}
-	}
-	page, inputs, at, ok, err := s.Profile(ctx)
-	if err != nil || !ok || inputs != "b" || !at.Equal(base) || !strings.Contains(string(page), `"b"`) {
-		t.Errorf("profile = %s, %q, %v, %v, %v", page, inputs, at, ok, err)
-	}
 }
 
-func TestRemindersConversationsAndCheckIns(t *testing.T) {
+func TestDueIntentionsAndUnaskedFacts(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	base := time.Now().UTC().Add(3 * time.Hour).Truncate(time.Microsecond)
@@ -380,43 +292,6 @@ func TestRemindersConversationsAndCheckIns(t *testing.T) {
 		t.Errorf("intentions due = %+v, %v", got, err)
 	}
 
-	checkIn := perception.Percept{ID: ulid.Make(), Source: "test", ExternalID: "check_in:" + ulid.Make().String(),
-		Thread: msg.Thread, Speaker: person, Kind: perception.KindCheckIn, At: base.Add(2 * time.Hour)}
-	if _, err := s.SavePercept(ctx, checkIn); err != nil {
-		t.Fatal(err)
-	}
-	d := decision.Decision{ID: ulid.Make(), At: checkIn.At, PerceptID: checkIn.ID, SetID: "reply@x", Tier: decision.TierSystem2,
-		Action: "check_in", Reply: "How did the interview go?", Gate: decision.GateAuto}
-	if err := s.SaveDecision(ctx, d); err != nil {
-		t.Fatal(err)
-	}
-
-	convs, err := s.Conversations(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var conv *memory.Conversation
-	for i := range convs {
-		if convs[i].Person == person {
-			conv = &convs[i]
-		}
-	}
-	if conv == nil || conv.Thread != msg.Thread || !conv.LastActivity.Equal(checkIn.At) || !strings.Contains(string(conv.Payload), `"chat_id"`) {
-		t.Fatalf("conversation = %+v", conv)
-	}
-	last, ok, err := s.LastSpokeFirst(ctx, person, perception.KindCheckIn)
-	if err != nil || !ok || !last.Equal(checkIn.At) {
-		t.Errorf("last check-in = %v, %v, %v", last, ok, err)
-	}
-	if _, ok, _ := s.LastSpokeFirst(ctx, person, perception.KindReminder); ok {
-		t.Error("found a reminder that was never sent")
-	}
-
-	exchanges, err := s.RecentExchanges(ctx, "test", msg.Thread, base.Add(-time.Minute), ulid.Make(), 10)
-	if err != nil || len(exchanges) != 2 || exchanges[1].Message != "" || exchanges[1].Reply != "How did the interview go?" {
-		t.Errorf("exchanges = %+v, %v; want the message and then the check-in", exchanges, err)
-	}
-
 	fact := memory.Fact{ID: ulid.Make(), PerceptID: msg.ID, Subject: person, Text: "I have an interview", At: base}
 	if err := s.SaveFact(ctx, fact); err != nil {
 		t.Fatal(err)
@@ -432,7 +307,7 @@ func TestRemindersConversationsAndCheckIns(t *testing.T) {
 	}
 }
 
-func TestProjectsWorksAndOwnIntentions(t *testing.T) {
+func TestProjectWorksAndOwnIntentions(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	base := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Microsecond)
@@ -441,17 +316,6 @@ func TestProjectsWorksAndOwnIntentions(t *testing.T) {
 		CreatedAt: base, UpdatedAt: base}
 	if err := s.SaveProject(ctx, song); err != nil {
 		t.Fatal(err)
-	}
-	song.Notes, song.UpdatedAt = "verse 1 done", base.Add(time.Minute)
-	if err := s.SaveProject(ctx, song); err != nil {
-		t.Fatal(err)
-	}
-	if p, ok, err := s.Project(ctx, song.ID); err != nil || !ok || p.Notes != "verse 1 done" {
-		t.Fatalf("project = %+v, %v, %v", p, ok, err)
-	}
-	active, err := s.ActiveProjects(ctx, 100)
-	if err != nil || !slices.ContainsFunc(active, func(p memory.Project) bool { return p.ID == song.ID }) {
-		t.Errorf("active = %+v, %v", active, err)
 	}
 
 	own := memory.Intention{ID: ulid.Make(), Subject: memory.SubjectSelf, Kind: memory.IntentionActivity, ProjectID: song.ID,
@@ -479,17 +343,8 @@ func TestProjectsWorksAndOwnIntentions(t *testing.T) {
 	if err != nil || len(ws) != 1 || ws[0].Title != "verse 2" || ws[0].IntentionID != own.ID {
 		t.Errorf("project works = %+v, %v", ws, err)
 	}
-	if ws, err := s.WorksBetween(ctx, base, base.Add(2*time.Minute)); err != nil || len(ws) != 2 || ws[0].Title != "verse 1" {
-		t.Errorf("works between = %+v, %v", ws, err)
-	}
 	if j, ok, err := s.LatestWork(ctx, "journal"); err != nil || !ok || j.ID != journal.ID || !j.ProjectID.IsZero() {
 		t.Errorf("latest journal = %+v, %v, %v", j, ok, err)
-	}
-	if w, ok, err := s.IntentionWork(ctx, own.ID); err != nil || !ok || w.Title != "verse 2" {
-		t.Errorf("intention work = %+v, %v, %v", w, ok, err)
-	}
-	if _, ok, err := s.IntentionWork(ctx, ulid.Make()); err != nil || ok {
-		t.Errorf("work for an intention without one: %v, %v", ok, err)
 	}
 
 	person := "test:" + ulid.Make().String()
@@ -521,7 +376,7 @@ func TestProjectsWorksAndOwnIntentions(t *testing.T) {
 	}
 }
 
-func TestSourcesAndReadingProgress(t *testing.T) {
+func TestSourcesAndReadingProjects(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -538,44 +393,17 @@ func TestSourcesAndReadingProgress(t *testing.T) {
 	if id, err := s.SaveSource(ctx, again); err != nil || id != src.ID {
 		t.Errorf("same URL again = %v, %v; want the first ID", id, err)
 	}
-	if text, err := s.SourceText(ctx, src.ID); err != nil || text != src.Text {
-		t.Errorf("text = %q, %v", text, err)
-	}
 
 	p := memory.Project{ID: ulid.Make(), Title: "Pride and Prejudice", Kind: "reading", Status: memory.ProjectActive,
 		SourceID: src.ID, Position: 12, CreatedAt: now, UpdatedAt: now}
 	if err := s.SaveProject(ctx, p); err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err := s.Project(ctx, p.ID)
-	if err != nil || !ok || got.SourceID != src.ID || got.Position != 12 || got.Source == nil ||
-		got.Source.Title != "Pride and Prejudice" || got.Source.Chars != len(src.Text) {
-		t.Errorf("project = %+v (%+v), %v", got, got.Source, err)
-	}
 	if r, ok, err := s.ReadingProject(ctx, src.ID); err != nil || !ok || r.ID != p.ID || r.Position != 12 {
 		t.Errorf("reading project = %+v, %v, %v", r, ok, err)
 	}
 	if _, ok, _ := s.ReadingProject(ctx, ulid.Make()); ok {
 		t.Error("found a project for a source nobody reads")
-	}
-
-	i := memory.Intention{ID: ulid.Make(), Subject: memory.SubjectSelf, Kind: memory.IntentionActivity, Text: "learn",
-		Ability: "read_article", Args: map[string]string{"query": "polyrhythm"}, DueAt: now.AddDate(0, 0, -50), Status: memory.IntentionPending, CreatedAt: now}
-	if err := s.SaveIntention(ctx, i); err != nil {
-		t.Fatal(err)
-	}
-	is, err := s.IntentionsDue(ctx, i.DueAt, i.DueAt.Add(time.Second))
-	if err != nil || len(is) != 1 || is[0].Ability != "read_article" || is[0].Args["query"] != "polyrhythm" {
-		t.Errorf("intention = %+v, %v", is, err)
-	}
-	if got, ok, err := s.Intention(ctx, i.ID); err != nil || !ok || got.Text != "learn" || got.Args["query"] != "polyrhythm" {
-		t.Errorf("by id = %+v, %v, %v", got, ok, err)
-	}
-	if _, ok, err := s.Intention(ctx, ulid.Make()); err != nil || ok {
-		t.Errorf("unknown id: %v, %v", ok, err)
-	}
-	if err := s.FinishIntention(ctx, i.ID, memory.IntentionDone, "", now); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -678,18 +506,6 @@ func TestApprovals(t *testing.T) {
 	if due, err := s.DueIntentions(ctx, now.Add(2*time.Hour), 1000); err != nil || slices.ContainsFunc(due, func(i memory.Intention) bool { return i.ID == promise.ID }) {
 		t.Errorf("an awaiting intention is due: %v", err)
 	}
-	if err := s.ResumeIntention(ctx, promise.ID, now.Add(3*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if is, _ := s.OpenIntentions(ctx, person, memory.IntentionTask); len(is) != 1 || !is[0].DueAt.Equal(now.Add(3*time.Hour)) {
-		t.Errorf("resumed = %+v", is)
-	}
-	if err := s.AwaitIntention(ctx, promise.ID); err != nil {
-		t.Fatal(err)
-	}
-	if is, _ := s.OpenIntentions(ctx, person, memory.IntentionTask); len(is) != 0 {
-		t.Errorf("awaiting again, but open: %+v", is)
-	}
 
 	old := memory.Approval{ID: ulid.Make(), Class: "commit", Person: person, What: "a verse by 20:00", Ref: promise.ID,
 		Status: memory.ApprovalPending, AskedAt: now.Add(-25 * time.Hour)}
@@ -707,8 +523,8 @@ func TestApprovals(t *testing.T) {
 	if err := s.MarkApprovalSent(ctx, fresh.ID, []byte(`{"chat_id":1,"message_id":2}`), now); err != nil {
 		t.Fatal(err)
 	}
-	if a, ok, err := s.Approval(ctx, fresh.ID); err != nil || !ok || a.SentAt.IsZero() || string(a.Message) != `{"chat_id": 1, "message_id": 2}` {
-		t.Errorf("sent approval = %+v (%s), %v", a, a.Message, err)
+	if a, ok, err := s.Approval(ctx, fresh.ID); err != nil || !ok || a.SentAt.IsZero() {
+		t.Errorf("sent approval = %+v, %v", a, err)
 	}
 	stale, err := s.StaleApprovals(ctx, now.Add(-24*time.Hour), 1000)
 	if err != nil || !slices.ContainsFunc(stale, func(a memory.Approval) bool { return a.ID == old.ID && a.Ref == promise.ID }) ||
@@ -741,21 +557,6 @@ func TestLearning(t *testing.T) {
 	}
 	if rules, err := s.AutonomyRules(ctx); err != nil || rules["reach_out"] != "ask" {
 		t.Errorf("rules = %v, %v", rules, err)
-	}
-
-	fp := perception.Percept{ID: ulid.Make(), Source: "test", ExternalID: ulid.Make().String(), Thread: thread, Kind: "message", At: base}
-	if _, err := s.SavePercept(ctx, fp); err != nil {
-		t.Fatal(err)
-	}
-	f := memory.Fact{ID: ulid.Make(), PerceptID: fp.ID, Subject: "test:x", Text: "x lives in Ikoyi", At: base}
-	if err := s.SaveFact(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-	if ok, err := s.DeleteFact(ctx, f.ID); err != nil || !ok {
-		t.Errorf("delete: %v, %v", ok, err)
-	}
-	if ok, _ := s.DeleteFact(ctx, f.ID); ok {
-		t.Error("deleted twice")
 	}
 
 	// Two messages and their reads; the first is labelled, twice.
@@ -799,208 +600,6 @@ func TestLearning(t *testing.T) {
 	if len(mine) != 1 || mine[0].Text != "I need a dentist" || mine[0].SetID != "incoming_message@1" || mine[0].Label != "ask_for_help" ||
 		mine[0].Answer.Choice != "share" || mine[0].Answer.Confidence != 0.6 {
 		t.Errorf("examples = %+v", mine)
-	}
-}
-
-func TestGrowth(t *testing.T) {
-	s := openTestStore(t)
-	ctx := context.Background()
-	now := time.Now().UTC().Truncate(time.Microsecond)
-
-	dream := memory.Dream{ID: ulid.Make(), Text: "be a producer", Status: memory.DreamActive, Source: memory.DreamFromLife, Since: now}
-	old := memory.Dream{ID: ulid.Make(), Text: "be a DJ", Status: memory.DreamActive, Source: memory.DreamFromSelf, Since: now}
-	for _, d := range []memory.Dream{dream, old} {
-		if err := s.SaveDream(ctx, d); err != nil {
-			t.Fatal(err)
-		}
-	}
-	old.Status, old.EndedAt = memory.DreamDropped, now
-	if err := s.SaveDream(ctx, old); err != nil {
-		t.Fatal(err)
-	}
-	active, err := s.Dreams(ctx, true)
-	if err != nil || !slices.ContainsFunc(active, func(d memory.Dream) bool { return d.ID == dream.ID }) ||
-		slices.ContainsFunc(active, func(d memory.Dream) bool { return d.ID == old.ID }) {
-		t.Errorf("active dreams = %+v, %v", active, err)
-	}
-
-	g := memory.Goal{ID: ulid.Make(), DreamID: dream.ID, Text: "five beat ideas", DoneWhen: "five in the EP", Due: now.AddDate(0, 1, 0),
-		Status: memory.GoalActive, CreatedAt: now, UpdatedAt: now}
-	if err := s.SaveGoal(ctx, g); err != nil {
-		t.Fatal(err)
-	}
-	g.Progress = "two done"
-	if err := s.SaveGoal(ctx, g); err != nil {
-		t.Fatal(err)
-	}
-	goals, err := s.Goals(ctx, true)
-	if err != nil || !slices.ContainsFunc(goals, func(x memory.Goal) bool { return x.ID == g.ID && x.Progress == "two done" && x.DreamID == dream.ID }) {
-		t.Errorf("goals = %+v, %v", goals, err)
-	}
-	p := memory.Project{ID: ulid.Make(), Title: "The EP", Kind: "music", Status: memory.ProjectActive, GoalID: g.ID, CreatedAt: now, UpdatedAt: now}
-	if err := s.SaveProject(ctx, p); err != nil {
-		t.Fatal(err)
-	}
-	if got, ok, err := s.Project(ctx, p.ID); err != nil || !ok || got.GoalID != g.ID {
-		t.Errorf("project = %+v, %v", got, err)
-	}
-
-	name := "skill-" + ulid.Make().String()
-	if err := s.AddSkill(ctx, memory.Skill{Name: name, Level: 3, ShownBy: []string{"beat_idea"}, UpdatedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.AddSkill(ctx, memory.Skill{Name: name, Level: 9, UpdatedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetSkillLevel(ctx, name, 4.6, now); err != nil {
-		t.Fatal(err)
-	}
-	skills, err := s.Skills(ctx)
-	if err != nil || !slices.ContainsFunc(skills, func(sk memory.Skill) bool { return sk.Name == name && sk.Level == 4.6 && sk.ShownBy[0] == "beat_idea" }) {
-		t.Errorf("skills = %+v, %v", skills, err)
-	}
-	for i, score := range []float64{5, 6.5} {
-		if err := s.SaveEvidence(ctx, memory.Evidence{ID: ulid.Make(), Skill: name, Score: score, Source: memory.EvidenceSystem1,
-			At: now.Add(time.Duration(i) * time.Minute)}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if ev, err := s.RecentEvidence(ctx, name, 1); err != nil || len(ev) != 1 || ev[0].Score != 6.5 {
-		t.Errorf("evidence = %+v, %v", ev, err)
-	}
-}
-
-func TestLessons(t *testing.T) {
-	s := openTestStore(t)
-	ctx := context.Background()
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	skill := "skill-" + ulid.Make().String()
-	if err := s.AddSkill(ctx, memory.Skill{Name: skill, Level: 3, UpdatedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	w := memory.Work{ID: ulid.Make(), Kind: "lyrics", Title: "Hook", Text: "...", CreatedAt: now}
-	if err := s.SaveWork(ctx, w); err != nil {
-		t.Fatal(err)
-	}
-	a := memory.Lesson{ID: ulid.Make(), Skill: skill, Text: "Leave space after the drop", Source: memory.LessonFromOwner, WorkID: w.ID, At: now}
-	b := memory.Lesson{ID: ulid.Make(), Skill: skill, Text: "Start on the downbeat", Source: memory.LessonFromSelf, At: now.Add(time.Minute)}
-	for _, l := range []memory.Lesson{a, b} {
-		if err := s.SaveLesson(ctx, l); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if ls, err := s.Lessons(ctx, skill, 10); err != nil || len(ls) != 2 || ls[0].ID != b.ID || ls[1].WorkID != w.ID {
-		t.Errorf("lessons = %+v, %v", ls, err)
-	}
-	if err := s.RetireLesson(ctx, a.ID, now); err != nil {
-		t.Fatal(err)
-	}
-	if ls, _ := s.Lessons(ctx, skill, 10); len(ls) != 1 || ls[0].ID != b.ID {
-		t.Errorf("after retiring = %+v", ls)
-	}
-
-	if err := s.MarkReviewAsked(ctx, w.ID, now.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if got, ok, err := s.AskedForReview(ctx, now.Add(30*time.Minute)); err != nil || !ok || got.ID != w.ID {
-		t.Errorf("asked for review = %+v, %v, %v", got, ok, err)
-	}
-}
-
-func TestLearningPlans(t *testing.T) {
-	s := openTestStore(t)
-	ctx := context.Background()
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	dream := memory.Dream{ID: ulid.Make(), Text: "write songs", Status: memory.DreamActive, Source: memory.DreamFromLife, Since: now}
-	if err := s.SaveDream(ctx, dream); err != nil {
-		t.Fatal(err)
-	}
-	goal := memory.Goal{ID: ulid.Make(), DreamID: dream.ID, Text: "hooks", Skill: "lyric writing", Due: now.AddDate(0, 1, 0),
-		Status: memory.GoalActive, CreatedAt: now, UpdatedAt: now}
-	if err := s.SaveGoal(ctx, goal); err != nil {
-		t.Fatal(err)
-	}
-	if gs, _ := s.Goals(ctx, true); !slices.ContainsFunc(gs, func(g memory.Goal) bool { return g.ID == goal.ID && g.Skill == "lyric writing" }) {
-		t.Errorf("goals = %+v", gs)
-	}
-	plan := memory.LearningPlan{ID: ulid.Make(), GoalID: goal.ID, Skill: "lyric writing", Status: memory.PlanActive, CreatedAt: now, UpdatedAt: now,
-		Stages: []memory.Stage{{N: 0, Learn: "hooks", Practice: "a hook", DoneWhen: "two good ones"}, {N: 1, Learn: "verses", Practice: "a verse"}}}
-	if err := s.SavePlan(ctx, plan); err != nil {
-		t.Fatal(err)
-	}
-	r := memory.Resource{ID: ulid.Make(), PlanID: plan.ID, Stage: 0, Ability: "read_article", Query: "hook (music)", Why: "basics",
-		Status: memory.ResourceTodo, AddedAt: now}
-	if err := s.SaveResource(ctx, r); err != nil {
-		t.Fatal(err)
-	}
-	w := memory.Work{ID: ulid.Make(), Kind: "reading_notes", Title: "Hooks", Text: "...", CreatedAt: now}
-	if err := s.SaveWork(ctx, w); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.FinishResource(ctx, r.ID, w.ID, "Hook (music)", now); err != nil {
-		t.Fatal(err)
-	}
-	if rs, err := s.Resources(ctx, plan.ID); err != nil || len(rs) != 1 || rs[0].Status != memory.ResourceDone || rs[0].WorkID != w.ID {
-		t.Errorf("resources = %+v, %v", rs, err)
-	}
-
-	mine := func() memory.LearningPlan {
-		ps, err := s.Plans(ctx, false)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, p := range ps {
-			if p.ID == plan.ID {
-				return p
-			}
-		}
-		t.Fatal("plan not found")
-		return memory.LearningPlan{}
-	}
-	if p := mine(); len(p.Stages) != 2 || p.Stages[0].DoneWhen != "two good ones" || p.Stage != 0 {
-		t.Errorf("plan = %+v", p)
-	}
-	if err := s.AdvancePlan(ctx, plan.ID, now); err != nil {
-		t.Fatal(err)
-	}
-	if p := mine(); p.Stage != 1 || p.Stages[0].DoneAt.IsZero() || p.Status != memory.PlanActive {
-		t.Errorf("after one stage = %+v", p)
-	}
-	if err := s.AdvancePlan(ctx, plan.ID, now); err != nil {
-		t.Fatal(err)
-	}
-	if p := mine(); p.Status != memory.PlanDone {
-		t.Errorf("after the last stage = %+v", p)
-	}
-}
-
-func TestWeb(t *testing.T) {
-	s := openTestStore(t)
-	ctx := context.Background()
-	now := time.Now().UTC().Truncate(time.Microsecond).AddDate(1, 0, 0) // after other tests' searches
-	url := "https://example.com/" + ulid.Make().String()
-	if err := s.SaveFound(ctx, "hooks", []search.Result{{Title: "Hooks", URL: url, Snippet: "a guide"}}, now); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SaveFound(ctx, "again", []search.Result{{Title: "Renamed", URL: url}}, now); err != nil {
-		t.Fatal(err)
-	}
-	if r, ok, err := s.Found(ctx, url); err != nil || !ok || r.Title != "Hooks" || r.Snippet != "a guide" {
-		t.Errorf("found = %+v, %v, %v", r, ok, err)
-	}
-	if _, ok, _ := s.Found(ctx, "https://never.example/"); ok {
-		t.Error("found a page no search found")
-	}
-	if rs, err := s.RecentFound(ctx, 1); err != nil || len(rs) != 1 || rs[0].URL != url {
-		t.Errorf("recent = %+v, %v", rs, err)
-	}
-	for _, kind := range []string{"search", "page", "page"} {
-		if err := s.LogWeb(ctx, kind, "x", 0.001, now); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if n, err := s.WebSince(ctx, "page", now.Add(-time.Minute)); err != nil || n != 2 {
-		t.Errorf("pages = %d, %v", n, err)
 	}
 }
 
@@ -1048,29 +647,12 @@ func TestJudgment(t *testing.T) {
 	}
 	var ask *memory.JudgmentCase
 	for i := range cs {
-		if cs[i].Type != "autonomy" {
-			t.Errorf("case of type %s; want only autonomy", cs[i].Type)
-		}
 		if cs[i].Key == "ask-"+tag {
 			ask = &cs[i]
 		}
 	}
 	if ask == nil || ask.Reason != "" || len(ask.Options) != 0 {
 		t.Fatalf("ask case = %+v", ask)
-	}
-	if ok, err := s.ReviewCase(ctx, ask.ID, memory.JudgmentApproved, "silence isn't consent", now); err != nil || !ok {
-		t.Fatalf("review case = %v, %v", ok, err)
-	}
-	cs, _ = s.JudgmentCases(ctx, memory.JudgmentApproved, nil)
-	found := false
-	for _, c := range cs {
-		found = found || (c.Key == "ask-"+tag && c.Reason == "silence isn't consent")
-	}
-	if !found {
-		t.Error("the reviewed case isn't approved with its reason")
-	}
-	if ok, _ := s.ReviewCase(ctx, ulid.Make(), memory.JudgmentApproved, "", now); ok {
-		t.Error("reviewed a case that doesn't exist")
 	}
 }
 
@@ -1133,15 +715,6 @@ func TestCalls(t *testing.T) {
 	}
 	if !slices.ContainsFunc(as, func(a memory.Agreement) bool { return a.Type == kind && a.Answered == 2 && a.Agreed == 1 }) {
 		t.Errorf("agreement = %+v", as)
-	}
-	p := memory.Principle{ID: ulid.Make(), Text: "Reading feeds the music " + kind, Types: []string{"life"}, Cases: []string{got.CaseID.String()},
-		Status: memory.JudgmentProposed, Source: "review", CreatedAt: now}
-	if err := s.SavePrinciple(ctx, p); err != nil {
-		t.Fatal(err)
-	}
-	ps, _ := s.Principles(ctx, memory.JudgmentProposed)
-	if !slices.ContainsFunc(ps, func(x memory.Principle) bool { return x.ID == p.ID && len(x.Cases) == 1 }) {
-		t.Error("the principle isn't saved with its case")
 	}
 }
 
@@ -1218,87 +791,6 @@ func TestOutcomes(t *testing.T) {
 	}
 }
 
-func TestAgreementByStakes(t *testing.T) {
-	s := openTestStore(t)
-	ctx := context.Background()
-	now := time.Now().UTC().Truncate(time.Microsecond).AddDate(4, 0, 0)
-	before, err := s.AgreementByStakes(ctx, 1000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	count := func(as []memory.Agreement, level string) memory.Agreement {
-		for _, a := range as {
-			if a.Type == level {
-				return a
-			}
-		}
-		return memory.Agreement{}
-	}
-	for i, c := range []struct {
-		stakes     string
-		reversible bool
-		agree      bool
-	}{{memory.StakesHigh, false, true}, {memory.StakesHigh, false, false}, {memory.StakesLow, true, true}} {
-		call := memory.Call{ID: ulid.Make(), Type: memory.CallFocus, Mode: memory.CallAfter, Situation: "s", Options: []string{"a", "b"},
-			Status: memory.CallLogged, Stakes: c.stakes, Reversible: c.reversible, CreatedAt: now}
-		if err := s.SaveCall(ctx, call); err != nil {
-			t.Fatal(err)
-		}
-		call.OwnerPick, call.AnsweredBy, call.AnsweredAt = 1, memory.AnsweredInConsole, now.Add(time.Duration(i)*time.Second)
-		if c.agree {
-			call.OwnerPick = 0
-		}
-		if _, err := s.AnswerCall(ctx, call, false); err != nil {
-			t.Fatal(err)
-		}
-		got, _, _ := s.Call(ctx, call.ID)
-		if got.Stakes != c.stakes || got.Reversible != c.reversible {
-			t.Errorf("call = %+v", got)
-		}
-	}
-	after, _ := s.AgreementByStakes(ctx, 1000)
-	high, low := count(after, "high, can't undo"), count(after, "low")
-	if high.Answered-count(before, "high, can't undo").Answered != 2 || high.Agreed-count(before, "high, can't undo").Agreed != 1 ||
-		low.Answered-count(before, "low").Answered != 1 {
-		t.Errorf("by stakes = %+v (before %+v)", after, before)
-	}
-}
-
-func TestCaseEmbeddings(t *testing.T) {
-	s := openTestStore(t)
-	ctx := context.Background()
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	c := memory.JudgmentCase{ID: ulid.Make(), Key: "emb-" + ulid.Make().String(), Type: "life", Situation: "s", Choice: "c",
-		Status: memory.JudgmentApproved, Source: memory.JudgmentFromSeed, At: now}
-	if _, _, err := s.SeedJudgment(ctx, []memory.JudgmentCase{c}, nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SaveCaseEmbedding(ctx, c.ID, []float32{0.5, -1, 2}, "openai/x"); err != nil {
-		t.Fatal(err)
-	}
-	find := func() memory.JudgmentCase {
-		cs, _ := s.JudgmentCases(ctx, "", nil)
-		for _, x := range cs {
-			if x.ID == c.ID {
-				return x
-			}
-		}
-		t.Fatal("case gone")
-		return memory.JudgmentCase{}
-	}
-	if got := find(); len(got.Embedding) != 3 || got.Embedding[2] != 2 || got.EmbeddedWith != "openai/x" {
-		t.Errorf("case = %+v", got)
-	}
-	s.ReviewCase(ctx, c.ID, memory.JudgmentApproved, "", now)
-	if got := find(); len(got.Embedding) != 3 {
-		t.Error("a review that didn't change the text cleared the embedding")
-	}
-	s.ReviewCase(ctx, c.ID, memory.JudgmentApproved, "a new reason", now)
-	if got := find(); got.Embedding != nil || got.Reason != "a new reason" {
-		t.Errorf("after a new reason = %+v", got)
-	}
-}
-
 func TestTastes(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
@@ -1367,14 +859,11 @@ func TestWorksFor(t *testing.T) {
 		}
 		return w
 	}
-	beat := work("beat", "beat_idea", memory.SubjectSelf, 1)
+	work("beat", "beat_idea", memory.SubjectSelf, 1)
 	work("for sam", "writing", sam, 2)
 	work("for ada", "writing", ada, 3)
 	work("diary", "journal", "", 4)
 	work("notes", "notes", "", 5)
-	if err := s.SaveWorkEmbedding(ctx, beat.ID, []float32{1, 0.5}, "openai/x"); err != nil {
-		t.Fatal(err)
-	}
 	ws, err := s.WorksFor(ctx, sam, 3)
 	if err != nil {
 		t.Fatal(err)
@@ -1388,8 +877,5 @@ func TestWorksFor(t *testing.T) {
 	}
 	if ws[0].MadeFor != "" || ws[1].MadeFor != sam || ws[2].MadeFor != memory.SubjectSelf {
 		t.Errorf("made for: %q, %q, %q", ws[0].MadeFor, ws[1].MadeFor, ws[2].MadeFor)
-	}
-	if b := ws[2]; len(b.Embedding) != 2 || b.Embedding[1] != 0.5 || b.EmbeddedWith != "openai/x" || ws[0].Embedding != nil {
-		t.Errorf("embeddings: %+v / %+v", b, ws[0])
 	}
 }

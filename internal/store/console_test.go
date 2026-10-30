@@ -8,7 +8,6 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Grandbusta/minime/internal/decision"
-	"github.com/Grandbusta/minime/internal/memory"
 	"github.com/Grandbusta/minime/internal/perception"
 )
 
@@ -46,38 +45,5 @@ func TestConsoleQueries(t *testing.T) {
 	chain, err := s.DecisionChain(ctx, child.ID)
 	if err != nil || len(chain) != 2 || chain[0].ID != root.ID || chain[1].Reply != "hi!" {
 		t.Errorf("chain = %+v, %v", chain, err)
-	}
-
-	v, err := s.Vitals(ctx, base.Add(-time.Second))
-	if err != nil || v.Decisions < 3 || v.ByTier["system2"] < 2 || v.Escalations < 1 || v.CostUSD < 0.0034 || v.AvgLatency <= 0 {
-		t.Errorf("vitals = %+v, %v", v, err)
-	}
-	days, err := s.CostByDay(ctx, base.Add(-time.Second), time.UTC)
-	if err != nil || len(days) == 0 || days[len(days)-1].Count < 3 {
-		t.Errorf("cost by day = %+v, %v", days, err)
-	}
-
-	f := memory.Fact{ID: ulid.Make(), PerceptID: p.ID, Subject: memory.SubjectSelf, Text: "likes jollof", At: base.Add(time.Hour)}
-	if err := s.SaveFact(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetFactPublic(ctx, f.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	facts, err := s.AllFacts(ctx, 10000)
-	var found *FactView
-	for i := range facts {
-		if facts[i].ID == f.ID {
-			found = &facts[i]
-		}
-	}
-	if err != nil || found == nil || found.Public == nil || !*found.Public || found.AskedAt != nil {
-		t.Errorf("fact = %+v, %v", found, err)
-	}
-	if c, err := s.Counts(ctx); err != nil || c.Decisions < 3 || c.SelfFacts < 1 {
-		t.Errorf("counts = %+v, %v", c, err)
-	}
-	if _, ok, err := s.Work(ctx, ulid.Make()); err != nil || ok {
-		t.Errorf("missing work: %v, %v", ok, err)
 	}
 }

@@ -263,7 +263,6 @@ func (m *Mind) sendApproved(ctx context.Context, a memory.Approval, now time.Tim
 	return err
 }
 
-// approvedFile is the file an approved delivery goes with; nil if none.
 func (m *Mind) approvedFile(ctx context.Context, a memory.Approval) (*file, error) {
 	if a.Kind != perception.KindDelivery || a.Ref.IsZero() {
 		return nil, nil
@@ -276,7 +275,7 @@ func (m *Mind) approvedFile(ctx context.Context, a memory.Approval) (*file, erro
 	if err != nil || !ok {
 		return nil, err
 	}
-	return m.fileFor(i, w)
+	return m.makeFile(i.Args["as"], w)
 }
 
 func (m *Mind) finishRef(ctx context.Context, id ulid.ULID, status, result string, now time.Time) {

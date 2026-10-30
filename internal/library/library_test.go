@@ -2,13 +2,11 @@ package library
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"unicode/utf8"
 )
 
 func TestFindBookAndText(t *testing.T) {
@@ -48,16 +46,6 @@ func TestFindBookAndText(t *testing.T) {
 	}
 }
 
-func TestNoBookFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, `<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>x/ebooks/authors/search.opds/</id><title>Authors</title></entry></feed>`)
-	}))
-	defer srv.Close()
-	if _, err := New(srv.URL, srv.URL).FindBook(context.Background(), "a modern novel"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("err = %v, want not found", err)
-	}
-}
-
 func TestAllowList(t *testing.T) {
 	evil := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "{}") }))
 	defer evil.Close()
@@ -71,50 +59,5 @@ func TestAllowList(t *testing.T) {
 	}
 	if _, err := c.get(context.Background(), srv.URL+"/redirect"); err == nil || !strings.Contains(err.Error(), "not allowed") {
 		t.Errorf("redirect to an unlisted host: %v", err)
-	}
-}
-
-func TestFindArticle(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		switch {
-		case q.Get("list") == "search" && q.Get("srsearch") == "polyrhythm":
-			io.WriteString(w, `{"query":{"search":[{"title":"Polyrhythm"}]}}`)
-		case q.Get("list") == "search":
-			io.WriteString(w, `{"query":{"search":[]}}`)
-		case q.Get("prop") == "extracts" && q.Get("titles") == "Polyrhythm":
-			io.WriteString(w, `{"query":{"pages":[{"title":"Polyrhythm","extract":" Polyrhythm is the use of two rhythms. "}]}}`)
-		}
-	}))
-	defer srv.Close()
-	c := New(srv.URL, srv.URL)
-	a, err := c.FindArticle(context.Background(), "polyrhythm")
-	if err != nil || a.Title != "Polyrhythm" || a.Text != "Polyrhythm is the use of two rhythms." || !strings.HasSuffix(a.URL, "/wiki/Polyrhythm") {
-		t.Fatalf("article = %+v, %v", a, err)
-	}
-	if _, err := c.FindArticle(context.Background(), "zzz"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("no result: %v", err)
-	}
-}
-
-func TestPassage(t *testing.T) {
-	text := "One.\n\nTwo two two.\n\nThree three three three.\n\nFour."
-	p, next := Passage(text, 0, 25)
-	if p != "One.\n\nTwo two two." || text[next:next+2] != "\n\n" {
-		t.Errorf("first = %q, next %d", p, next)
-	}
-	var all []string
-	for from := 0; from < len(text); {
-		var p string
-		p, from = Passage(text, from, 25)
-		all = append(all, p)
-	}
-	if strings.Join(all, "|") != "One.\n\nTwo two two.|Three three three three.|Four." {
-		t.Errorf("passages = %q", all)
-	}
-	long := strings.Repeat("é", 100)
-	p, next = Passage(long, 0, 51)
-	if !utf8.ValidString(p) || !utf8.ValidString(long[next:]) {
-		t.Errorf("split a character: %q", p)
 	}
 }

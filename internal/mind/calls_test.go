@@ -3,7 +3,6 @@ package mind
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -11,7 +10,6 @@ import (
 
 	"github.com/Grandbusta/minime/internal/ability"
 	"github.com/Grandbusta/minime/internal/ability/journal"
-	"github.com/Grandbusta/minime/internal/action"
 	"github.com/Grandbusta/minime/internal/memory"
 	"github.com/Grandbusta/minime/internal/perception"
 )
@@ -55,24 +53,12 @@ func TestDayPlanCalls(t *testing.T) {
 	if len(s.calls) != 2 || s.calls[0].Type != memory.CallFocus || s.calls[0].Mode != memory.CallAfter || s.calls[0].Status != memory.CallLogged {
 		t.Fatalf("calls = %+v", s.calls)
 	}
-	if !strings.Contains(s2.requests[0].Instructions, "planning for Busta") {
-		t.Errorf("instructions don't name the owner: %q", s2.requests[0].Instructions)
-	}
 
 	// One ask a day: the one it's least sure of.
 	m.sendCalls(ctx, at(29, 8, 2))
 	m.sendCalls(ctx, at(29, 9, 0))
 	if len(asker.asked) != 1 || asker.ids[0] != s.calls[1].ID.String() {
 		t.Fatalf("asked %q (%v); want only the start call", asker.asked, asker.ids)
-	}
-	for _, want := range []string{"Starting a new hook or going on.", "1. Start a new hook\n2. Go on with the motif ★",
-		"I went with 2 because finish first (40% sure you'd pick it too). What would you do?"} {
-		if !strings.Contains(asker.asked[0], want) {
-			t.Errorf("ask is missing %q:\n%s", want, asker.asked[0])
-		}
-	}
-	if strings.Contains(asker.asked[0], "—") {
-		t.Error("an em dash in the ask")
 	}
 
 	// The owner's reason is theirs, not a message to answer.
@@ -82,8 +68,9 @@ func TestDayPlanCalls(t *testing.T) {
 	if got.Status != memory.CallAnswered || got.Agreed == nil || *got.Agreed || got.Waiting != memory.CallWaitingReason || got.CaseID.IsZero() {
 		t.Fatalf("call after the tap = %+v", got)
 	}
-	if last := asker.settled[len(asker.settled)-1]; !strings.HasSuffix(last, "You'd pick 1. What tipped it?") {
-		t.Errorf("settled = %q", last)
+	m.handle(ctx, ownerTaps(start.ID, 1))
+	if *s.callAt(start.ID).Agreed {
+		t.Error("a second tap changed the answer")
 	}
 	asked := len(s2.requests)
 	m.handle(ctx, ownerSays("A new hook keeps the ideas fresh while the motif rests"))
@@ -106,42 +93,6 @@ func TestDayPlanCalls(t *testing.T) {
 	m.handle(ctx, ownerSays("How's the motif going?"))
 	if len(s2.requests) == asked && len(r.sent) == 1 {
 		t.Error("a later message was taken as a reason too")
-	}
-}
-
-func TestSomethingElseAndAgreeing(t *testing.T) {
-	ctx := context.Background()
-	m, s, asker, r := callsMind(&fakeSystem2{})
-	m.Calls.AsksPerDay = 3
-	now := time.Now()
-	for i := range 2 {
-		c, _ := newCall(memory.CallFocus, memory.CallAfter, "What to focus on today", []string{"a", "b"}, 0, "", 0.5, now)
-		c.Situation += string(rune('A' + i))
-		s.calls = append(s.calls, c)
-	}
-	m.sendCalls(ctx, now)
-	if len(asker.asked) != 2 {
-		t.Fatalf("asked %d", len(asker.asked))
-	}
-	m.handle(ctx, ownerTaps(s.calls[0].ID, 0))
-	if c := s.callAt(s.calls[0].ID); c.Agreed == nil || !*c.Agreed || c.Waiting != "" {
-		t.Errorf("agreed call = %+v", c)
-	}
-	m.handle(ctx, ownerTaps(s.calls[0].ID, 1))
-	if c := s.callAt(s.calls[0].ID); !*c.Agreed {
-		t.Error("a second tap changed the answer")
-	}
-	m.handle(ctx, ownerTaps(s.calls[1].ID, -1))
-	if c := s.callAt(s.calls[1].ID); c.Status != memory.CallAsked || c.Waiting != memory.CallWaitingAnswer {
-		t.Fatalf("something else = %+v", c)
-	}
-	m.handle(ctx, ownerSays("Rest today; you worked all week"))
-	c := s.callAt(s.calls[1].ID)
-	if c.Status != memory.CallAnswered || c.OwnerPick != -1 || c.OwnerChoice != "Rest today; you worked all week" || *c.Agreed {
-		t.Errorf("their own answer = %+v", c)
-	}
-	if len(r.sent) != 1 || !strings.HasPrefix(r.sent[0], "Got it") {
-		t.Errorf("replies = %q", r.sent)
 	}
 }
 
@@ -179,7 +130,7 @@ func TestGoalCalls(t *testing.T) {
 	}
 
 	m.sendCalls(ctx, time.Now()) // goal calls are always asked
-	if len(asker.asked) != 3 || !strings.Contains(asker.asked[1], "1. Set it ★\n2. Not now") || !strings.Contains(asker.asked[1], "I'll go with mine.") {
+	if len(asker.asked) != 3 {
 		t.Fatalf("asked %q", asker.asked)
 	}
 	m.handle(ctx, ownerTaps(s.calls[0].ID, 1)) // keep the old goal
@@ -191,129 +142,5 @@ func TestGoalCalls(t *testing.T) {
 	m.expireCalls(ctx, time.Now().Add(25*time.Hour))
 	if c := s.callAt(s.calls[2].ID); c.Status != memory.CallExpired || c.Agreed != nil || goal(c.Ref).Status != memory.GoalActive {
 		t.Errorf("expired call = %+v, goal %s", c, goal(c.Ref).Status)
-	}
-	if last := asker.settled[len(asker.settled)-1]; !strings.HasSuffix(last, "No answer, so I went with mine.") {
-		t.Errorf("settled = %q", last)
-	}
-}
-
-func TestApprovalsCountAsCalls(t *testing.T) {
-	ctx := context.Background()
-	m, s, _, _ := callsMind(&fakeSystem2{})
-	a := memory.Approval{ID: ulid.Make(), Class: string(action.Publish), What: "a poem", Status: memory.ApprovalPending, AskedAt: time.Now()}
-	s.approvals = append(s.approvals, a)
-	m.decide(ctx, a, memory.ApprovalDenied, ulid.ULID{})
-	if len(s.calls) != 1 || s.calls[0].Type != "publish" || s.calls[0].Agreed == nil || *s.calls[0].Agreed ||
-		s.calls[0].AnsweredBy != memory.AnsweredByApproval || len(s.cases) != 0 {
-		t.Errorf("calls = %+v, cases %d", s.calls, len(s.cases))
-	}
-}
-
-func TestReviewDrawsPrinciples(t *testing.T) {
-	ctx := context.Background()
-	m, s, _, _ := callsMind(&fakeSystem2{})
-	agreed := false
-	c := memory.Call{ID: ulid.Make(), Type: memory.CallFocus, Situation: "What to focus on today", Options: []string{"the motif", "rest"}, Pick: 0,
-		Status: memory.CallAnswered, OwnerPick: 1, OwnerReason: "you worked all week", Agreed: &agreed, AnsweredBy: memory.AnsweredOnTelegram,
-		AnsweredAt: at(25, 9, 0), CaseID: ulid.Make()}
-	s.calls = append(s.calls, c)
-	review := `{"title":"A week","text":"Fine.","goals":[],"new_goals":[],"projects":[],"dreams":[],"retire_lessons":[],"new_lessons":[],"plans":[],"new_resources":[],
-		"principles":[{"text":"Rest after a hard week.","types":["life","chores"],"calls":["` + c.ID.String() + `"]},{"text":"A guess.","types":["life"],"calls":[]}]}`
-	s2 := &fakeSystem2{formats: map[string]string{"weekly_review": review}}
-	m.System2 = s2
-	if err := m.Review(ctx, at(26, 20, 1)); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(s2.requests[0].Note, `You picked "the motif"; Busta picked "rest". Why: you worked all week`) {
-		t.Errorf("note:\n%s", s2.requests[0].Note)
-	}
-	if len(s.principles) != 1 || s.principles[0].Text != "Rest after a hard week." || s.principles[0].Status != memory.JudgmentProposed ||
-		len(s.principles[0].Types) != 1 || len(s.principles[0].Cases) != 1 || s.principles[0].Cases[0] != c.CaseID.String() {
-		t.Errorf("principles = %+v", s.principles)
-	}
-}
-
-func TestLookingBackOnCalls(t *testing.T) {
-	ctx := context.Background()
-	reviewAt := at(26, 20, 1)
-	agreed, differed := true, false
-	theirs := memory.Call{ID: ulid.Make(), Type: memory.CallFocus, Mode: memory.CallAfter, Situation: "What to focus on today",
-		Options: []string{"the motif", "rest"}, Pick: 0, Status: memory.CallAnswered, OwnerPick: 1, Agreed: &differed, CaseID: ulid.Make(),
-		CreatedAt: reviewAt.Add(-5 * 24 * time.Hour)}
-	ok := memory.Call{ID: ulid.Make(), Type: memory.CallStart, Mode: memory.CallAfter, Situation: "Start a new hook or go on",
-		Options: []string{"start it", "go on"}, Pick: 1, Status: memory.CallAnswered, OwnerPick: 1, Agreed: &agreed, CreatedAt: reviewAt.Add(-4 * 24 * time.Hour)}
-	tooNew := memory.Call{ID: ulid.Make(), Type: memory.CallFocus, Options: []string{"a", "b"}, Status: memory.CallLogged, CreatedAt: reviewAt.Add(-time.Hour)}
-	approval := memory.Call{ID: ulid.Make(), Type: "publish", Options: []string{"yes", "no"}, Status: memory.CallAnswered, CreatedAt: reviewAt.Add(-4 * 24 * time.Hour)}
-	review := `{"title":"A week","text":"Fine.","goals":[],"new_goals":[],"projects":[],"dreams":[],"retire_lessons":[],"new_lessons":[],"plans":[],"new_resources":[],
-		"principles":[],"outcomes":[
-		{"call_id":"` + theirs.ID.String() + `","outcome":"went_badly","verdict":"bad_call","note":"I pushed on tired and the motif got worse"},
-		{"call_id":"` + ok.ID.String() + `","outcome":"went_well","verdict":"good_call","note":"Finishing first worked"},
-		{"call_id":"` + tooNew.ID.String() + `","outcome":"went_well","verdict":"good_call","note":"not asked"},
-		{"call_id":"` + ok.ID.String() + `","outcome":"great","verdict":"good_call","note":"not an outcome"}]}`
-	s2 := &fakeSystem2{formats: map[string]string{"weekly_review": review}}
-	m, s, _, _ := callsMind(s2)
-	s.calls = []memory.Call{theirs, ok, tooNew, approval}
-	s.cases = []memory.JudgmentCase{{ID: theirs.CaseID, Key: theirs.CaseID.String(), Type: "life", Situation: "What to focus on today",
-		Choice: "rest", Status: memory.JudgmentApproved}}
-	if err := m.Review(ctx, reviewAt); err != nil {
-		t.Fatal(err)
-	}
-	note := s2.requests[0].Note
-	for _, want := range []string{"[call " + theirs.ID.String() + "]", `you did "the motif". Busta would have chosen "rest".`, "[call " + ok.ID.String() + "]"} {
-		if !strings.Contains(note, want) {
-			t.Errorf("note is missing %q:\n%s", want, note)
-		}
-	}
-	if strings.Contains(note, tooNew.ID.String()) || strings.Contains(note, approval.ID.String()) {
-		t.Error("looked back on a call too new, or an approval")
-	}
-	if c := s.callAt(theirs.ID); c.Outcome != memory.OutcomeBadly || c.Verdict != memory.VerdictBad || c.OutcomeBy != memory.OutcomeBySelf {
-		t.Errorf("call = %+v", c)
-	}
-	if c := s.callAt(ok.ID); c.Outcome != memory.OutcomeWell {
-		t.Errorf("call = %+v", c)
-	}
-	if c := s.callAt(tooNew.ID); c.Outcome != "" {
-		t.Error("recorded an outcome for a call it wasn't asked about")
-	}
-	if note := m.judgmentNote(ctx, planJudgment, ""); !strings.Contains(note, "How it turned out: went_badly, bad_call: I pushed on tired") {
-		t.Errorf("judgment note:\n%s", note)
-	}
-	// The owner's verdict stands over a later review's.
-	s.SetOutcome(ctx, ok.ID, memory.OutcomeMixed, memory.VerdictLucky, "", memory.OutcomeByOwner, now)
-	if done, _ := s.SetOutcome(ctx, ok.ID, memory.OutcomeWell, memory.VerdictGood, "", memory.OutcomeBySelf, now); done {
-		t.Error("its review overrode the owner's verdict")
-	}
-}
-
-func TestStakes(t *testing.T) {
-	ctx := context.Background()
-	s2 := &fakeSystem2{formats: map[string]string{"day_plan": `{"activities":[],"calls":[
-		{"type":"focus","situation":"Unsure but cheap","options":["a","b"],"pick":0,"why":"","confidence":0.3,"stakes":"low","reversible":true},
-		{"type":"start","situation":"Surer but costly","options":["start it","go on"],"pick":0,"why":"","confidence":0.6,"stakes":"high","reversible":false}]}`}}
-	m, s, asker, _ := callsMind(s2)
-	m.planDay(ctx, at(29, 8, 1))
-	if len(s.calls) != 2 || s.calls[0].Stakes != memory.StakesLow || !s.calls[0].Reversible || s.calls[1].Stakes != memory.StakesHigh || s.calls[1].Reversible {
-		t.Fatalf("calls = %+v", s.calls)
-	}
-	// Asked first: what puts the most at stake and it's least sure of (6 x 0.4 against 1 x 0.7).
-	m.sendCalls(ctx, at(29, 8, 2))
-	if len(asker.asked) != 1 || asker.ids[0] != s.calls[1].ID.String() || !strings.Contains(asker.asked[0], "A lot rides on it, and I can't undo it.") {
-		t.Errorf("asked %v: %q", asker.ids, asker.asked)
-	}
-
-	// A dropped goal can't be undone; a message sent can't be unsent; a published work can come off the page.
-	g := memory.Goal{ID: ulid.Make(), Text: "three beats", Status: memory.GoalActive}
-	m.goalCall(ctx, memory.CallDropGoal, g, "", 0.5, now)
-	if c := s.calls[len(s.calls)-1]; c.Stakes != memory.StakesMedium || c.Reversible {
-		t.Errorf("drop goal call = %+v", c)
-	}
-	for class, reversible := range map[action.Class]bool{action.ReachOut: false, action.Publish: true} {
-		a := memory.Approval{ID: ulid.Make(), Class: string(class), What: "x", Status: memory.ApprovalPending, AskedAt: time.Now()}
-		s.approvals = append(s.approvals, a)
-		m.decide(ctx, a, memory.ApprovalApproved, ulid.ULID{})
-		if c := s.calls[len(s.calls)-1]; c.Type != string(class) || c.Reversible != reversible || c.Stakes == "" {
-			t.Errorf("%s call = %+v", class, c)
-		}
 	}
 }

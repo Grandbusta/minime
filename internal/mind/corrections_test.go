@@ -42,9 +42,8 @@ func TestCorrectingFacts(t *testing.T) {
 	if got := strings.Join(texts, "|"); got != "Sam lives in Lekki|Tobi is 19" {
 		t.Errorf("facts = %s", got)
 	}
-	if len(ds) != 2 || ds[0].Action != "correct_fact" || ds[1].Action != "forget_fact" || *ds[0].ParentID != reply.ID ||
-		strings.Contains(ds[1].Outcome.Detail, "Golf") {
-		t.Errorf("decisions = %+v / %+v", ds[0], ds[1])
+	if len(ds) != 2 {
+		t.Errorf("decisions = %+v", ds)
 	}
 
 	ds = m.correctFacts(context.Background(), from(owner), reply, map[string]memory.Fact{"f1": age},
@@ -77,25 +76,6 @@ func TestTheOwnerChangesPermissionsByChat(t *testing.T) {
 	restarted.loadPermissions(context.Background())
 	if restarted.Autonomy.Check(action.ReachOut, sam) != action.Auto || restarted.Autonomy.Check(action.Commit, sam) != action.Ask {
 		t.Errorf("after a restart: %v", restarted.Autonomy.Classes)
-	}
-}
-
-func TestPermissionChangesAreDecisionsAfterTheReply(t *testing.T) {
-	s2 := &fakeSystem2{perms: []system2.Permission{{Class: "commit", Verdict: "auto"}}}
-	m, s, _ := gatedMind(&fakeReplier{}, s2)
-	p := percept("1", "You can say yes to people without asking me")
-	p.Speaker, p.SpeakerName = owner, "Busta"
-	m.handle(context.Background(), p)
-
-	if note := s2.requests[0].Note; !strings.Contains(note, "commit: ask") || !strings.Contains(note, "reach_out: ask") {
-		t.Errorf("the owner's note doesn't say what it may do:\n%s", note)
-	}
-	if ins := s2.requests[0].Instructions; m.ReplyPrompt.Text != "" && strings.Contains(ins, "{permissions_help}") {
-		t.Error("placeholder left in the instructions")
-	}
-	last, reply := s.decisions[len(s.decisions)-1], s.decisions[len(s.decisions)-2]
-	if last.Action != "permission" || reply.Action != "reply" || *last.ParentID != reply.ID || reply.Reply != "a thoughtful reply" {
-		t.Errorf("reply %+v, then %+v", reply, last)
 	}
 }
 

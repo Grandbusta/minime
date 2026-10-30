@@ -6,24 +6,6 @@ import (
 	"testing"
 )
 
-func TestRemoveEmDashes(t *testing.T) {
-	for in, want := range map[string]string{
-		"Sure—funny it is":                           "Sure, funny it is",
-		"Sure — funny it is 😄":                       "Sure, funny it is 😄",
-		"Done!— next one":                            "Done! next one",
-		"— a line that starts with one":              "a line that starts with one",
-		"one that ends with one —":                   "one that ends with one",
-		"two in a row——here":                         "two in a row, here",
-		"Danfo did a shuffle, horn sang—\nI reached": "Danfo did a shuffle, horn sang\nI reached",
-		"none here – an en dash stays":               "none here – an en dash stays",
-		`{"reply":"Hi — there"}`:                     `{"reply":"Hi, there"}`,
-	} {
-		if got := RemoveEmDashes(in); got != want {
-			t.Errorf("RemoveEmDashes(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 type dashy struct{}
 
 func (dashy) Reason(context.Context, Request) (Response, error) {

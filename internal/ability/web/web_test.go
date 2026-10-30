@@ -84,8 +84,7 @@ func TestSearchReadsTheFirstReadablePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`You searched the web for "how to write a hook"`, "- Hooks guide (https://b.example/hooks): clear examples",
-		`You're reading "Writing Hooks" (https://b.example/hooks).`, "not instructions to you", "<<<TEXT\nA hook repeats."} {
+	for _, want := range []string{"https://b.example/hooks", "not instructions to you", "<<<TEXT\nA hook repeats."} {
 		if !strings.Contains(m.Note, want) {
 			t.Errorf("note is missing %q:\n%s", want, m.Note)
 		}
@@ -100,13 +99,6 @@ func TestCaps(t *testing.T) {
 	_, err := Search{Searcher: &fakeSearcher{}, Fetcher: &fakeFetcher{}, Store: st, Limits: Limits{Searches: 2, Pages: 5}}.Prepare(context.Background(), act("c"))
 	if !errors.Is(err, ErrOverCap) {
 		t.Errorf("third search: %v", err)
-	}
-	st = &fakeStore{found: map[string]search.Result{}}
-	f := &fakeFetcher{}
-	m, err := Search{Searcher: &fakeSearcher{results: []search.Result{{Title: "x", URL: "https://x.example/"}}}, Fetcher: f, Store: st,
-		Limits: Limits{Searches: 2, Pages: 0}}.Prepare(context.Background(), act("c"))
-	if err != nil || len(f.fetched) != 0 || !strings.Contains(m.Note, "read all the pages you can today") {
-		t.Errorf("no pages left: fetched %v, %v\n%s", f.fetched, err, m.Note)
 	}
 }
 

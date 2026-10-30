@@ -418,7 +418,7 @@ func (s *Server) workPDF(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": work.Title + ".pdf"}))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": pdf.FileName(work.Title)}))
 	w.Write(data)
 }
 

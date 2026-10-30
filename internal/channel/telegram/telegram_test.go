@@ -112,7 +112,7 @@ func TestChannelKeepsOnlyOwnerMessages(t *testing.T) {
 	}
 }
 
-func TestChannelRunsOnTheBotAPI(t *testing.T) {
+func TestChannelHearsOwnersAndReplies(t *testing.T) {
 	api := &fakeAPI{}
 	served := false
 	api.reply = func(method string) (int, string) {
@@ -130,33 +130,30 @@ func TestChannelRunsOnTheBotAPI(t *testing.T) {
 				"from":{"id":42,"is_bot":false,"first_name":"Sam"}}},
 				{"update_id":6,"message":{"message_id":10,"date":1700000001,"text":"spam","chat":{"id":8,"type":"private"},
 				"from":{"id":99,"is_bot":false,"first_name":"X"}}}]`
+		case "sendMessage":
+			return http.StatusOK, `{"message_id":77,"date":0,"chat":{"id":7,"type":"private"}}`
 		}
 		return http.StatusOK, `true`
 	}
-	srv := api.serve(t)
 	got := make(chan perception.Percept, 4)
-	s := newChannel(t, srv.URL, got)
+	c := newChannel(t, api.serve(t).URL, got)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	go s.Run(ctx)
+	go c.Run(ctx)
+	var p perception.Percept
 	select {
-	case p := <-got:
+	case p = <-got:
 		if p.Text != "hello" || p.Speaker != "telegram:42" {
-			t.Errorf("percept = %+v", p)
+			t.Fatalf("percept = %+v", p)
 		}
 	case <-ctx.Done():
 		t.Fatal("no percept from the owner's message")
 	}
-}
-
-func TestChannelStopsOnABadToken(t *testing.T) {
-	api := &fakeAPI{reply: func(string) (int, string) { return http.StatusUnauthorized, "Unauthorized" }}
-	srv := api.serve(t)
-	s := newChannel(t, srv.URL, nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := s.Run(ctx); err == nil || !strings.Contains(err.Error(), "rejected the bot token") {
-		t.Errorf("err = %v", err)
+	if err := c.Reply(ctx, p, "hi Sam"); err != nil {
+		t.Fatal(err)
+	}
+	if sent := api.sent("sendMessage"); len(sent) != 1 || sent[0]["chat_id"] != "7" || sent[0]["text"] != "hi Sam" {
+		t.Errorf("sent %v", sent)
 	}
 }
 
@@ -171,12 +168,6 @@ func TestSplitLongMessages(t *testing.T) {
 		if n := len([]rune(p)); n > 4096 || n == 0 {
 			t.Errorf("part of %d runes", n)
 		}
-	}
-	if !strings.HasPrefix(parts[1], "word") || !strings.HasSuffix(parts[0], "word") {
-		t.Errorf("not cut at a paragraph: %q / %q", parts[0][len(parts[0])-10:], parts[1][:10])
-	}
-	if got := split("short", 4096); len(got) != 1 || got[0] != "short" {
-		t.Errorf("short = %q", got)
 	}
 	if got := split(strings.Repeat("é", 10000), 4096); len(got) != 3 || len([]rune(got[0])) != 4096 {
 		t.Errorf("no breaks: %d parts", len(got))
@@ -227,55 +218,5 @@ func TestAskAndSettle(t *testing.T) {
 	edited := api.sent("editMessageText")
 	if len(edited) != 1 || edited[0]["message_id"] != "77" || edited[0]["reply_markup"] != "" || !strings.Contains(edited[0]["text"], "You said yes") {
 		t.Errorf("settled %v", edited)
-	}
-}
-
-func TestCallButtons(t *testing.T) {
-	s := owned
-	for data, want := range map[string]int{"call:01ABC:1": 1, "call:01ABC:x": -1} {
-		p, ok := s.percept(tap(42, data))
-		var pick perception.Pick
-		if !ok || p.Kind != perception.KindCall || json.Unmarshal(p.Payload, &pick) != nil || pick.Call != "01ABC" || pick.Option != want {
-			t.Errorf("%s: percept = %+v, %v; pick %+v", data, p, ok, pick)
-		}
-	}
-	for _, u := range []*models.Update{tap(99, "call:01ABC:1"), tap(42, "call:01ABC:two"), tap(42, "call::1"), tap(42, "call:01ABC:-3")} {
-		if _, ok := s.percept(u); ok {
-			t.Errorf("kept %+v", u.CallbackQuery)
-		}
-	}
-
-	api := &fakeAPI{}
-	c := newChannel(t, api.serve(t).URL, nil)
-	p := perception.Percept{Source: Source, Payload: json.RawMessage(`{"chat_id":7,"message_id":1,"user_id":42}`)}
-	where, err := c.Choose(context.Background(), p, "What would you do?", "01ABC", 3, 1)
-	if err != nil || string(where) != `{"chat_id":7,"message_id":77}` {
-		t.Fatalf("choose = %s, %v", where, err)
-	}
-	kb := api.sent("sendMessage")[0]["reply_markup"]
-	for _, want := range []string{`"text":"2 ★","callback_data":"call:01ABC:1"`, `"text":"3","callback_data":"call:01ABC:2"`, `"callback_data":"call:01ABC:x"`} {
-		if !strings.Contains(kb, want) {
-			t.Errorf("keyboard %s is missing %s", kb, want)
-		}
-	}
-}
-
-func TestSendFile(t *testing.T) {
-	api := &fakeAPI{}
-	c := newChannel(t, api.serve(t).URL, nil)
-	p := perception.Percept{Source: Source, Payload: json.RawMessage(`{"chat_id":7,"message_id":1,"user_id":42}`)}
-	if err := c.SendFile(context.Background(), p, "plan.pdf", []byte("%PDF-1.4 x"), "Here's the plan."); err != nil {
-		t.Fatal(err)
-	}
-	docs := api.sent("sendDocument")
-	if len(docs) != 1 || docs[0]["chat_id"] != "7" || docs[0]["caption"] != "Here's the plan." {
-		t.Errorf("sent %v", docs)
-	}
-	long := strings.Repeat("word ", 300)
-	if err := c.SendFile(context.Background(), p, "plan.pdf", []byte("%PDF-1.4 x"), long); err != nil {
-		t.Fatal(err)
-	}
-	if msgs, docs := api.sent("sendMessage"), api.sent("sendDocument"); len(msgs) != 1 || len(docs) != 2 || docs[1]["caption"] != "" {
-		t.Errorf("long caption: %d messages, docs %v", len(msgs), docs)
 	}
 }

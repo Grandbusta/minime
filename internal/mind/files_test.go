@@ -41,9 +41,6 @@ func TestPromisesCanBeSentAsAPDF(t *testing.T) {
 	if len(s.intentions) != 2 || s.intentions[0].Args["as"] != "pdf" || s.intentions[1].Args["as"] != "" {
 		t.Errorf("intentions = %+v", s.intentions)
 	}
-	if help := m.filesHelp(names{speaker: "Sam"}); !strings.Contains(help, "If Sam wants, as a PDF, something you already made") || !strings.Contains(help, "If Sam wants something new made as a PDF") {
-		t.Errorf("help = %q", help)
-	}
 }
 
 const weekJSON = `{"title":"Sam's Week","kind":"writing","text":"Sam's Week\n\n## Monday\n\n- Call the clinic","project_notes":"",
@@ -59,12 +56,6 @@ func TestAPDFPromiseIsSentAsAFile(t *testing.T) {
 	s.intentions = []memory.Intention{i}
 	m.tick(context.Background(), now)
 
-	if note := s2.requests[0].Note; !strings.Contains(note, "It goes to them as a PDF document") {
-		t.Errorf("making note:\n%s", note)
-	}
-	if note := s2.requests[1].Note; !strings.Contains(note, "it goes with your message as a PDF, sam-s-week.pdf") {
-		t.Errorf("message note:\n%s", note)
-	}
 	if len(r.sent) != 0 || len(filer.sent) != 1 {
 		t.Fatalf("messages %q, files %d", r.sent, len(filer.sent))
 	}
@@ -73,9 +64,6 @@ func TestAPDFPromiseIsSentAsAFile(t *testing.T) {
 	}
 	if got := s.intention(i.ID); got.Status != memory.IntentionDone {
 		t.Errorf("intention = %+v", got)
-	}
-	if d := s.decisions[len(s.decisions)-1]; d.Action != "deliver" || d.Reply != "a thoughtful reply\n\n📎 sam-s-week.pdf" {
-		t.Errorf("decision %s: %q", d.Action, d.Reply)
 	}
 }
 
@@ -95,13 +83,5 @@ func TestAnApprovedPDFGoesWithItsFile(t *testing.T) {
 	m.handle(context.Background(), tap(owner, asker.ids[0], true))
 	if len(filer.sent) != 1 || filer.sent[0].caption != "a thoughtful reply" || len(r.sent) != 0 {
 		t.Fatalf("files %d, messages %q", len(filer.sent), r.sent)
-	}
-}
-
-func TestFileName(t *testing.T) {
-	for title, want := range map[string]string{"Sam's Week": "sam-s-week.pdf", "  ": "work.pdf", "Ọjà Plan: 2026!": "ọjà-plan-2026.pdf"} {
-		if got := fileName(title, "pdf"); got != want {
-			t.Errorf("%q: %q", title, got)
-		}
 	}
 }

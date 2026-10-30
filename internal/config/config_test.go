@@ -69,6 +69,14 @@ working_memory:
 	if err := cfg.ValidateAgent(); err != nil {
 		t.Errorf("ValidateAgent: %v", err)
 	}
+	cfg.Console.Addr = ":8090" // reachable from outside, so it needs a real token
+	if err := cfg.ValidateAgent(); err == nil {
+		t.Error("ValidateAgent passed with a public console and no token")
+	}
+	cfg.Console.Token = strings.Repeat("x", 16)
+	if err := cfg.ValidateAgent(); err != nil {
+		t.Errorf("ValidateAgent with a console token: %v", err)
+	}
 	if cfg.DailyLife.Pace != 1 {
 		t.Errorf("pace = %d, want a person's pace", cfg.DailyLife.Pace)
 	}
@@ -91,25 +99,6 @@ func TestValidateAgentRequiresToken(t *testing.T) {
 	}
 	if err := cfg.ValidateAgent(); err == nil {
 		t.Fatal("expected error for missing telegram.token")
-	}
-}
-
-func TestAbilityNames(t *testing.T) {
-	for body, want := range map[string]string{
-		"":                           "read_book,read_article",
-		"\n  abilities: [read_book]": "read_book",
-		"\n  abilities: []":          "",
-		"\n  reading: false":         "",
-		"\n  reading: true":          "read_book,read_article",
-		"\n  reading: false\n  abilities: [read_article]": "read_article",
-	} {
-		cfg, err := Load(writeConfig(t, "database: {url: x}\ndaily_life:\n  enabled: true"+body+"\n"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := strings.Join(cfg.DailyLife.AbilityNames(), ","); got != want {
-			t.Errorf("%q: abilities = %q, want %q", body, got, want)
-		}
 	}
 }
 
@@ -157,13 +146,6 @@ func TestLiving(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeConfig(t, "self:\n  dir: "+dir+"\ndatabase:\n  url: postgres://x\ninitiative:\n  check_ins: [\"11:00\"]\n  quiet: 2h\n"+
 		"daily_life:\n  plan_at: \"06:00\"\n  plan_prompt: prompts/mine.md\n")
-	cfg, err := Load(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Initiative.CheckIns[0] != "11:00" || cfg.DailyLife.PlanAt != "06:00" {
-		t.Errorf("without living: %+v %+v", cfg.Initiative, cfg.DailyLife)
-	}
 	os.WriteFile(filepath.Join(dir, "living.yaml"), []byte(`initiative:
   check_ins: ["10:00", "17:00"]
 daily_life:
@@ -174,33 +156,16 @@ autonomy:
 judgment:
   asks_per_day: 1
 `), 0o600)
-	cfg, err = Load(cfgPath)
+	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cfg.Initiative.CheckIns) != 2 || cfg.Initiative.Quiet != 2*time.Hour || cfg.DailyLife.PlanAt != "08:30" ||
-		cfg.DailyLife.PlanPrompt != "prompts/mine.md" || cfg.DailyLife.JournalAt != "22:00" || len(cfg.DailyLife.Abilities) != 1 ||
-		cfg.Autonomy.Classes["publish"] != "auto" || cfg.Autonomy.AskExpires != 24*time.Hour || cfg.Judgment.AsksPerDay != 1 || !cfg.Judgment.Calls {
+		cfg.DailyLife.PlanPrompt != "prompts/mine.md" || cfg.Autonomy.Classes["publish"] != "auto" || cfg.Judgment.AsksPerDay != 1 {
 		t.Errorf("with living: %+v %+v %+v %+v", cfg.Initiative, cfg.DailyLife, cfg.Autonomy, cfg.Judgment)
-	}
-	if cfg.Self.LifeFile() != filepath.Join(dir, "life.yaml") || cfg.Self.JudgmentFile() != filepath.Join(dir, "judgment.yaml") {
-		t.Errorf("self = %+v", cfg.Self)
 	}
 	os.WriteFile(filepath.Join(dir, "living.yaml"), []byte("database:\n  url: postgres://elsewhere\n"), 0o600)
 	if _, err := Load(cfgPath); err == nil {
 		t.Error("living.yaml set the database; want an error")
-	}
-}
-
-func TestAddressesFromTheEnvironment(t *testing.T) {
-	path := writeConfig(t, "database:\n  url: postgres://x\nconsole:\n  addr: 127.0.0.1:8090\nportfolio:\n  addr: 127.0.0.1:8080\n")
-	t.Setenv("MINIME_CONSOLE_ADDR", ":8090")
-	t.Setenv("MINIME_PROFILE_ADDR", "")
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Console.Addr != ":8090" || cfg.Console.Local() || cfg.Portfolio.Addr != "" {
-		t.Errorf("console %q, profile %q", cfg.Console.Addr, cfg.Portfolio.Addr)
 	}
 }

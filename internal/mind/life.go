@@ -655,6 +655,13 @@ func (m *Mind) finishLife(ctx context.Context, d *decision.Decision, start time.
 
 func orNone(s string) string { return orDefault(s, "(no notes yet)") }
 
+func cutRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
+}
+
 func orDefault(s, def string) string {
 	if s = strings.TrimSpace(s); s != "" {
 		return s

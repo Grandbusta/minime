@@ -146,7 +146,7 @@ func (m *Mind) keepPromise(ctx context.Context, i memory.Intention, now time.Tim
 	n := m.namesFor(p)
 	s := speech{action: "deliver", attachment: titled(w), trim: firstParagraph, ref: i.ID}
 	goes := "it goes right after your message, word for word"
-	f, err := m.fileFor(i, w)
+	f, err := m.makeFile(i.Args["as"], w)
 	if err != nil {
 		log.Error("making the file failed; it goes as a message", "err", err)
 	}

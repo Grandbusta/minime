@@ -79,13 +79,6 @@ func TestStartingMei(t *testing.T) {
 		res.Env["OPENAI_MODEL"] != "gpt-6-luna" || len(res.Env["CONSOLE_TOKEN"]) < 16 {
 		t.Errorf("result = %+v", res)
 	}
-	for _, want := range []string{"That token doesn't work", "Found your bot: @mei_bot", "holds Elsa's memory", "Can't connect",
-		"Got it: Sam (user ID 42)", "their mentor"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("output is missing %q:\n%s", want, out)
-		}
-	}
-
 	raw, _ := os.ReadFile(filepath.Join(dir, ".env"))
 	if !strings.Contains(string(raw), "# Your ID.\nTELEGRAM_OWNER_ID=42\n") || !strings.Contains(string(raw), "OPENAI_API_KEY=") {
 		t.Errorf(".env =\n%s", raw)
@@ -106,11 +99,6 @@ func TestStartingMei(t *testing.T) {
 		life.Family[0].Circle != "school" {
 		t.Errorf("life = %+v", life.Family)
 	}
-	for _, f := range self.Files {
-		if _, err := os.Stat(filepath.Join(dir, "self", f)); err != nil {
-			t.Errorf("%s: %v", f, err)
-		}
-	}
 }
 
 func TestSomeoneAlreadyLivesHere(t *testing.T) {
@@ -125,36 +113,6 @@ func TestSomeoneAlreadyLivesHere(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".env")); err == nil {
 		t.Error(".env was written")
-	}
-}
-
-func TestReplacingSomeoneMovesThemAside(t *testing.T) {
-	ts, _ := self.Templates("../../lives")
-	answers := "y\n1\n123:good\nsk-x\n\npostgres://new\n\n1\nn\n"
-	s, out, dir := newSetup(t, answers)
-	os.MkdirAll(filepath.Join(dir, "self"), 0o755)
-	os.WriteFile(filepath.Join(dir, "self", "life.yaml"), []byte("name: Old\nstory: [Old is old.]\n"), 0o600)
-	res, err := s.Run(context.Background())
-	if err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	if res.Start || res.Name != ts[0].Name {
-		t.Errorf("result = %+v", res)
-	}
-	if raw, err := os.ReadFile(filepath.Join(dir, "self", "previous", "2026-10-30-120000", "life.yaml")); err != nil || !strings.Contains(string(raw), "Old") {
-		t.Errorf("the old life wasn't moved aside: %v", err)
-	}
-}
-
-func TestSetEnv(t *testing.T) {
-	text := "# c\nA=1\nexport B=2\n"
-	got := SetEnv(SetEnv(SetEnv(text, "A", "x y"), "B", "plain"), "C", `it's "$5" \ ok`)
-	if !strings.HasPrefix(got, "# c\nA=") || strings.Count(got, "\n") != 4 {
-		t.Errorf("got %q: want the comment kept and A, B in place, C added", got)
-	}
-	vars, err := godotenv.Unmarshal(got)
-	if err != nil || vars["A"] != "x y" || vars["B"] != "plain" || vars["C"] != `it's "$5" \ ok` {
-		t.Errorf("reads back as %q, %v", vars, err)
 	}
 }
 

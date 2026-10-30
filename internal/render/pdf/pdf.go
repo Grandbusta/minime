@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/signintech/gopdf"
 	"github.com/yuin/goldmark"
@@ -136,7 +137,6 @@ func (w *writer) rule(left float64) {
 	w.pdf.Line(left, w.y, pageW-margin, w.y)
 }
 
-// lines writes s wrapped to width from x, in grey if grey > 0.
 func (w *writer) lines(s string, f font, size, x, width float64, grey uint8) error {
 	s = w.clean(s, f)
 	if strings.TrimSpace(s) == "" {
@@ -312,7 +312,6 @@ func (w *writer) table(t *east.Table, left, width float64) error {
 	return nil
 }
 
-// inline is the plain text of n's inline children.
 func (w *writer) inline(n ast.Node) string {
 	var b strings.Builder
 	var walk func(ast.Node)
@@ -338,21 +337,45 @@ func (w *writer) inline(n ast.Node) string {
 	return b.String()
 }
 
-// clean swaps characters f can't draw for a stand-in, or leaves them out.
 func (w *writer) clean(s string, f font) string {
 	g := w.glyphs[f.name]
 	var buf sfnt.Buffer
 	var b strings.Builder
 	for _, r := range s {
-		if r == '\n' || r == '\t' {
-			b.WriteRune(map[rune]rune{'\n': '\n', '\t': ' '}[r])
-			continue
-		}
-		if i, err := g.GlyphIndex(&buf, r); err == nil && i != 0 {
+		switch i, err := g.GlyphIndex(&buf, r); {
+		case r == '\n':
 			b.WriteRune(r)
-			continue
+		case r == '\t':
+			b.WriteRune(' ')
+		case err == nil && i != 0:
+			b.WriteRune(r)
+		default:
+			b.WriteString(substitutes[r])
 		}
-		b.WriteString(substitutes[r])
 	}
 	return b.String()
+}
+
+// FileName is title as a file name, like "clinic-outreach-plan.pdf".
+func FileName(title string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(title) {
+		if b.Len() >= 60 {
+			break
+		}
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			dash = true
+			continue
+		}
+		if dash && b.Len() > 0 {
+			b.WriteByte('-')
+		}
+		b.WriteRune(r)
+		dash = false
+	}
+	if b.Len() == 0 {
+		return "work.pdf"
+	}
+	return b.String() + ".pdf"
 }

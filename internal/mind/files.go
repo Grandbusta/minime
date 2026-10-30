@@ -3,9 +3,6 @@ package mind
 import (
 	"context"
 	"fmt"
-	"slices"
-	"strings"
-	"unicode"
 
 	"github.com/Grandbusta/minime/internal/memory"
 	"github.com/Grandbusta/minime/internal/perception"
@@ -13,7 +10,7 @@ import (
 	"github.com/Grandbusta/minime/internal/render/pdf"
 )
 
-// asPDF is a promise sent as a PDF document instead of a message.
+// asPDF is the one file it can send things as; "" means a message.
 const asPDF = "pdf"
 
 type Filer interface {
@@ -25,15 +22,7 @@ type file struct {
 	data []byte
 }
 
-// formats is what it can send a promise as besides a message.
-func (m *Mind) formats() []string {
-	if m.Filer == nil {
-		return nil
-	}
-	return []string{asPDF}
-}
-
-func (m *Mind) canSendAs(as string) bool { return as != "" && slices.Contains(m.formats(), as) }
+func (m *Mind) canSendAs(as string) bool { return m.Filer != nil && as == asPDF }
 
 func (m *Mind) filesHelp(n names) string {
 	if !m.canSendAs(asPDF) {
@@ -46,7 +35,6 @@ func (m *Mind) filesHelp(n names) string {
 		`Otherwise leave "as" and send empty.`, n.speaker)
 }
 
-// fileNote tells System 2, making a promise, how it will be sent.
 func fileNote(i memory.Intention) string {
 	if i.Args["as"] != asPDF {
 		return ""
@@ -55,21 +43,16 @@ func fileNote(i memory.Intention) string {
 		"use Markdown headings, and lists or tables where they help; no chat talk around it."
 }
 
-// fileFor is the file promise i is sent as; nil if it goes as a message.
-func (m *Mind) fileFor(i memory.Intention, w memory.Work) (*file, error) {
-	return m.makeFile(i.Args["as"], w)
-}
-
 // makeFile is w as a file; nil if it can't send it as one.
 func (m *Mind) makeFile(as string, w memory.Work) (*file, error) {
-	if !m.canSendAs(as) || as != asPDF {
+	if !m.canSendAs(as) {
 		return nil, nil
 	}
 	data, err := pdf.Render(pdf.Doc{Title: w.Title, Author: m.Life.Name, Text: w.Text, At: w.CreatedAt})
 	if err != nil {
 		return nil, fmt.Errorf("pdf: %w", err)
 	}
-	return &file{name: fileName(w.Title, asPDF), data: data}, nil
+	return &file{name: pdf.FileName(w.Title), data: data}, nil
 }
 
 func (m *Mind) send(ctx context.Context, p perception.Percept, text string, f *file) error {
@@ -82,7 +65,6 @@ func (m *Mind) send(ctx context.Context, p perception.Percept, text string, f *f
 // attachedLine marks, in what was said, the file that went with it.
 func attachedLine(name string) string { return "\n\n📎 " + name }
 
-// sendWith is the file a reply goes with: a work in its note, by ref; nil if none.
 func (m *Mind) sendWith(p perception.Percept, s system2.Send, refs map[string]memory.Work) *file {
 	if s.Work == "" {
 		return nil
@@ -100,26 +82,4 @@ func (m *Mind) sendWith(p perception.Percept, s system2.Send, refs map[string]me
 	}
 	log.Info("sending a work with the reply", "title", w.Title, "file", f.name)
 	return f
-}
-
-// fileName is title as a file name, like "clinic-outreach-plan.pdf".
-func fileName(title, ext string) string {
-	var b strings.Builder
-	dash := false
-	for _, r := range strings.ToLower(title) {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			if dash && b.Len() > 0 {
-				b.WriteByte('-')
-			}
-			b.WriteRune(r)
-			dash = false
-		default:
-			dash = true
-		}
-		if b.Len() >= 60 {
-			break
-		}
-	}
-	return orDefault(b.String(), "work") + "." + ext
 }
