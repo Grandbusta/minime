@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -62,12 +63,14 @@ type Store interface {
 	Principles(ctx context.Context, status string) ([]memory.Principle, error)
 	JudgmentCases(ctx context.Context, status string, types []string) ([]memory.JudgmentCase, error)
 	ReviewPrinciple(ctx context.Context, id ulid.ULID, status, text string, at time.Time) (bool, error)
+	RankPriority(ctx context.Context, id ulid.ULID, rank int, at time.Time) (bool, error)
 	ReviewCase(ctx context.Context, id ulid.ULID, status, reason string, at time.Time) (bool, error)
 	RecentCalls(ctx context.Context, status string, limit int) ([]memory.Call, error)
 	Agreement(ctx context.Context, n int) ([]memory.Agreement, error)
 	Call(ctx context.Context, id ulid.ULID) (memory.Call, bool, error)
 	AnswerCall(ctx context.Context, c memory.Call, asCase bool) (bool, error)
 	GiveCallReason(ctx context.Context, id ulid.ULID, reason string, at time.Time) error
+	SetOutcome(ctx context.Context, id ulid.ULID, outcome, verdict, note, by string, at time.Time) (bool, error)
 }
 
 // agreementOver is how many of the latest answered calls of a type its
@@ -112,6 +115,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/judgment", s.judgment)
 	mux.HandleFunc("POST /api/judgment", s.reviewJudgment)
 	mux.HandleFunc("POST /api/judgment/calls", s.gradeCall)
+	mux.HandleFunc("POST /api/judgment/outcomes", s.judgeOutcome)
 	return s.auth(headers(mux))
 }
 
@@ -610,7 +614,7 @@ func (s *Server) judgment(w http.ResponseWriter, r *http.Request) {
 	}
 	pv := make([]map[string]any, len(ps))
 	for i, p := range ps {
-		pv[i] = map[string]any{"id": p.ID.String(), "text": p.Text, "types": nonNil(p.Types), "status": p.Status, "source": p.Source,
+		pv[i] = map[string]any{"id": p.ID.String(), "text": p.Text, "kind": p.Kind, "rank": p.Rank, "types": nonNil(p.Types), "status": p.Status, "source": p.Source,
 			"edited": p.Seed != "" && p.Seed != p.Text, "cases": nonNil(p.Cases), "updated_at": p.UpdatedAt}
 	}
 	cv := make([]map[string]any, len(cs))
@@ -630,7 +634,8 @@ func (s *Server) judgment(w http.ResponseWriter, r *http.Request) {
 	for i, c := range calls {
 		v := map[string]any{"id": c.ID.String(), "type": c.Type, "mode": c.Mode, "situation": c.Situation, "options": nonNil(c.Options),
 			"pick": c.Pick, "why": c.Why, "confidence": c.Confidence, "status": c.Status, "waiting": c.Waiting, "created_at": c.CreatedAt,
-			"answered_by": c.AnsweredBy, "owner_choice": c.OwnerChoice, "owner_reason": c.OwnerReason, "agreed": c.Agreed}
+			"answered_by": c.AnsweredBy, "owner_choice": c.OwnerChoice, "owner_reason": c.OwnerReason, "agreed": c.Agreed,
+			"outcome": c.Outcome, "verdict": c.Verdict, "outcome_note": c.OutcomeNote, "outcome_by": c.OutcomeBy}
 		if c.Agreed != nil {
 			v["owner_pick"] = c.OwnerPick
 		}
@@ -721,6 +726,7 @@ func (s *Server) reviewJudgment(w http.ResponseWriter, r *http.Request) {
 		ID     string `json:"id"`
 		Status string `json:"status"`
 		Text   string `json:"text"` // a principle's new text, or a decision's reason; empty keeps it
+		Rank   int    `json:"rank"` // a priority's new place, 1 first; 0 keeps it
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&in); err != nil {
 		http.Error(w, "bad review", http.StatusBadRequest)
@@ -741,6 +747,9 @@ func (s *Server) reviewJudgment(w http.ResponseWriter, r *http.Request) {
 	switch in.Kind {
 	case "principle":
 		found, err = s.Store.ReviewPrinciple(r.Context(), id, in.Status, in.Text, time.Now().UTC())
+		if err == nil && found && in.Rank > 0 {
+			found, err = s.Store.RankPriority(r.Context(), id, in.Rank, time.Now().UTC())
+		}
 	case "case":
 		found, err = s.Store.ReviewCase(r.Context(), id, in.Status, in.Text, time.Now().UTC())
 	default:
@@ -752,6 +761,42 @@ func (s *Server) reviewJudgment(w http.ResponseWriter, r *http.Request) {
 	}
 	if !found {
 		http.NotFound(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// judgeOutcome records how one of its calls turned out, as the owner sees
+// it: it stands over what its review said.
+func (s *Server) judgeOutcome(w http.ResponseWriter, r *http.Request) {
+	if !fromConsole(w, r) {
+		return
+	}
+	var in struct {
+		ID      string `json:"id"`
+		Outcome string `json:"outcome"`
+		Verdict string `json:"verdict"`
+		Note    string `json:"note"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&in); err != nil {
+		http.Error(w, "bad outcome", http.StatusBadRequest)
+		return
+	}
+	id, err := ulid.Parse(in.ID)
+	in.Note = strings.TrimSpace(in.Note)
+	if err != nil || !slices.Contains(memory.Outcomes, in.Outcome) || !slices.Contains(memory.Verdicts, in.Verdict) || len([]rune(in.Note)) > 1000 {
+		http.Error(w, "bad outcome", http.StatusBadRequest)
+		return
+	}
+	c, ok, err := s.Store.Call(r.Context(), id)
+	if s.failed(w, err) {
+		return
+	}
+	if !ok || c.Status == memory.CallAsked {
+		http.Error(w, "no such call to judge", http.StatusNotFound)
+		return
+	}
+	if _, err := s.Store.SetOutcome(r.Context(), id, in.Outcome, in.Verdict, in.Note, memory.OutcomeByOwner, time.Now().UTC()); s.failed(w, err) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

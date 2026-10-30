@@ -974,13 +974,22 @@ function renderJudgment() {
   $("#jFilter").innerHTML = Object.keys(J_STATUS).map((s) => `<button class="chip ${s === jFilter ? "on" : ""}" data-f="${s}">${J_STATUS[s]} · ${count(s)}</button>`).join("");
   const byKey = Object.fromEntries(judgment.cases.map((c) => [c.key, c]));
   const ps = judgment.principles.filter(jShown), cs = judgment.cases.filter(jShown);
-  $("#principles").innerHTML = ps.length ? ps.map((p) => `<div class="jp st-${esc(p.status)}">
-      <div class="jtop"><b>${p.types.map(esc).join(" · ") || "any decision"}</b><span>${esc(J_STATUS[p.status] || p.status)}${p.edited ? " · edited" : ""}</span></div>
+  const pHTML = (p) => `<div class="jp st-${esc(p.status)} k-${esc(p.kind)}">
+      <div class="jtop"><b>${p.kind === "priority" ? "priority " + p.rank : p.kind === "boundary" ? "never" : p.types.map(esc).join(" · ") || "any decision"}</b><span>${esc(J_STATUS[p.status] || p.status)}${p.edited ? " · edited" : ""}</span></div>
       <h3>${esc(p.text)}</h3>
       ${jButtons("principle", p)}
+      ${p.kind === "priority" ? `<div class="jbtns jrank"><button class="jb" data-kind="principle" data-id="${esc(p.id)}" data-rank="${p.rank - 1}" ${p.rank <= 1 ? "disabled" : ""}>↑ higher</button><button class="jb" data-kind="principle" data-id="${esc(p.id)}" data-rank="${p.rank + 1}">↓ lower</button></div>` : ""}
       ${p.cases.length ? `<details><summary>${p.cases.length} decision${p.cases.length > 1 ? "s" : ""} behind it</summary>
         ${p.cases.map((k) => byKey[k] ? caseHTML(byKey[k], true) : "").join("")}</details>` : ""}
-    </div>`).join("") : `<div class="empty">${judgment.principles.length ? "nothing " + J_STATUS[jFilter] : "no principles yet: add some to self/judgment.yaml"}</div>`;
+    </div>`;
+  const group = (kind, title, note) => {
+    const g = ps.filter((p) => (p.kind || "principle") === kind);
+    return g.length ? `<div class="jgroup"><div class="jgroup-h">${title} <span>${note}</span></div>${g.map(pHTML).join("")}</div>` : "";
+  };
+  $("#principles").innerHTML = ps.length ? group("boundary", "BOUNDARIES", "never, whatever the gain")
+    + group("priority", "PRIORITIES", "most important first; the higher wins when rules clash")
+    + group("principle", "RULES", "drawn from your decisions")
+    : `<div class="empty">${judgment.principles.length ? "nothing " + J_STATUS[jFilter] : "no principles yet: add some to self/judgment.yaml"}</div>`;
   $("#cases").innerHTML = cs.length ? cs.map((c) => caseHTML(c, false)).join("")
     : `<div class="empty">${judgment.cases.length ? "nothing " + J_STATUS[jFilter] : "no decisions yet: add some to self/judgment.yaml"}</div>`;
 }
@@ -1003,7 +1012,22 @@ function callHTML(c) {
     ${gradable ? `<div class="jgrade"><span>you'd pick</span>${c.options.map((o, i) => `<button class="jb" data-opt="${i}">${i + 1}</button>`).join("")}
       <button class="jb" data-opt="-1">something else</button></div>` : ""}
     ${c.agreed === false && !c.owner_reason && c.answered_by !== "approval" ? `<div class="jbtns"><button class="jb" data-why="1">add your why</button></div>` : ""}
+    ${c.outcome ? `<p class="jout v-${esc(c.verdict)}">turned out: <b>${esc(c.outcome.replace(/_/g, " "))}</b> · <i>${esc(VERDICTS[c.verdict] || c.verdict)}</i>
+      <em>${c.outcome_by === "owner" ? "your verdict" : "his verdict"}</em>${c.outcome_note ? `<br>${esc(c.outcome_note)}` : ""}</p>` : ""}
+    ${c.status !== "asked" && (c.outcome || Date.now() - new Date(c.created_at) > 2 * 864e5) ? `<div class="jbtns"><button class="jb" data-judge="1">${c.outcome ? (c.outcome_by === "owner" ? "change your verdict" : "confirm or correct") : "how did it turn out?"}</button></div>` : ""}
   </div>`;
+}
+
+const VERDICTS = { good_call: "a good call", lucky: "lucky", unlucky: "unlucky", bad_call: "a bad call" };
+
+function judgeForm(c) {
+  const pick = (name, values, labels, current) => `<div class="jgrade"><span>${name}</span>${values.map((v) =>
+    `<button class="jb jpick ${v === current ? "on" : ""}" data-${name}="${v}">${esc(labels[v] || v.replace(/_/g, " "))}</button>`).join("")}</div>`;
+  return `<div class="jedit jjudge">
+    ${pick("outcome", ["went_well", "mixed", "went_badly"], {}, c.outcome)}
+    ${pick("verdict", Object.keys(VERDICTS), VERDICTS, c.verdict)}
+    <textarea rows="2" maxlength="1000" class="jo-note" placeholder="what happened (optional)">${esc(c.outcome_note)}</textarea>
+    <div class="jbtns"><button class="jb jb-approved" data-osave="1">save</button><button class="jb" data-cancel="1">cancel</button></div></div>`;
 }
 
 function renderCalls() {
@@ -1021,6 +1045,22 @@ $("#calls").addEventListener("click", (e) => {
   const b = e.target.closest(".jb");
   if (!b) return;
   const box = b.closest(".jcall"), id = box.dataset.id;
+  if (b.dataset.judge) {
+    b.closest(".jbtns").outerHTML = judgeForm(judgment.calls.find((c) => c.id === id));
+    return;
+  }
+  if (b.classList.contains("jpick")) {
+    b.parentElement.querySelectorAll(".jpick").forEach((x) => x.classList.toggle("on", x === b));
+    return;
+  }
+  if (b.dataset.cancel && box.querySelector(".jjudge")) return renderCalls();
+  if (b.dataset.osave) {
+    const outcome = box.querySelector("[data-outcome].on")?.dataset.outcome, verdict = box.querySelector("[data-verdict].on")?.dataset.verdict;
+    if (!outcome || !verdict) return;
+    fetch("/api/judgment/outcomes", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, outcome, verdict, note: box.querySelector(".jo-note").value }) }).then((r) => r.ok && loadJudgment());
+    return;
+  }
   if (b.dataset.why || b.dataset.opt !== undefined) {
     const opt = b.dataset.why ? null : Number(b.dataset.opt);
     const agrees = opt !== null && opt === judgment.calls.find((c) => c.id === id).pick;
@@ -1058,12 +1098,13 @@ $("#view-judgment").addEventListener("click", async (e) => {
     box.querySelector("[data-save]").onclick = (ev) => { ev.stopPropagation(); reviewJudgment(kind, id, "approved", ta.value); };
     return;
   }
+  if (b.dataset.rank) return reviewJudgment(kind, id, item.status, "", Number(b.dataset.rank));
   if (b.dataset.status) reviewJudgment(kind, id, b.dataset.status, "");
 });
 
-async function reviewJudgment(kind, id, status, text) {
+async function reviewJudgment(kind, id, status, text, rank = 0) {
   const r = await fetch("/api/judgment", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind, id, status, text }) });
+    body: JSON.stringify({ kind, id, status, text, rank }) });
   if (r.ok) loadJudgment();
 }
 

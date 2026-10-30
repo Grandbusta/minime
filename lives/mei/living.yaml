@@ -1,0 +1,62 @@
+# How Mei lives: her days, when she checks in on people, what she can do,
+# what she may do without asking, and how she learns {owner}'s judgment. Times
+# are in her time zone (timezone in life.yaml).
+
+# She speaks first: reminders people asked for when they're due, and at the
+# check-in times she considers asking someone about something going on in
+# their life.
+initiative:
+  check_ins: ["12:30", "19:30"] # at most one check-in a day per person; [] turns them off
+  quiet: 4h # only after the conversation has been quiet this long
+
+# Her own day, like a person's: in the morning she plans a few things from her
+# goals, projects and routine; through the day she does them, for real, in
+# writing; at night she writes her journal. What she makes is kept.
+daily_life:
+  enabled: true
+  plan_at: "06:30"
+  journal_at: "22:30"
+  review_at: "Sun 19:00" # her weekly review: goals checked, new ones set, dreams revisited
+  activities: 4          # things she plans a day, besides the journal
+  budget_usd: 0.05       # most her own day may cost; past it, the rest is missed
+  # What she can do beyond writing; her journal is always on. Remove one to
+  # switch it off, or use [] for none.
+  #   read_book     public-domain books from Project Gutenberg, a passage a day
+  #   read_article  Wikipedia articles, to learn about a topic
+  #   web_search    search the open web and read the best page
+  #   read_page     read a page one of her own searches found
+  abilities: [read_book, read_article, web_search, read_page]
+  web: # how much of the open web she may use a day
+    searches_per_day: 10
+    pages_per_day: 15
+
+# What she may do on her own. Each kind of action is auto (on her own), ask
+# (she asks {owner} first, on Telegram, with Approve and Deny buttons) or forbid.
+#   read_web          abilities that fetch from the web: auto or forbid
+#   reach_out         messaging someone first (reminders, check-ins, deliveries)
+#   commit            promising to make something for someone
+#   publish           putting a work on her public page
+#   dream             adding, rewording or dropping one of her dreams
+#   spend, external_message   money, and email or posts outside the chat (later)
+# {owner} can loosen or tighten most of these by telling her, on Telegram.
+autonomy:
+  classes:
+    read_web: auto
+    reach_out: ask
+    commit: ask
+    publish: ask
+    dream: ask
+    spend: forbid
+    external_message: forbid
+  ask_expires: 24h # unanswered, a request is denied
+
+# She predicts what {owner} would choose on her own decisions (today's focus,
+# starting something new, setting or dropping a goal) and asks on Telegram,
+# to learn {owner}'s judgment. Goal calls always wait for an answer; day-plan
+# calls she asks at most asks_per_day of, least sure first, and the rest
+# {owner} can grade in the console. A different pick, and {owner}'s next
+# message (within reply_window) is taken as why.
+judgment:
+  calls: true
+  asks_per_day: 3
+  reply_window: 30m

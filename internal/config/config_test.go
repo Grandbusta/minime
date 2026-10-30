@@ -62,6 +62,10 @@ working_memory:
 		cfg.Reasoning.Prompt != "prompts/reply.md" || cfg.Reasoning.Effort != "low" {
 		t.Errorf("defaults not applied: %+v", cfg)
 	}
+	if err := cfg.ValidateAgent(); err == nil {
+		t.Error("ValidateAgent passed with no time zone")
+	}
+	cfg.Initiative.Timezone = "Africa/Lagos" // from the life story, by then
 	if err := cfg.ValidateAgent(); err != nil {
 		t.Errorf("ValidateAgent: %v", err)
 	}
@@ -139,5 +143,45 @@ func TestShippedConfigPolicy(t *testing.T) {
 	}
 	if p.Owner != "telegram:42" || p.Classes["commit"] != "ask" || p.Classes["spend"] != "forbid" {
 		t.Errorf("policy = %+v", p)
+	}
+}
+
+func TestLiving(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeConfig(t, "self:\n  dir: "+dir+"\ndatabase:\n  url: postgres://x\ninitiative:\n  check_ins: [\"11:00\"]\n  quiet: 2h\n"+
+		"daily_life:\n  plan_at: \"06:00\"\n  plan_prompt: prompts/mine.md\n")
+	// No living.yaml: the config file's.
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Initiative.CheckIns[0] != "11:00" || cfg.DailyLife.PlanAt != "06:00" {
+		t.Errorf("without living: %+v %+v", cfg.Initiative, cfg.DailyLife)
+	}
+	os.WriteFile(filepath.Join(dir, "living.yaml"), []byte(`initiative:
+  check_ins: ["10:00", "17:00"]
+daily_life:
+  plan_at: "08:30"
+  abilities: [read_book]
+autonomy:
+  classes: {publish: auto}
+judgment:
+  asks_per_day: 1
+`), 0o600)
+	cfg, err = Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Initiative.CheckIns) != 2 || cfg.Initiative.Quiet != 2*time.Hour || cfg.DailyLife.PlanAt != "08:30" ||
+		cfg.DailyLife.PlanPrompt != "prompts/mine.md" || cfg.DailyLife.JournalAt != "22:00" || len(cfg.DailyLife.Abilities) != 1 ||
+		cfg.Autonomy.Classes["publish"] != "auto" || cfg.Autonomy.AskExpires != 24*time.Hour || cfg.Judgment.AsksPerDay != 1 || !cfg.Judgment.Calls {
+		t.Errorf("with living: %+v %+v %+v %+v", cfg.Initiative, cfg.DailyLife, cfg.Autonomy, cfg.Judgment)
+	}
+	if cfg.Self.LifeFile() != filepath.Join(dir, "life.yaml") || cfg.Self.JudgmentFile() != filepath.Join(dir, "judgment.yaml") {
+		t.Errorf("self = %+v", cfg.Self)
+	}
+	os.WriteFile(filepath.Join(dir, "living.yaml"), []byte("database:\n  url: postgres://elsewhere\n"), 0o600)
+	if _, err := Load(cfgPath); err == nil {
+		t.Error("living.yaml set the database; want an error")
 	}
 }

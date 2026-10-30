@@ -1146,3 +1146,76 @@ func TestCalls(t *testing.T) {
 		t.Error("the principle isn't saved with its case")
 	}
 }
+
+func TestRankPriority(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	tag := ulid.Make().String()
+	var ps []memory.Principle
+	for i, text := range []string{"health", "honesty", "music"} {
+		ps = append(ps, memory.Principle{ID: ulid.Make(), Text: text + tag, Seed: text + tag, Kind: memory.PrincipleRank, Rank: i + 1,
+			Status: memory.JudgmentProposed, Source: memory.JudgmentFromSeed, CreatedAt: now})
+	}
+	if _, _, err := s.SeedJudgment(ctx, nil, ps); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.RankPriority(ctx, ps[2].ID, 1, now); err != nil || !ok {
+		t.Fatalf("rank = %v, %v", ok, err)
+	}
+	got, _ := s.Principles(ctx, memory.JudgmentProposed)
+	var order []string
+	for _, p := range got {
+		if strings.HasSuffix(p.Text, tag) {
+			order = append(order, strings.TrimSuffix(p.Text, tag))
+		}
+	}
+	if strings.Join(order, ",") != "music,health,honesty" {
+		t.Errorf("order = %v", order)
+	}
+	if ok, _ := s.RankPriority(ctx, ulid.Make(), 1, now); ok {
+		t.Error("ranked a priority that doesn't exist")
+	}
+}
+
+func TestOutcomes(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond).AddDate(3, 0, 0) // after other tests' calls
+	kind := "focus_" + ulid.Make().String()[:8]
+	c := memory.Call{ID: ulid.Make(), Type: kind, Mode: memory.CallAfter, Situation: "s", Options: []string{"a", "b"}, Status: memory.CallLogged,
+		CreatedAt: now.Add(-3 * 24 * time.Hour)}
+	if err := s.SaveCall(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	c.OwnerPick, c.AnsweredBy, c.AnsweredAt = 1, memory.AnsweredInConsole, now
+	if _, err := s.AnswerCall(ctx, c, true); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := s.CallsToLookBack(ctx, []string{kind}, now.Add(-14*24*time.Hour), now.Add(-2*24*time.Hour), 10)
+	if err != nil || len(cs) != 1 || cs[0].ID != c.ID {
+		t.Fatalf("to look back on = %+v, %v", cs, err)
+	}
+	if ok, err := s.SetOutcome(ctx, c.ID, memory.OutcomeBadly, memory.VerdictUnlucky, "it rained", memory.OutcomeBySelf, now); err != nil || !ok {
+		t.Fatalf("set = %v, %v", ok, err)
+	}
+	if ok, _ := s.SetOutcome(ctx, c.ID, memory.OutcomeBadly, memory.VerdictBad, "", memory.OutcomeByOwner, now); !ok {
+		t.Fatal("the owner couldn't correct it")
+	}
+	if ok, _ := s.SetOutcome(ctx, c.ID, memory.OutcomeWell, memory.VerdictGood, "x", memory.OutcomeBySelf, now); ok {
+		t.Error("its review overrode the owner")
+	}
+	got, _, _ := s.Call(ctx, c.ID)
+	if got.Outcome != memory.OutcomeBadly || got.Verdict != memory.VerdictBad || got.OutcomeNote != "it rained" || got.OutcomeBy != memory.OutcomeByOwner {
+		t.Errorf("call = %+v", got)
+	}
+	cases, _ := s.JudgmentCases(ctx, memory.JudgmentApproved, nil)
+	if !slices.ContainsFunc(cases, func(x memory.JudgmentCase) bool {
+		return x.ID == got.CaseID && x.Outcome == "went badly, bad call: it rained"
+	}) {
+		t.Error("the decision doesn't say how it turned out")
+	}
+	if cs, _ := s.CallsToLookBack(ctx, []string{kind}, now.Add(-14*24*time.Hour), now, 10); len(cs) != 0 {
+		t.Error("looked back on it twice")
+	}
+}

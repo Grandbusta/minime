@@ -506,6 +506,7 @@ func (m *Mind) activityNote(ctx context.Context, i memory.Intention, what string
 	b.WriteString(m.now(now))
 	b.WriteString("\n\n" + what)
 	b.WriteString(m.lessonsNote(ctx))
+	b.WriteString(m.boundariesNote(ctx))
 	if i.ProjectID.IsZero() {
 		return b.String(), nil, true
 	}

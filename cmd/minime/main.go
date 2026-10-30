@@ -80,6 +80,11 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	if cfg.Initiative.Timezone == "" { // where it lives is part of its life
+		if life, err := self.Load(cfg.Self.LifeFile()); err == nil {
+			cfg.Initiative.Timezone = life.Timezone
+		}
+	}
 	log, err := newLogger(cfg.Log.Level)
 	if err != nil {
 		return err
@@ -95,7 +100,7 @@ func run(args []string) error {
 		}
 		// Who the agent is comes first: without a life story it does not start,
 		// and the database is not touched.
-		life, err := self.Load(cfg.Self.Life)
+		life, err := self.Load(cfg.Self.LifeFile())
 		if err != nil {
 			return err
 		}
@@ -116,7 +121,7 @@ func run(args []string) error {
 		if err := cfg.ValidateAgent(); err != nil {
 			return err
 		}
-		life, err := self.Load(cfg.Self.Life)
+		life, err := self.Load(cfg.Self.LifeFile())
 		if err != nil {
 			return err
 		}
@@ -141,7 +146,7 @@ func run(args []string) error {
 		if err := cfg.ValidateAgent(); err != nil {
 			return err
 		}
-		life, err := self.Load(cfg.Self.Life)
+		life, err := self.Load(cfg.Self.LifeFile())
 		if err != nil {
 			return err
 		}
@@ -166,7 +171,7 @@ func run(args []string) error {
 		if err := cfg.ValidateAgent(); err != nil {
 			return err
 		}
-		life, err := self.Load(cfg.Self.Life)
+		life, err := self.Load(cfg.Self.LifeFile())
 		if err != nil {
 			return err
 		}
@@ -196,7 +201,7 @@ func run(args []string) error {
 }
 
 func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store.Store, log *slog.Logger) error {
-	judgment, err := self.LoadJudgment(cfg.Self.Judgment)
+	judgment, err := self.LoadJudgment(cfg.Self.JudgmentFile())
 	if err != nil {
 		return err
 	}
@@ -314,7 +319,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	sensor := telegram.NewSensor(tg, cfg.Telegram.OwnerIDs, cfg.Telegram.PollTimeoutSeconds, percepts,
 		log.With("component", "telegram"))
 
-	log.Info("mini-me awake", "name", life.Name, "life_story_lines", len(life.Story), "owners", len(cfg.Telegram.OwnerIDs),
+	log.Info("minime awake", "name", life.Name, "life_story_lines", len(life.Story), "owners", len(cfg.Telegram.OwnerIDs),
 		"system1", cfg.Decision.Provider.Provider, "question_set", incoming.Ref(), "follow_up", followUp.Ref(),
 		"life_area", lifeArea.Ref(), "person_circle", personCircle.Ref(), "fact_relevance", factRelevance.Ref(),
 		"open_threads", openThreads.Ref(), "timezone", zone.String(), "check_ins", cfg.Initiative.CheckIns,
@@ -343,7 +348,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		})
 	}
 	err = g.Wait()
-	log.Info("mini-me asleep")
+	log.Info("minime asleep")
 	return err
 }
 

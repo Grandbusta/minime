@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -17,6 +19,10 @@ import (
 type Life struct {
 	Name  string   `yaml:"name"`
 	Story []string `yaml:"story"` // third person, with the agent's name
+	// Timezone is where the agent lives, an IANA name like Africa/Lagos: its
+	// days, reminders and check-ins are in it. The config's
+	// initiative.timezone, when set, overrides it.
+	Timezone string `yaml:"timezone"`
 	// Personality is how the agent is with people: its temperament and how it
 	// talks, third person with its name. Optional.
 	Personality []string `yaml:"personality"`
@@ -36,8 +42,9 @@ type Life struct {
 	// time, after which they grow from what it makes and its owner's feedback.
 	Skills []Skill `yaml:"skills"`
 	// Family the agent is born knowing, like anyone knows their parents and
-	// cousins whether or not they ever talk to them. Copied into memory the
-	// first time; after that memory wins.
+	// cousins whether or not they ever talk to them, and anyone else it has
+	// always known, like a mentor or an old friend (by Circle). Copied into
+	// memory the first time; after that memory wins.
 	Family []Relative `yaml:"family"`
 }
 
@@ -75,6 +82,24 @@ type Relative struct {
 	// Account is how they talk to the agent, e.g. "telegram:123"; empty if
 	// they don't. With it, the agent knows them by account, not by name.
 	Account string `yaml:"account"`
+	// Circle is which part of its life they're from: family (the default),
+	// friend, school (a teacher or mentor), work or community.
+	Circle string `yaml:"circle"`
+}
+
+// Circles a person it is born knowing can be from.
+var Circles = []string{"family", "friend", "school", "work", "community"}
+
+// CircleOf is the circle a relation is usually from: a mentor or teacher is
+// school, a friend is a friend, anyone else is family.
+func CircleOf(relation string) string {
+	switch r := strings.ToLower(relation); {
+	case strings.Contains(r, "friend"):
+		return "friend"
+	case strings.Contains(r, "mentor"), strings.Contains(r, "teacher"), strings.Contains(r, "tutor"):
+		return "school"
+	}
+	return "family"
 }
 
 func Load(path string) (Life, error) {
@@ -88,7 +113,12 @@ func Load(path string) (Life, error) {
 	if err := dec.Decode(&l); err != nil {
 		return Life{}, fmt.Errorf("%s: %w", path, err)
 	}
-	l.Name = strings.TrimSpace(l.Name)
+	l.Name, l.Timezone = strings.TrimSpace(l.Name), strings.TrimSpace(l.Timezone)
+	if l.Timezone != "" {
+		if _, err := time.LoadLocation(l.Timezone); err != nil {
+			return Life{}, fmt.Errorf("%s: timezone must be a time zone like Africa/Lagos, have %q", path, l.Timezone)
+		}
+	}
 	l.Story = nonEmpty(l.Story)
 	l.Personality = nonEmpty(l.Personality)
 	l.Routine = nonEmpty(l.Routine)
@@ -135,7 +165,14 @@ func Load(path string) (Life, error) {
 	}
 	accounts := map[string]bool{}
 	for i, r := range l.Family {
-		r.Name, r.Relation, r.Account = strings.TrimSpace(r.Name), strings.TrimSpace(r.Relation), strings.TrimSpace(r.Account)
+		r.Name, r.Relation, r.Account, r.Circle = strings.TrimSpace(r.Name), strings.TrimSpace(r.Relation), strings.TrimSpace(r.Account),
+			strings.ToLower(strings.TrimSpace(r.Circle))
+		if r.Circle == "" {
+			r.Circle = "family"
+		}
+		if !slices.Contains(Circles, r.Circle) {
+			return Life{}, fmt.Errorf("%s: %s's circle must be one of %s, have %q", path, r.Name, strings.Join(Circles, ", "), r.Circle)
+		}
 		if r.Name == "" || r.Relation == "" {
 			return Life{}, fmt.Errorf("%s: family member %d needs a name and a relation", path, i+1)
 		}

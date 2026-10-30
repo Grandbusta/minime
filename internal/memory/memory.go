@@ -323,6 +323,8 @@ const (
 type Principle struct {
 	ID        ulid.ULID
 	Text      string
+	Kind      string   // PrincipleRule, PrincipleRank or PrincipleLimit
+	Rank      int      // a priority's place, 1 first; 0 for the others
 	Types     []string // kinds of decision it applies to
 	Status    string   // JudgmentProposed, JudgmentApproved or JudgmentRejected
 	Source    string   // JudgmentFromSeed, ...
@@ -344,9 +346,17 @@ type JudgmentCase struct {
 	Reason    string // the owner's own words; empty when they gave none
 	Status    string
 	Source    string
+	Outcome   string // how it turned out, when it came from a call that was looked back on; else empty
 	At        time.Time
 	UpdatedAt time.Time
 }
+
+// Kinds of principle.
+const (
+	PrincipleRule  = "principle" // a rule drawn from decisions
+	PrincipleRank  = "priority"  // what matters most, in order: the higher wins when rules clash
+	PrincipleLimit = "boundary"  // never, whatever the gain
+)
 
 const (
 	JudgmentProposed = "proposed" // waiting for the owner's review; not used
@@ -383,7 +393,37 @@ type Call struct {
 	CreatedAt   time.Time
 	AskedAt     time.Time
 	AnsweredAt  time.Time
+	// How it turned out, looked at later; empty until then.
+	Outcome     string // OutcomeWell, OutcomeMixed or OutcomeBadly
+	Verdict     string // VerdictGood, VerdictLucky, VerdictUnlucky or VerdictBad
+	OutcomeNote string // what happened
+	OutcomeBy   string // OutcomeBySelf or OutcomeByOwner
+	OutcomeAt   time.Time
 }
+
+// How a call turned out.
+const (
+	OutcomeWell  = "went_well"
+	OutcomeMixed = "mixed"
+	OutcomeBadly = "went_badly"
+)
+
+// Whether how a call turned out was the decision or luck.
+const (
+	VerdictGood    = "good_call" // a good decision, and it went well
+	VerdictLucky   = "lucky"     // it went well despite the decision
+	VerdictUnlucky = "unlucky"   // a good decision that went badly anyway
+	VerdictBad     = "bad_call"  // it went badly because of the decision
+
+	OutcomeBySelf  = "self"  // its weekly review
+	OutcomeByOwner = "owner" // its owner, which its review never overrides
+)
+
+// Outcomes and Verdicts are the values each may take.
+var (
+	Outcomes = []string{OutcomeWell, OutcomeMixed, OutcomeBadly}
+	Verdicts = []string{VerdictGood, VerdictLucky, VerdictUnlucky, VerdictBad}
+)
 
 // Kinds of call.
 const (

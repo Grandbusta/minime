@@ -59,7 +59,7 @@ family:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(l.Family) != 2 || l.Family[0].Account != "telegram:42" || l.Family[1] != (Relative{Name: "Ada", Relation: "cousin"}) {
+	if len(l.Family) != 2 || l.Family[0].Account != "telegram:42" || l.Family[1] != (Relative{Name: "Ada", Relation: "cousin", Circle: "family"}) {
 		t.Errorf("family = %+v", l.Family)
 	}
 
@@ -71,12 +71,6 @@ family:
 		if _, err := Load(write(t, "name: Tobi\nstory: [x]\nfamily:\n"+family)); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
-	}
-}
-
-func TestShippedLifeStoryLoads(t *testing.T) {
-	if _, err := Load("../../self/life.yaml"); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -156,19 +150,10 @@ cases:
 		"no choice":     "cases: [{key: a, type: life, situation: s}]\n",
 		"twice":         "cases: [{key: a, type: life, situation: s, choice: c}, {key: a, type: life, situation: s, choice: c}]\n",
 		"unknown field": "cases: [{key: a, type: life, situation: s, choice: c, why: x}]\n",
+		"listed twice":  "priorities: [Health]\nboundaries: [Health]\n",
 	} {
 		if _, err := LoadJudgment(write(t, body)); err == nil {
 			t.Errorf("%s: loaded; want an error", name)
 		}
-	}
-}
-
-func TestDanielsJudgment(t *testing.T) {
-	j, err := LoadJudgment("../../self/judgment.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(j.Principles) == 0 || len(j.Cases) == 0 {
-		t.Errorf("judgment = %d principles, %d cases", len(j.Principles), len(j.Cases))
 	}
 }

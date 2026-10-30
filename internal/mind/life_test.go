@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -255,14 +256,42 @@ func TestWhatItMakesComesFromItsLife(t *testing.T) {
 	}
 }
 
-func TestShippedLifePromptsAreFilledIn(t *testing.T) {
-	life, err := self.Load("../../self/life.yaml")
+// shippedLives are the lives in lives/, each filled in for an owner, Sam.
+func shippedLives(t *testing.T) []self.Life {
+	t.Helper()
+	ts, err := self.Templates("../../lives")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, _ := lifeMind(&fakeSystem2{})
-	m.Life = life
-	for _, path := range []string{"../../prompts/plan.md", "../../prompts/activity.md"} {
+	var lives []self.Life
+	for _, tmpl := range ts {
+		files, err := tmpl.Render(self.Owner{Name: "Sam", Relation: tmpl.Relations[0], Account: owner})
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(t.TempDir(), "life.yaml")
+		if err := os.WriteFile(path, files["life.yaml"], 0o600); err != nil {
+			t.Fatal(err)
+		}
+		life, err := self.Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lives = append(lives, life)
+	}
+	return lives
+}
+
+func TestShippedLifePromptsAreFilledIn(t *testing.T) {
+	for _, life := range shippedLives(t) {
+		m, _ := lifeMind(&fakeSystem2{})
+		m.Life = life
+		shippedLifePrompts(t, m, life)
+	}
+}
+
+func shippedLifePrompts(t *testing.T, m *Mind, life self.Life) {
+	for _, path := range []string{"../../prompts/plan.md", "../../prompts/activity.md", "../../prompts/review.md", "../../prompts/learn.md"} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)

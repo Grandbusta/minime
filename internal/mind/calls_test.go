@@ -234,3 +234,57 @@ func TestReviewDrawsPrinciples(t *testing.T) {
 		t.Errorf("principles = %+v", s.principles)
 	}
 }
+
+func TestLookingBackOnCalls(t *testing.T) {
+	ctx := context.Background()
+	reviewAt := at(26, 20, 1)
+	agreed, differed := true, false
+	theirs := memory.Call{ID: ulid.Make(), Type: memory.CallFocus, Mode: memory.CallAfter, Situation: "What to focus on today",
+		Options: []string{"the motif", "rest"}, Pick: 0, Status: memory.CallAnswered, OwnerPick: 1, Agreed: &differed, CaseID: ulid.Make(),
+		CreatedAt: reviewAt.Add(-5 * 24 * time.Hour)}
+	ok := memory.Call{ID: ulid.Make(), Type: memory.CallStart, Mode: memory.CallAfter, Situation: "Start a new hook or go on",
+		Options: []string{"start it", "go on"}, Pick: 1, Status: memory.CallAnswered, OwnerPick: 1, Agreed: &agreed, CreatedAt: reviewAt.Add(-4 * 24 * time.Hour)}
+	tooNew := memory.Call{ID: ulid.Make(), Type: memory.CallFocus, Options: []string{"a", "b"}, Status: memory.CallLogged, CreatedAt: reviewAt.Add(-time.Hour)}
+	approval := memory.Call{ID: ulid.Make(), Type: "publish", Options: []string{"yes", "no"}, Status: memory.CallAnswered, CreatedAt: reviewAt.Add(-4 * 24 * time.Hour)}
+	review := `{"title":"A week","text":"Fine.","goals":[],"new_goals":[],"projects":[],"dreams":[],"retire_lessons":[],"new_lessons":[],"plans":[],"new_resources":[],
+		"principles":[],"outcomes":[
+		{"call_id":"` + theirs.ID.String() + `","outcome":"went_badly","verdict":"bad_call","note":"I pushed on tired and the motif got worse"},
+		{"call_id":"` + ok.ID.String() + `","outcome":"went_well","verdict":"good_call","note":"Finishing first worked"},
+		{"call_id":"` + tooNew.ID.String() + `","outcome":"went_well","verdict":"good_call","note":"not asked"},
+		{"call_id":"` + ok.ID.String() + `","outcome":"great","verdict":"good_call","note":"not an outcome"}]}`
+	s2 := &fakeSystem2{formats: map[string]string{"weekly_review": review}}
+	m, s, _, _ := callsMind(s2)
+	s.calls = []memory.Call{theirs, ok, tooNew, approval}
+	s.cases = []memory.JudgmentCase{{ID: theirs.CaseID, Key: theirs.CaseID.String(), Type: "life", Situation: "What to focus on today",
+		Choice: "rest", Status: memory.JudgmentApproved}}
+	if err := m.Review(ctx, reviewAt); err != nil {
+		t.Fatal(err)
+	}
+	note := s2.requests[0].Note
+	for _, want := range []string{"[call " + theirs.ID.String() + "]", `you did "the motif". Busta would have chosen "rest".`, "[call " + ok.ID.String() + "]"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note is missing %q:\n%s", want, note)
+		}
+	}
+	if strings.Contains(note, tooNew.ID.String()) || strings.Contains(note, approval.ID.String()) {
+		t.Error("looked back on a call too new, or an approval")
+	}
+	if c := s.callAt(theirs.ID); c.Outcome != memory.OutcomeBadly || c.Verdict != memory.VerdictBad || c.OutcomeBy != memory.OutcomeBySelf {
+		t.Errorf("call = %+v", c)
+	}
+	if c := s.callAt(ok.ID); c.Outcome != memory.OutcomeWell {
+		t.Errorf("call = %+v", c)
+	}
+	if c := s.callAt(tooNew.ID); c.Outcome != "" {
+		t.Error("recorded an outcome for a call it wasn't asked about")
+	}
+	// How it turned out goes with Busta's decision into later notes.
+	if note := m.judgmentNote(ctx, planJudgment); !strings.Contains(note, "How it turned out: went_badly, bad_call: I pushed on tired") {
+		t.Errorf("judgment note:\n%s", note)
+	}
+	// The owner's verdict stands over a later review's.
+	s.SetOutcome(ctx, ok.ID, memory.OutcomeMixed, memory.VerdictLucky, "", memory.OutcomeByOwner, now)
+	if done, _ := s.SetOutcome(ctx, ok.ID, memory.OutcomeWell, memory.VerdictGood, "", memory.OutcomeBySelf, now); done {
+		t.Error("its review overrode the owner's verdict")
+	}
+}

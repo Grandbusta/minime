@@ -4,8 +4,11 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -63,7 +66,7 @@ func (p Portfolio) UpdateTime() (time.Duration, error) {
 // Initiative is the agent speaking first: reminders, and checking in on people.
 type Initiative struct {
 	// Timezone is the agent's own, an IANA name like Africa/Lagos: reminders
-	// and check-in times are in it.
+	// and check-in times are in it. Empty: the one in its life story.
 	Timezone string `yaml:"timezone"`
 	// CheckIns are the times of day ("HH:MM") it considers checking in on
 	// people, at most once a day each. Empty: never unprompted.
@@ -75,7 +78,8 @@ type Initiative struct {
 func (i Initiative) Zone() (*time.Location, error) {
 	loc, err := time.LoadLocation(i.Timezone)
 	if err != nil || i.Timezone == "" {
-		return nil, fmt.Errorf("config: initiative.timezone must be a time zone like Africa/Lagos, have %q", i.Timezone)
+		return nil, fmt.Errorf("a time zone like Africa/Lagos is needed: timezone in the life story, or initiative.timezone in the config; have %q",
+			i.Timezone)
 	}
 	return loc, nil
 }
@@ -242,13 +246,16 @@ type WorkingMemory struct {
 	Window time.Duration `yaml:"window"` // e.g. 2h: older exchanges are left out
 }
 
-// Self is who the agent is.
+// Self is where the person is: a folder with their life (life.yaml), how
+// they live (living.yaml) and their owner's judgment (judgment.yaml), laid
+// out like each life in lives/.
 type Self struct {
-	Life string `yaml:"life"` // file with the agent's name and life story
-	// Judgment is a file with how its owner decides (optional), seeded for
-	// the owner to review in the console.
-	Judgment string `yaml:"judgment"`
+	Dir string `yaml:"dir"`
 }
+
+func (s Self) LifeFile() string     { return filepath.Join(s.Dir, "life.yaml") }
+func (s Self) LivingFile() string   { return filepath.Join(s.Dir, "living.yaml") }
+func (s Self) JudgmentFile() string { return filepath.Join(s.Dir, "judgment.yaml") }
 
 type Database struct {
 	URL string `yaml:"url"`
@@ -291,15 +298,15 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 	cfg := &Config{
-		Self:          Self{Life: "self/life.yaml", Judgment: "self/judgment.yaml"},
+		Self:          Self{Dir: "self"},
 		Telegram:      Telegram{PollTimeoutSeconds: 30},
 		Decision:      Decision{QuestionSets: "decisions"},
 		Reasoning:     Reasoning{Prompt: "prompts/reply.md", Effort: "low"},
 		WorkingMemory: WorkingMemory{Turns: 8, Window: 30 * time.Minute},
 		Memory:        Memory{RecallCandidates: 30},
 		Portfolio:     Portfolio{Prompt: "prompts/profile.md", UpdateAt: "00:00"},
-		Initiative:    Initiative{Timezone: "UTC", Quiet: 4 * time.Hour},
-		DailyLife: DailyLife{PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
+		Initiative:    Initiative{Quiet: 4 * time.Hour},
+		DailyLife: DailyLife{Enabled: true, PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
 			PlanPrompt: "prompts/plan.md", ActivityPrompt: "prompts/activity.md",
 			ReviewAt: "Sun 20:00", ReviewPrompt: "prompts/review.md", LearnPrompt: "prompts/learn.md",
 			Web: Web{Searches: 10, Pages: 15}},
@@ -311,10 +318,39 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal([]byte(os.ExpandEnv(string(raw))), cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
+	if err := cfg.loadLiving(); err != nil {
+		return nil, err
+	}
 	if cfg.Database.URL == "" {
 		return nil, errors.New("config: database.url is required")
 	}
 	return cfg, nil
+}
+
+// loadLiving reads how the person lives (living.yaml in their folder) over
+// the defaults and the config file: their days, check-ins, abilities, what
+// they may do on their own, and how they learn their owner's judgment. A
+// missing file leaves those as they are.
+func (c *Config) loadLiving() error {
+	raw, err := os.ReadFile(c.Self.LivingFile())
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read living: %w", err)
+	}
+	living := struct {
+		Initiative *Initiative `yaml:"initiative"`
+		DailyLife  *DailyLife  `yaml:"daily_life"`
+		Autonomy   *Autonomy   `yaml:"autonomy"`
+		Judgment   *Judgment   `yaml:"judgment"`
+	}{&c.Initiative, &c.DailyLife, &c.Autonomy, &c.Judgment}
+	dec := yaml.NewDecoder(strings.NewReader(os.ExpandEnv(string(raw))))
+	dec.KnownFields(true)
+	if err := dec.Decode(&living); err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("%s: %w", c.Self.LivingFile(), err)
+	}
+	return nil
 }
 
 // ValidateAgent checks the settings needed to run the agent, beyond what Load requires.

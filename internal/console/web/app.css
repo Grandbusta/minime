@@ -336,6 +336,22 @@ b { font-weight: 600; }
 .jp details { margin-top: 10px; }
 .jp summary { cursor: pointer; font: 10px var(--mono); color: var(--muted); letter-spacing: .06em; }
 .calls-card { margin-bottom: 16px; }
+.jout { margin: 8px 0 0; font-size: 12px; color: var(--soft); }
+.jout b { font-weight: 600; color: var(--ink); }
+.jout em { font-style: normal; font: 9px var(--mono); color: var(--muted); margin-left: 6px; letter-spacing: .06em; text-transform: uppercase; }
+.jout i { font-style: normal; }
+.jout.v-good_call i, .jout.v-unlucky i { color: var(--accent); }
+.jout.v-bad_call i, .jout.v-lucky i { color: var(--lf); }
+.jpick.on { color: var(--accent); border-color: rgba(124,255,107,.5); }
+.jgroup { display: grid; gap: 10px; }
+.jgroup + .jgroup { margin-top: 16px; }
+.jgroup-h { font: 600 10px var(--mono); letter-spacing: .14em; color: var(--soft); }
+.jgroup-h span { font-weight: 400; letter-spacing: .04em; color: var(--muted); margin-left: 6px; }
+.jp.k-boundary { border-color: rgba(255,107,139,.35); background: rgba(255,107,139,.04); }
+.jp.k-boundary .jtop b { color: var(--bad); }
+.jp.k-priority .jtop b { color: var(--s1); }
+.jrank { margin-top: 6px; }
+.jb:disabled { opacity: .35; cursor: default; }
 .jhead { margin-top: 4px; }
 .agreement { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-bottom: 14px; }
 .agr { position: relative; overflow: hidden; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: rgba(0,0,0,.25); }

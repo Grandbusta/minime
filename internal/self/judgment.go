@@ -19,6 +19,11 @@ import (
 // proposed; the owner approves, edits or rejects each in the console, and
 // only approved ones are used.
 type Judgment struct {
+	// Priorities are what matters most to them, most important first: when
+	// principles clash, the higher priority wins.
+	Priorities []string `yaml:"priorities"`
+	// Boundaries are what they never do, whatever the gain.
+	Boundaries []string    `yaml:"boundaries"`
 	Principles []Principle `yaml:"principles"`
 	Cases      []Case      `yaml:"cases"`
 }
@@ -75,6 +80,13 @@ func LoadJudgment(path string) (Judgment, error) {
 		j.Cases[i] = c
 	}
 	texts := map[string]bool{}
+	j.Priorities, j.Boundaries = nonEmpty(j.Priorities), nonEmpty(j.Boundaries)
+	for _, t := range append(append([]string{}, j.Priorities...), j.Boundaries...) {
+		if texts[t] {
+			return Judgment{}, fmt.Errorf("%s: %q is listed twice", path, t)
+		}
+		texts[t] = true
+	}
 	for i, p := range j.Principles {
 		p.Text = strings.TrimSpace(p.Text)
 		p.Types, p.Cases = nonEmpty(p.Types), nonEmpty(p.Cases)

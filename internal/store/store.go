@@ -1565,9 +1565,9 @@ func (s *Store) SeedJudgment(ctx context.Context, cases []memory.JudgmentCase, p
 		nc += int(tag.RowsAffected())
 	}
 	for _, p := range principles {
-		tag, err := tx.Exec(ctx, `INSERT INTO principles (id, text, types, status, source, seed, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $7) ON CONFLICT (seed) DO NOTHING`,
-			p.ID.String(), p.Text, nonNil(p.Types), p.Status, p.Source, p.Seed, p.CreatedAt)
+		tag, err := tx.Exec(ctx, `INSERT INTO principles (id, text, kind, rank, types, status, source, seed, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9) ON CONFLICT (seed) DO NOTHING`,
+			p.ID.String(), p.Text, kindOf(p), p.Rank, nonNil(p.Types), p.Status, p.Source, p.Seed, p.CreatedAt)
 		if err != nil {
 			return 0, 0, fmt.Errorf("seed principle: %w", err)
 		}
@@ -1586,10 +1586,10 @@ func (s *Store) SeedJudgment(ctx context.Context, cases []memory.JudgmentCase, p
 // Principles returns its owner's principles, oldest first, with the keys of
 // the cases behind them: all of them, or only those with status.
 func (s *Store) Principles(ctx context.Context, status string) ([]memory.Principle, error) {
-	rows, err := s.pool.Query(ctx, `SELECT p.id, p.text, p.types, p.status, p.source, COALESCE(p.seed, ''), p.created_at, p.updated_at,
+	rows, err := s.pool.Query(ctx, `SELECT p.id, p.text, p.kind, p.rank, p.types, p.status, p.source, COALESCE(p.seed, ''), p.created_at, p.updated_at,
 			COALESCE(array_agg(c.key ORDER BY c.at, c.key) FILTER (WHERE c.key IS NOT NULL), '{}')
 		FROM principles p LEFT JOIN principle_cases pc ON pc.principle_id = p.id LEFT JOIN judgment_cases c ON c.id = pc.case_id
-		WHERE $1 = '' OR p.status = $1 GROUP BY p.id ORDER BY p.created_at, p.id`, status)
+		WHERE $1 = '' OR p.status = $1 GROUP BY p.id ORDER BY p.kind = 'priority' DESC, p.rank, p.created_at, p.id`, status)
 	if err != nil {
 		return nil, fmt.Errorf("query principles: %w", err)
 	}
@@ -1600,7 +1600,8 @@ func (s *Store) Principles(ctx context.Context, status string) ([]memory.Princip
 			p  memory.Principle
 			id string
 		)
-		if err := rows.Scan(&id, &p.Text, &p.Types, &p.Status, &p.Source, &p.Seed, &p.CreatedAt, &p.UpdatedAt, &p.Cases); err != nil {
+		if err := rows.Scan(&id, &p.Text, &p.Kind, &p.Rank, &p.Types, &p.Status, &p.Source, &p.Seed, &p.CreatedAt, &p.UpdatedAt,
+			&p.Cases); err != nil {
 			return nil, err
 		}
 		if p.ID, err = ulid.Parse(id); err != nil {
@@ -1614,7 +1615,7 @@ func (s *Store) Principles(ctx context.Context, status string) ([]memory.Princip
 // JudgmentCases returns its owner's decisions, oldest first: all of them, or
 // only those with status, of any of types (all types if none).
 func (s *Store) JudgmentCases(ctx context.Context, status string, types []string) ([]memory.JudgmentCase, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, key, type, situation, options, choice, reason, status, source, at, updated_at
+	rows, err := s.pool.Query(ctx, `SELECT id, key, type, situation, options, choice, reason, status, source, outcome, at, updated_at
 		FROM judgment_cases WHERE ($1 = '' OR status = $1) AND (cardinality($2::text[]) = 0 OR type = ANY($2))
 		ORDER BY at, key`, status, nonNil(types))
 	if err != nil {
@@ -1627,7 +1628,7 @@ func (s *Store) JudgmentCases(ctx context.Context, status string, types []string
 			c  memory.JudgmentCase
 			id string
 		)
-		if err := rows.Scan(&id, &c.Key, &c.Type, &c.Situation, &c.Options, &c.Choice, &c.Reason, &c.Status, &c.Source, &c.At,
+		if err := rows.Scan(&id, &c.Key, &c.Type, &c.Situation, &c.Options, &c.Choice, &c.Reason, &c.Status, &c.Source, &c.Outcome, &c.At,
 			&c.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -1670,9 +1671,9 @@ func (s *Store) SavePrinciple(ctx context.Context, p memory.Principle) error {
 		return fmt.Errorf("save principle: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `INSERT INTO principles (id, text, types, status, source, seed, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`, p.ID.String(), p.Text, nonNil(p.Types), p.Status, p.Source, nullString(p.Seed),
-		p.CreatedAt); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO principles (id, text, kind, rank, types, status, source, seed, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)`, p.ID.String(), p.Text, kindOf(p), p.Rank, nonNil(p.Types), p.Status, p.Source,
+		nullString(p.Seed), p.CreatedAt); err != nil {
 		return fmt.Errorf("save principle: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO principle_cases (principle_id, case_id)
@@ -1683,7 +1684,8 @@ func (s *Store) SavePrinciple(ctx context.Context, p memory.Principle) error {
 }
 
 const callColumns = `id, type, mode, situation, options, pick, why, confidence, ref, status, waiting, waiting_since, owner_pick,
-	owner_choice, owner_reason, agreed, answered_by, message, case_id, created_at, asked_at, answered_at`
+	owner_choice, owner_reason, agreed, answered_by, message, case_id, created_at, asked_at, answered_at, outcome, verdict, outcome_note,
+	outcome_by, outcome_at`
 
 // SaveCall stores a new call.
 func (s *Store) SaveCall(ctx context.Context, c memory.Call) error {
@@ -1705,11 +1707,12 @@ func scanCalls(rows pgx.Rows) ([]memory.Call, error) {
 			id                    string
 			ref, caseID           *string
 			waitingAt, asked, ans *time.Time
+			outcomeAt             *time.Time
 			ownerPick             *int
 		)
 		if err := rows.Scan(&id, &c.Type, &c.Mode, &c.Situation, &c.Options, &c.Pick, &c.Why, &c.Confidence, &ref, &c.Status, &c.Waiting,
 			&waitingAt, &ownerPick, &c.OwnerChoice, &c.OwnerReason, &c.Agreed, &c.AnsweredBy, &c.Message, &caseID, &c.CreatedAt, &asked,
-			&ans); err != nil {
+			&ans, &c.Outcome, &c.Verdict, &c.OutcomeNote, &c.OutcomeBy, &outcomeAt); err != nil {
 			return nil, err
 		}
 		var err error
@@ -1725,7 +1728,7 @@ func scanCalls(rows pgx.Rows) ([]memory.Call, error) {
 		for _, t := range []struct {
 			from *time.Time
 			to   *time.Time
-		}{{waitingAt, &c.WaitingAt}, {asked, &c.AskedAt}, {ans, &c.AnsweredAt}} {
+		}{{waitingAt, &c.WaitingAt}, {asked, &c.AskedAt}, {ans, &c.AnsweredAt}, {outcomeAt, &c.OutcomeAt}} {
 			if t.from != nil {
 				*t.to = *t.from
 			}
@@ -1905,4 +1908,101 @@ func (s *Store) Agreement(ctx context.Context, n int) ([]memory.Agreement, error
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// kindOf is a principle's kind; a rule if it has none.
+func kindOf(p memory.Principle) string {
+	if p.Kind == "" {
+		return memory.PrincipleRule
+	}
+	return p.Kind
+}
+
+// RankPriority moves a priority to rank (1 first), shifting the others to
+// make room, and returns whether there was such a priority.
+func (s *Store) RankPriority(ctx context.Context, id ulid.ULID, rank int, at time.Time) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("rank priority: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `SELECT id FROM principles WHERE kind = $1 AND status <> $2 AND id <> $3 ORDER BY rank, created_at, id`,
+		memory.PrincipleRank, memory.JudgmentRejected, id.String())
+	if err != nil {
+		return false, fmt.Errorf("rank priority: %w", err)
+	}
+	var others []string
+	for rows.Next() {
+		var o string
+		if err := rows.Scan(&o); err != nil {
+			rows.Close()
+			return false, err
+		}
+		others = append(others, o)
+	}
+	rows.Close()
+	rank = max(1, min(rank, len(others)+1))
+	tag, err := tx.Exec(ctx, `UPDATE principles SET rank = $2, updated_at = $3 WHERE id = $1 AND kind = $4`, id.String(), rank, at,
+		memory.PrincipleRank)
+	if err != nil || tag.RowsAffected() == 0 {
+		return false, err
+	}
+	for i, o := range others { // the others in their order, around it
+		r := i + 1
+		if r >= rank {
+			r++
+		}
+		if _, err := tx.Exec(ctx, `UPDATE principles SET rank = $2 WHERE id = $1`, o, r); err != nil {
+			return false, fmt.Errorf("rank priority: %w", err)
+		}
+	}
+	return true, tx.Commit(ctx)
+}
+
+// CallsToLookBack returns calls of types made between from and to that
+// haven't been looked back on yet, oldest first: what its weekly review
+// judges.
+func (s *Store) CallsToLookBack(ctx context.Context, types []string, from, to time.Time, limit int) ([]memory.Call, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+callColumns+` FROM judgment_calls
+		WHERE outcome = '' AND type = ANY($1) AND created_at >= $2 AND created_at < $3 AND status <> $4
+		ORDER BY created_at, id LIMIT $5`, nonNil(types), from, to, memory.CallAsked, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query calls to look back on: %w", err)
+	}
+	return scanCalls(rows)
+}
+
+// SetOutcome records how a call turned out, and on the owner's decision it
+// became. The owner's verdict stands: its review never overrides it. It
+// returns whether it was recorded.
+func (s *Store) SetOutcome(ctx context.Context, id ulid.ULID, outcome, verdict, note, by string, at time.Time) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("set outcome: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var (
+		caseID *string
+		kept   string // the note, as it now is
+	)
+	err = tx.QueryRow(ctx, `UPDATE judgment_calls SET outcome = $2, verdict = $3, outcome_note = COALESCE(NULLIF($4, ''), outcome_note),
+			outcome_by = $5, outcome_at = $6
+		WHERE id = $1 AND (outcome_by <> $7 OR $5 = $7) RETURNING case_id, outcome_note`,
+		id.String(), outcome, verdict, note, by, at, memory.OutcomeByOwner).Scan(&caseID, &kept)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("set outcome: %w", err)
+	}
+	if caseID != nil {
+		text := strings.ReplaceAll(outcome, "_", " ") + ", " + strings.ReplaceAll(verdict, "_", " ")
+		if kept != "" {
+			text += ": " + kept
+		}
+		if _, err := tx.Exec(ctx, `UPDATE judgment_cases SET outcome = $2, updated_at = $3 WHERE id = $1`, *caseID, text, at); err != nil {
+			return false, fmt.Errorf("set outcome: %w", err)
+		}
+	}
+	return true, tx.Commit(ctx)
 }

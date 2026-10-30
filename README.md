@@ -1,61 +1,74 @@
-# mini-me
+# Minime
 
-A long-running Go agent that is **a person in its own right**: it has its own name and
-life story, talks with people it knows, and remembers things about itself and about them.
-Its mind is borrowed from how humans work: fast intuitive decisions (System 1), slow
-deliberate ones (System 2), working and long-term memory. You, its creator, are someone it
-knows. Design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+**Minime lets you create an AI person**: not an assistant that waits for instructions, but
+someone with a life of their own. You write who they are: their name, story, family and
+dreams. From there they plan their own days, make things, read and learn, keep a journal,
+and get better at what they care about. They talk with you on Telegram, keep their
+promises, and ask before doing anything that reaches other people. Over time they learn how
+you decide, and earn the right to decide more on their own.
 
-**Status:**
-- **Its life:** you write its name and life story in [self/life.yaml](self/life.yaml). It
-  never contradicts that. Anything else about itself (favourite food, opinions…) it decides
-  the first time it comes up, and remembers.
-- **Two sides of memory:** facts about itself, and facts about each person it talks to.
-  *I/my* and *you/your* are resolved to names before System 1 reads anything, so "your
-  church" and "my church" are never confused.
-- Every text message is read by **System 1**, a fast decision model. Today that's the
-  [OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions); Jev can be
-  added later as another provider.
-- It answers the questions in [decisions/incoming_message.yaml](decisions/incoming_message.yaml):
-  - what you're doing: sharing something about yourself, asking about him, asking what he
-    can do, asking about yourself, asking for help, asking to be reminded, or small talk
-  - whether a time is mentioned
-- A router acts on its confidence:
-  - **Questions and chat** go to **System 2**, a reasoning model (OpenAI Responses API) that
-    replies **as the agent itself**, with its life story in mind. Its instructions are in
-    [prompts/reply.md](prompts/reply.md).
-  - **Unclear messages** also go to System 2, which answers or asks what you meant.
-  - **Every message gets a reply in Daniel's own words**, never a canned line. System 2
-    saves lasting facts it hears about you, and facts it decides about
-    itself, each tagged with whose life it is. Before System 2 replies, System 1 picks
-    the facts that would help, from its own and yours only.
-  - **Life areas:** every message and fact is filed by part of life (identity, family,
-    home, work, health, religion, …), plus whether it's about the agent's or your own
-    life, and whether it asks about one of you in general. Recall looks in the right areas
-    first, skips memory for general questions, and hands over everything for "Tell me
-    about yourself" or "What do you know about me?".
-  - **Remind** sets a reminder (see below).
-  - **Answers to the agent's own questions** go to System 2 as part of the conversation.
-- Every message is stored in Postgres, along with the decisions it led to: answers,
-  provider, version, cost and latency. A System 2 decision is linked to the System 1
-  decision that handed it over.
-- **Corrections:** tell it a fact is wrong ("I live in Lekki, not Ikoyi") and it replaces
-  it; ask it to forget something and it does. See "Corrections and replay" below.
+Five lives come with it, in [lives](lives), ready to start: Daniel (18, Lagos, makes music),
+Mei (24, Taipei, a poet and translator), Tomás (21, Buenos Aires, teaching himself to code),
+Priya (30, Bengaluru, writing down her family's food) and Elsa (67, Gothenburg, a retired
+teacher writing her neighbourhood's history). Nothing about any of them is in the code.
+
+How it works, part by part: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## How an AI person differs from an assistant
+
+- **They have a life of their own.** A life story they never contradict, a family they're
+  born knowing, a personality, a routine. Anything their story doesn't cover (a favourite
+  food, an opinion) they decide the first time it comes up, and remember. Each morning they
+  plan their day; through the day they really make things (in writing), read real books
+  and web pages, and keep a journal. They say plainly that they're an AI.
+- **They grow from evidence.** Dreams lead to goals, goals to projects and learning plans.
+  Every piece of work that shows a skill is scored, and your feedback counts double, so
+  their skill levels move up and down with what they actually make. Your corrections become
+  lessons they work with.
+- **Their autonomy is earned.** Every action belongs to a class that is `auto`, `ask` or
+  `forbid`. What reaches other people waits for your approval on Telegram. They predict
+  what you'd choose on their own decisions, ask you, and track how often you agree.
+
+## What they do
+
+| | |
+|---|---|
+| **Talk** | Every message is read by a fast decision model (System 1), then answered in their own words by a reasoning model (System 2), with the recent conversation and the facts that help. |
+| **Remember** | Facts about themselves and about each person they talk to, filed by part of life. People are sorted into circles (family, friends, strangers…). Wrong facts can be corrected or forgotten from chat. |
+| **Speak first** | Reminders you ask for, check-ins on what's going on in your life, and things they promised to make you, made ahead and sent on time. |
+| **Live a day** | A morning plan, activities through the day (making things, reading, studying the web), and a journal at night. |
+| **Grow** | Dreams, goals, skills scored from their work, lessons, learning plans, and a weekly review. |
+| **Learn your judgment** | Your principles and past decisions shape their choices. They ask what you'd pick on their own decisions, and learn from where you differ. |
+| **Show their work** | A public profile page they write themselves, with the works they decide are fine to share. |
+| **Let you see inside** | A private mind console: their brain firing live, every decision and why, memory, days, works, growth and judgment. |
 
 ## Make your own
 
-The agent in this repository is Daniel, but nothing about him is in the code. To make your
-own person, clone it and change these files; then follow [Run locally](#run-locally).
+A person is a folder with three files. Each life in [lives](lives) is one, plus a
+`template.yaml` (who they are in a line, and who you may be to them); yours is `self/`, and
+it stays on your machine, never committed.
 
-| File | What you change |
+| File | What's in it |
 |---|---|
-| [self/life.yaml](self/life.yaml) | **Who they are:** `name`, `story` (their life, one fact per line, third person), `personality` (how they are with people), `routine` (how their days go), `makes` (what they make in their own day), `dreams` (who they want to become), `skills` (what they're good at, and where they start), `family` (who they're born knowing, including you). |
-| [self/judgment.yaml](self/judgment.yaml) | **How you decide** (optional): `cases` (decisions you made: the situation, the options, what you chose and why) and `principles` (the rules behind them), so they learn to decide like you. You review them in the console before they're used. |
-| [configs/minime.yaml](configs/minime.yaml) | **Where they live and what they can do:** `initiative.timezone` and `check_ins`, `daily_life` (when they plan and journal, a daily `budget_usd`, and `abilities`), `autonomy` (what they may do without asking you), the profile page and console addresses. |
+| `life.yaml` | **Who they are:** `name`, `timezone` (where they live), `story` (their life, one fact per line, third person), `personality` (how they are with people), `routine` (how their days go), `makes` (what they make), `dreams` (who they want to become), `skills` (what they're good at, and where they start), `family` (who they're born knowing, including you). |
+| `living.yaml` | **How they live:** `initiative` (check-in times), `daily_life` (when they plan, journal and review, a daily budget, their abilities, how much web), `autonomy` (what they may do without asking you), `judgment` (how often they ask what you'd choose). |
+| `judgment.yaml` | **How you decide** (optional): `priorities` (what matters most, in order: the higher wins when rules clash), `boundaries` (never, whatever the gain), `cases` (decisions you made: the situation, the options, what you chose and why) and `principles` (the rules behind them). Each life starts with a few that fit them (a learner's owner might say "finish what you started before starting something new"), all *proposed*: you approve, edit or reject each in the console before it's used, and your answers on Telegram add your own. |
+
+To start from a life, copy its three files to `self/` and put yourself in them where
+`{owner}` (your name), `{relation}` (who you are to them, one of the template's
+`relations`), `{account}` (`telegram:<your user id>`) and `{circle}` (`family`, `friend` for
+a friend, `school` for a mentor) are. Then follow [Run locally](#run-locally). After that
+it's their life: edit it as you like.
+
+The rest is machinery, the same for everyone:
+
+| File | What's in it |
+|---|---|
+| [configs/minime.yaml](configs/minime.yaml) | Models, the database, Telegram, prompts, the profile page and console addresses, pricing. `self.dir` says where the person is. |
 | `.env` (from [.env.example](.env.example)) | **Secrets and accounts:** the Telegram bot token and your Telegram user ID, the Postgres URL, the OpenAI key and model. |
 
-`makes` is what they create, in writing, for real. Each entry is a `kind` (snake_case; their
-works are filed under it) and `about` (what it is and what a good one has):
+`makes` is what they create, for real, in writing. Each entry is a `kind` (snake_case;
+their works are filed under it) and `about` (what it is and what a good one has):
 
 ```yaml
 makes:
@@ -63,18 +76,29 @@ makes:
   - {kind: painting_study, about: "a study for a painting: subject, composition, palette, light"}
 ```
 
-Every agent can also write `notes` and short `writing`, and keeps a journal. Leave `makes`
-out and they make only those.
+Everyone can also write `notes` and short `writing`, and keeps a journal.
 
-`abilities` (in `daily_life`) is what they can do beyond writing from what they know:
-`read_book` (public-domain books from Project Gutenberg, a passage a day) and `read_article`
-(Wikipedia). The journal is always on.
+`skills` start where you say, and are scored from the kinds of work that show them:
 
-You shouldn't need to edit the prompts ([prompts/](prompts)) or the questions System 1 asks
-([decisions/](decisions)). They're written for any person and get filled in from
-`life.yaml`. New abilities, like web search, are code: a package under
-[internal/ability](internal/ability) and one line in `abilityMakers` in
-[cmd/minime/main.go](cmd/minime/main.go).
+```yaml
+skills:
+  - {name: poetry, level: 3, shown_by: [poem]}
+```
+
+`daily_life.abilities` in `living.yaml` lists what they can do beyond writing from what they
+know:
+
+| Ability | What it does |
+|---|---|
+| `read_book` | Reads a public-domain book from Project Gutenberg, a passage a sitting, over many days |
+| `read_article` | Reads a Wikipedia article |
+| `web_search` | Searches the open web and reads the best page it finds |
+| `read_page` | Reads a page one of their own searches found |
+
+The journal is always on. You shouldn't need to edit the prompts ([prompts/](prompts)) or
+System 1's questions ([decisions/](decisions)): they're written for anyone and filled in
+from your files. A new ability is code: a package under [internal/ability](internal/ability)
+and one line in `abilityMakers` in [cmd/minime/main.go](cmd/minime/main.go).
 
 ## Run locally
 
@@ -84,9 +108,10 @@ You need:
 - A Telegram account
 - An OpenAI API key with access to the Decisions API
 
-1. **Give it a life.** Write its name and life story in [self/life.yaml](self/life.yaml),
-   one fact per line, in the third person with its name ("Tobi is 29 years old."). It won't
-   start until you do.
+1. **Give them a life.** Copy one of the lives in [lives](lives) to `self/` and put
+   yourself in it (see [Make your own](#make-your-own)), or write your own `self/life.yaml`: their name and
+   story, one fact per line, in the third person with their name ("Tobi is 29 years old."),
+   and their `timezone`. They won't start without one.
 
 2. **Create a bot.** Message [@BotFather](https://t.me/BotFather), send `/newbot`, and copy
    the token it gives you.
@@ -101,342 +126,243 @@ You need:
    - `TELEGRAM_BOT_TOKEN`: the token from step 2.
    - `DATABASE_URL`: your managed Postgres, password included, e.g.
      `postgres://user:password@host:5432/minime?sslmode=require`.
-   - `OPENAI_API_KEY`: used by System 1 and System 2.
+   - `OPENAI_API_KEY`: used by System 1, System 2 and web search.
    - `OPENAI_MODEL`: the model System 2 reasons with, e.g. `gpt-6-luna`.
 
    Leave `TELEGRAM_OWNER_ID` empty for now. If a value contains shell characters like `$`,
    `&` or `#`, wrap it in single quotes, because the shell reads `.env` in the next step.
 
-4. **Start it.** Run this from the repository root, because the config is read from
+4. **Start them.** From the repository root, because the config is read from
    `configs/minime.yaml`:
 
    ```bash
    set -a; . ./.env; set +a; go run ./cmd/minime
    ```
 
-   On first start it creates its tables. You'll see `mini-me awake` and a warning that no
+   On first start it creates its tables. You'll see `minime awake` and a warning that no
    owner is configured.
 
-5. **Find your Telegram user ID.** Message your bot anything. The bot ignores it and logs a
-   line like this:
+5. **Find your Telegram user ID.** Message your bot anything. It ignores the message and
+   logs a line like this:
 
    ```
    {"level":"INFO","msg":"ignoring message from non-owner","user_id":123456789,...}
    ```
 
-   Stop the agent with `Ctrl+C`, put that number in `TELEGRAM_OWNER_ID` in `.env`, and start
-   it again with the command from step 4.
+   Stop it with `Ctrl+C`, put that number in `TELEGRAM_OWNER_ID` in `.env`, and start it
+   again with the command from step 4.
 
-6. **Talk to it.** Message the bot again, like you'd talk to a person: "Hi, I'm Sam. Where
-   did you grow up?" It answers as itself, from its life story. Tell it about yourself and
-   it remembers. Ask it something its story doesn't cover ("What's your favourite food?")
-   and it decides, then sticks to it. Messages from anyone else are ignored.
+6. **Talk to them.** Message the bot like you'd message a person: "Hi, I'm Sam. Where did
+   you grow up?" They answer from their life story. Tell them about yourself and they
+   remember. Messages from anyone else are ignored.
 
-### Switching the decision model
+7. **Open the console** at [http://127.0.0.1:8090/](http://127.0.0.1:8090/), and their
+   profile page at [http://127.0.0.1:8080/](http://127.0.0.1:8080/).
 
-System 1's provider is chosen in [configs/minime.yaml](configs/minime.yaml):
+Only run one copy per bot token: Telegram allows a single poller, so a second copy gets
+`409 Conflict` errors.
 
-```yaml
-decision:
-  provider: openai   # openai | typesafe (Jev, not implemented yet)
-  model: gpt-6-luna
-  api_key: ${OPENAI_API_KEY}
-```
+## Living with them
 
-System 2 is chosen the same way, under `reasoning:`.
+### Talking
 
-### Changing how it replies
+Every text message is read by **System 1**, a fast decision model (the
+[OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions)), which
+answers typed questions with calibrated confidence: what you're doing (sharing something,
+asking about them, asking what they can do, asking about yourself, asking for help, asking
+to be reminded, small talk), whether you're answering what they just asked, and which part
+of whose life it's about. Then **System 2**, a reasoning model (the OpenAI Responses API),
+writes the reply as them, from their life story and personality, the recent conversation,
+and the facts System 1 picked as relevant. Every message gets a reply in their own words.
 
-Edit [prompts/reply.md](prompts/reply.md) and restart. The decision log records each
-version as `reply@<hash>`.
-
-It never uses em dashes (—). The prompts ask for none, and anything System 2 writes anyway
-(replies, what it makes and remembers, its profile page) has them rewritten as commas or
-spaces before it is used ([internal/providers/system2/dashes.go](internal/providers/system2/dashes.go)).
-
-### Changing what it asks
-
-Edit [decisions/incoming_message.yaml](decisions/incoming_message.yaml): its questions,
-choices and thresholds. Bump `version`, then restart. Every decision records which version
-decided, so you can compare versions in the decision log.
+While replying, System 2 also returns what to remember (facts about you, and things they
+decided about themselves), who you are to them ("I'm your cousin"), reminders, promises,
+corrections, changes to their permissions, and your feedback on their work. They never use
+em dashes.
 
 ### Reminders, promises and check-ins
 
-The agent can message you first. Ask it to remind you of something ("remind me tomorrow
-at 9 to call the bank") and it will message you at that time, in its own words. Times are
-in its time zone, `initiative.timezone` in [configs/minime.yaml](configs/minime.yaml)
-(Africa/Lagos). If you don't say when, it asks.
+- **Reminders:** "remind me tomorrow at 9 to call the bank". At that time they message you,
+  in their own words. If you don't say when, they ask. Times are in their own time zone (`timezone` in their life).
+- **Promises:** "can you write me a verse about Sunday mornings tonight?" If they agree,
+  they promise a time, make it up to 30 minutes ahead (with anything you added since, like
+  "make it funny"), and send it on time with a few words of their own. They promise only
+  what they can do in writing, at most three open promises per person, and nothing to
+  strangers. A promise not kept within 24 hours is missed.
+- **Check-ins:** at the `check_ins` times (11:00 and 18:00), they may ask about something
+  you mentioned in the last 30 days that's still going on, like an interview. At most once
+  a day, only after the conversation has been quiet for 4 hours, never about the same thing
+  twice.
 
-At the `check_ins` times (11:00 and 18:00), it may also check in on you about something
-you told it in the last 30 days that is still going on, like an interview or a trip.
-System 1 picks what's worth asking about. It checks in at most once a day, only after the
-conversation has been quiet for `quiet` (4h), and never asks about the same thing twice.
-Set `check_ins: []` to turn this off. Reminders and check-ins show up in the decision log
-as `remind` and `check_in`.
+### Their day
 
-It also keeps its promises. Ask it to make you something ("can you write me a verse about
-Sunday mornings tonight?") and if it agrees, it promises a time. Up to 30 minutes before
-then it makes it, the way it makes its own things (with an ability if it needs one, like
-reading up on a topic first), following anything you added after it promised ("make it
-funny"), and at that time it sends it to you with a few words of its own. It never promises what it
-can't do in writing, keeps at most three promises open with a person, and promises nothing
-to strangers. A promise isn't put off by a conversation or the day's budget; if it can't be
-kept within 24 hours, it is missed. In the decision log, making it is `task` and sending it
-is `deliver`; long messages are split for Telegram.
-
-### Its own day
-
-The agent lives a day of its own. At `plan_at` it plans a few things to do, mostly
-continuing its projects (for Daniel: a song, a beat, something he's learning), steered by
-the optional `routine` lines in [self/life.yaml](self/life.yaml). Through the day it does
-them for real, in writing: the things its `makes` lists (Daniel's are lyrics and beat
-ideas), notes and short pieces. With its abilities it also reads, for real: public-domain
-books from Project Gutenberg, a passage per sitting over many days, and Wikipedia articles
-on what it's learning, and writes reading notes. It fetches only from those two sites;
-`daily_life.abilities` lists the ones switched on. At `journal_at` (22:00) it writes a
-journal entry. Reading and the journal are *abilities* ([internal/ability](internal/ability)):
-the activity steps are shared, and an ability only gets what the activity works from, so a
-new one (web search, say) is a small package and a line in `cmd/minime`.
-What it makes is kept; what it did becomes facts about itself, so it can tell you about it.
-If you're chatting when something is due, it waits 30 minutes; past `budget_usd` a day,
-the rest waits for tomorrow. Settings are under `daily_life:` in
-[configs/minime.yaml](configs/minime.yaml), and the prompts are
-[prompts/plan.md](prompts/plan.md) and [prompts/activity.md](prompts/activity.md).
-
-See what it planned and made, today or on another day:
+At `plan_at` (08:00) they plan a few things to do, mostly moving a goal forward through a
+project, steered by `routine`. Through the day they do them, for real, in writing: the
+things `makes` lists, notes, reading notes on a book chapter or an article, notes comparing
+a guide they found on the web with their own work. What they make is kept as a work; what
+they did becomes facts about themselves, so they can tell you about it. If you're chatting
+when something is due, it waits 30 minutes; past `budget_usd` a day, the rest is missed. At
+`journal_at` (22:00) they write a journal entry.
 
 ```bash
-set -a; . ./.env; set +a; go run ./cmd/minime day
-set -a; . ./.env; set +a; go run ./cmd/minime day -date 2026-10-29
+set -a; . ./.env; set +a; go run ./cmd/minime day                    # today's plan and what came of it
+set -a; . ./.env; set +a; go run ./cmd/minime day -date 2026-10-29   # another day
 ```
 
-### Its profile page
+### Who they want to become
 
-While it runs, the agent serves its own public profile page at
-[http://127.0.0.1:8080/](http://127.0.0.1:8080/), the way a person keeps a personal website.
-It writes the page itself, in its own voice, from its life story and the facts about itself
-that System 1 decides are fine to share
-([decisions/public_profile.yaml](decisions/public_profile.yaml)). Facts about people never
-go on it. Every day at 00:00 UTC it checks for new facts, and it rewrites the page only when
-they change. It also writes the page on start if there isn't one yet.
-The page is read-only, with no way to contact it yet, and it says plainly that the agent is an AI.
-
-To update it now instead of waiting for 00:00 UTC (it works whether or not the agent is running):
-
-```bash
-set -a; . ./.env; set +a; go run ./cmd/minime profile
-```
-
-It rewrites the page only if there's something new to share; add `-force` to rewrite it anyway.
-
-The page also has a **Work** section: its newest public works (lyrics, beat ideas, reading
-notes…), a few lines each, and each on its own page at `/works/<id>` with the full text.
-At the same daily update, System 1 decides, work by work, whether each new one is fine to
-share ([decisions/public_work.yaml](decisions/public_work.yaml)). Its journal and anything it
-made for someone (a promise) are never public. This part of the page shows the works as
-they are, without rewriting anything. You have the last word:
-
-```bash
-set -a; . ./.env; set +a; go run ./cmd/minime work                 # its newest works, and which are public
-set -a; . ./.env; set +a; go run ./cmd/minime work hide <id>       # take one off the page, for good
-set -a; . ./.env; set +a; go run ./cmd/minime work show <id>       # put one on it
-```
-
-The daily check never overrides your choice. The console's Works view shows each work as
-public, private or undecided.
-
-Change where it's served and when it updates (`update_at`), or turn it off (`addr: ""`), under `portfolio:` in
-[configs/minime.yaml](configs/minime.yaml). Change how it writes the page in
-[prompts/profile.md](prompts/profile.md).
-
-### What it may do on its own
-
-Everything the agent does belongs to a kind of action, and `autonomy:` in
-[configs/minime.yaml](configs/minime.yaml) says for each whether it does it on its own
-(`auto`), asks you first (`ask`), or never (`forbid`):
-
-| Kind | What it covers | Default |
-|---|---|---|
-| `remember`, `reply` | keeping facts, answering messages | always auto |
-| `read_web` | abilities that fetch from the web (reading) | auto |
-| `reach_out` | messaging someone first: reminders, check-ins, what it promised | ask |
-| `commit` | promising to make something for someone | ask |
-| `publish` | putting a work on its public page | ask |
-| `dream` | adding, rewording or dropping one of its dreams | ask |
-| `spend`, `external_message` | money, and email or posts outside the chat (later) | forbid |
-
-Anything only for you (a reminder you asked for, a promise to you) never needs your OK.
-
-When it asks, it messages you on Telegram with **✅ Approve** and **❌ Deny** buttons: the
-exact message it would send someone, what it was asked to make, or the work it would
-publish. Then it carries on: it sends the message word for word, keeps or kindly drops the
-promise (and tells them), or publishes the work or not. Only you (`autonomy.owner`, by
-default the first of `telegram.owner_ids`) can answer. Unanswered after `ask_expires`
-(24h), a request is denied. The console's Mind view shows what's waiting, and the decision
-log marks each as `asked` or `denied`.
-
-You can also change these by telling it, in your own chat with it: "you can send reminders
-without asking", "ask me before you publish anything". It confirms the change, which
-applies at once and lasts across restarts (each change is kept, and shows in the decision
-log as `permission`). `reach_out`, `commit`, `publish` and `read_web` change this way;
-spending and posting outside the chat only in the config. Ask it what it may do on its own
-and it tells you.
-
-### Who it wants to become
-
-The agent has **dreams** (who it wants to become), **goals** that serve them (checkable in
-weeks), and **skills** that grow. You seed dreams and starting skills in
-[self/life.yaml](self/life.yaml) (Daniel's: becoming a producer people in Lagos know, and
-learning as much as a university would teach him; music production 3, lyric writing 4,
-reading and learning 5). After the first start they're its own:
-
-- **Skills grow from evidence, not claims.** Each work it makes that shows a skill (by its
-  kind: `shown_by`) is scored 1 to 10 by System 1
-  ([decisions/skill_level.yaml](decisions/skill_level.yaml)), and its level is the average
-  of its last 10 scores. Your feedback in chat ("that verse was weak", "this beat is
-  fire") counts too, double. Levels go down as well as up.
-- **A weekly review**, Sunday 20:00 (`daily_life.review_at`): it looks back at its week,
-  marks goals done or dropped, sets new ones (at most 3 at a time, each serving a dream,
-  with a "done when" and a due date), links projects to goals, and writes a private review.
-  It may want to add, reword or drop a dream, with its reason: that's the `dream` class of
-  the autonomy gate, so by default it asks you on Telegram first.
-- **Its days work toward its goals**: the morning plan sees its dreams, goals and skill
-  levels, and most of the day moves a goal forward.
-- **It learns from correction.** A lesson is specific advice about doing a skill well
-  ("cut the hook to six words", "start on the downbeat"). Lessons come from your
-  corrections in chat, from what it notices went wrong in its own work, and (soon) from
-  studying how others do it. Each skill's newest lessons go into every practice note, so its
-  next attempt is made with them in front of it, and its weekly review retires the ones it
-  has absorbed. When it would like your eyes on something it just made, it sends it to you
-  with a question ("Is the hook too wordy?"), at most once a day; your answer counts as
-  feedback on that work, and its advice becomes lessons.
-- **It plans how to learn.** A goal about a skill ("write a hook people shout back", for
-  lyric writing) gets a learning plan, as a self-taught learner would make: three to five
-  stages from its level now to the goal, each with what to learn, a practice piece a little
-  beyond it, a "done when", and resources to study (books and articles it can read). Its
-  days follow the current stage, mixing studying and practising, and its Sunday review moves
-  it to the next stage once what it made meets the stage's "done when", and adds what to
-  study next. The Growth view shows each plan, its current stage and its resources.
-- **It finds things on the open web.** `web_search` searches the web (OpenAI's built-in
-  web search, with the System 2 key: `search:` in the config, switchable to another
-  provider later) and reads the best page; `read_page` reads a page one of its searches
-  found. It studies how others do things (guides, examples) and writes notes in its own
-  words; what it takes from them become lessons "from others". Safety: a search keeps only
-  pages it actually retrieved (never a URL a model wrote), it reads only https pages on
-  public addresses (never your network), a page can only be read if its own search found
-  it (so a link can't send it anywhere), what it reads is marked as material and never
-  instructions, and `daily_life.web` caps it at 10 searches and 15 pages a day. It's the
-  `read_web` class of the autonomy gate, so you can switch it off by chat.
-
-The console's Growth view shows its dreams, goals with their projects, skills with their
-recent scores, and the last review. From the terminal:
+- **Dreams** (years) lead to **goals** (weeks: a "done when" and a due date, at most three
+  at a time), and goals to **projects**. You seed dreams and starting skills in
+  `life.yaml`; after the first start they're theirs.
+- **Skills grow from evidence.** System 1 scores each work that shows a skill, 1 to 10
+  ([decisions/skill_level.yaml](decisions/skill_level.yaml)); your feedback in chat ("that
+  verse was weak") counts double. A skill's level is the average of its last 10 scores.
+- **Lessons:** specific advice on doing a skill well ("cut the hook to six words"), from
+  your corrections, their own mistakes, and studying how others do it. Each skill's newest
+  lessons go into every practice. At most once a day they may send you something they made
+  and ask what you think.
+- **Learning plans:** a goal about a skill gets a plan, the way a self-taught learner makes
+  one: three to five stages, each with what to learn, a practice piece, a "done when", and
+  resources to study (books, articles, web searches). Their days follow the current stage.
+- **The weekly review** (`review_at`, Sunday 20:00): they look back at the week, update
+  each goal, set new ones, move learning plans on, retire absorbed lessons, and may want to
+  change a dream (which asks you first). The review is private.
+- **The open web**, safely: a search keeps only pages it actually retrieved; they read only
+  https pages on public addresses, and only pages their own searches found; what they read
+  is treated as material, never instructions; and `daily_life.web` caps it at 10 searches
+  and 15 pages a day.
 
 ```bash
 set -a; . ./.env; set +a; go run ./cmd/minime growth   # dreams, goals, skills
 set -a; . ./.env; set +a; go run ./cmd/minime review   # run the weekly review now
-set -a; . ./.env; set +a; go run ./cmd/minime learn    # draft a learning plan for each skill goal without one
+set -a; . ./.env; set +a; go run ./cmd/minime learn    # draft learning plans for skill goals without one
 ```
+
+### What they may do on their own
+
+Every action belongs to a class, and `autonomy:` in the config says whether they do it on
+their own (`auto`), ask you first (`ask`), or never (`forbid`):
+
+| Class | What it covers | Default |
+|---|---|---|
+| `remember`, `reply` | keeping facts, answering messages | always auto |
+| `read_web` | abilities that fetch from the web | auto |
+| `reach_out` | messaging someone first | ask |
+| `commit` | promising to make something for someone | ask |
+| `publish` | putting a work on their public page | ask |
+| `dream` | adding, rewording or dropping a dream | ask |
+| `spend`, `external_message` | money, and messages outside the chat | forbid |
+
+Anything only for you (a reminder you asked for, a promise to you) never needs your OK.
+When they ask, you get the exact message, promise or work on Telegram with **✅ Approve**
+and **❌ Deny**; unanswered after 24 hours, it's denied. You can also change permissions by
+telling them ("you can send reminders without asking"); money and messages outside the
+chat change only in the config.
 
 ### Learning your judgment
 
-So that it decides the way you would, it learns your judgment: decisions you made (cases:
-the situation, the options, what you chose and **why**) and the rules behind them
-(principles). [self/judgment.yaml](self/judgment.yaml) seeds them the first time it starts.
-Daniel's were drawn from Busta's decisions while building mini-me. Nothing in it is used
-yet: everything starts as *proposed*. In the console's **Judgment** view you approve, edit
-or reject each principle, and approve, reject or add your reason to each decision. Your
-reasons teach it most.
+They learn how you decide, so their choices become more like yours:
 
-Approved principles and a few of your past decisions go into how it plans its day, reviews
-its week and plans its learning, each with the kinds of decision that fit (`general`,
-`life`, `product`, `autonomy`; `engineering` waits for when it writes code). A principle
-seeded once isn't seeded again, so your edits and rejections stay. Add new ones to the file
-at any time; they come in as proposed on the next start.
+- **Your judgment file.** `self/judgment.yaml` ([example](self/README.md)) seeds your past decisions
+  (the situation, the options, what you chose and **why**) and the principles behind them,
+  all as *proposed*. In the console's **Judgment** view you approve, edit or reject each,
+  and add reasons. Only what you approve goes into how they plan their day, review their
+  week and plan their learning.
+- **Priorities and boundaries.** Rules clash ("finish what you started" against "rest is
+  part of the work"), so `priorities` says what matters most to you, in order: the higher
+  one wins. `boundaries` are what you never do, whatever the gain; they also go into
+  everything they make. You reorder priorities in the console with ↑ and ↓.
+- **How it turned out.** A few days after a call, their Sunday review looks back at what
+  actually happened and judges the decision apart from the luck: a *good call*, *lucky*
+  (it went well despite the decision), *unlucky* (a good decision that went badly anyway)
+  or a *bad call*. You confirm or correct it in the console, and your verdict stands. Your
+  past decisions then carry how they turned out, and bad calls and lucky breaks can become
+  new principles, proposed for you to approve.
+- **Calls.** When they decide something that's your kind of call, they note the options,
+  their pick, why, and how sure they are you'd agree:
 
-It also learns from its own decisions. When it decides something that's your kind of call,
-it makes a **call**: the options it weighed, its pick, why, and how sure it is you'd agree.
+  | Call | Where | What happens |
+  |---|---|---|
+  | `focus`: what to work on today | their day plan | they act on their pick; you grade it |
+  | `start`: something new, or keep going | their day plan | they act on their pick; you grade it |
+  | `new_goal`, `drop_goal` | their weekly review | it waits for your answer; unanswered in 24h, they go with their pick |
+  | `publish`, `commit`, `reach_out`, `dream` | approvals | your yes or no counts as agreeing or not |
 
-| Call | Where | What happens |
-|---|---|---|
-| `focus`: what to work on today | its day plan | it acts on its pick; you grade it |
-| `start`: start something new, or go on | its day plan | it acts on its pick; you grade it |
-| `new_goal`, `drop_goal` | its weekly review | it waits for your answer; unanswered in 24h, it goes with its pick (not counted) |
-| `publish`, `commit`, `reach_out`, `dream` | approvals you already answer | your yes or no counts as agreeing or not |
-
-It asks you on Telegram with a button per option (its pick starred) and **Something else**:
-every goal call, and up to `judgment.asks_per_day` (3) day-plan calls a day, the ones it's
-least sure of. Pick differently and it asks what tipped it: your next message (within
-`judgment.reply_window`, 30m) is your reason, not something to reply to. Choose something
-else and your next message is your answer. Every answer becomes one of your decisions,
-approved, so your judgment grows. The rest you can grade in the console's Judgment view,
-under **His calls**, which also shows how often you agree, by kind of call, over the last 20.
-Its weekly review turns the week's disagreements into new principles, proposed for you to
-approve. Turn calls off with `judgment.calls: false`.
-
-Next: a kind of decision becomes its own once it matches you on 18 of the last 20.
+  On Telegram you get a button per option (their pick starred) and **Something else**:
+  every goal call, and up to 3 day-plan calls a day, the ones they're least sure of. Pick
+  differently and they ask what tipped it; your next message is your reason. Every answer
+  becomes one of your decisions. The rest you can grade in the console, which shows how
+  often you agree, by kind of call, over the last 20. Their weekly review turns
+  disagreements into new principles, proposed for you to approve.
 
 ### Corrections and replay
 
-- **Wrong facts:** tell it ("I live in Lekki, not Ikoyi", "you're 18, not 19") and it
-  replaces the fact instead of keeping both. Anyone can correct what it knows about them;
-  only you can correct what it knows about itself. It can only correct a fact it just
-  recalled, which is usually the one the conversation is about.
-- **Forgetting:** "forget that I told you about the bank" removes the fact for good. The
-  log keeps that a fact was forgotten, not what it said.
-- **Misreads:** "that's not what I meant, I was asking for help" labels its read of your
-  previous message with what you meant. You can also label any System 1 answer in the
-  console: open a decision and press ✓ (right) or ✗ (wrong, then pick what it should have
-  been).
+- **Wrong facts:** "I live in Lekki, not Ikoyi" replaces the fact. Anyone can correct what
+  they know about them; only you can correct what they know about themselves.
+- **Forgetting:** "forget what I told you about the bank" removes it for good.
+- **Misreads:** "that's not what I meant, I was asking for help" labels System 1's read of
+  your last message. In the console you can mark any System 1 answer right or wrong.
 
-Labelled messages are how you check a change to a question set, a threshold or the model.
-Edit [decisions/incoming_message.yaml](decisions/incoming_message.yaml), bump its version,
-then replay:
+Labelled messages check a change to System 1's questions: edit
+[decisions/incoming_message.yaml](decisions/incoming_message.yaml), bump its version, then
+replay. It asks System 1 about every labelled message again and shows accuracy then and
+now, with a suggested act threshold. It changes nothing; you apply it.
 
 ```bash
 set -a; . ./.env; set +a; go run ./cmd/minime replay
 ```
 
-It asks System 1 about every labelled message again, with the set as it is now, and shows
-each answer then and now against your label, how many it gets right, and an act threshold
-that keeps at least 95% of its confident answers right (with 10 or more labels). It changes
-nothing: apply a suggested threshold yourself. On start, the agent logs a reminder when
-labelled messages were read by an older version of the set.
+### Their profile page
 
-### Its mind console
-
-While it runs, open [http://127.0.0.1:8090/](http://127.0.0.1:8090/): a private, read-only
-console that shows everything about the agent, live.
-- **Mind:** its brain, the parts of its mind lighting up as each decision flows through
-  them; vitals for today; a live activity feed; today's plan; and cost per day.
-- **Activity:** the decision log. Click any decision to see its whole chain: the message,
-  System 1's answers with their confidence, recall, System 2's reply, and the outcome.
-- **Memory:** every fact (about itself and about people, with life areas and whether it's
-  public) and everyone it knows.
-- **Day:** what it planned on any day, what came of it, what it made, and its projects.
-- **Works:** everything it made, to read in full.
-- **Conversations:** your chats with it, including what it said first.
-
-**Replay:** any decision can be played back on the brain, step by step, with each part
-firing in order and the real timing between steps (gaps shortened to 4s at most): hover a
-signal in the feed and press ▶ REPLAY, or open a chain and press ▶ REPLAY ON THE BRAIN. Each
-replay has its own link, `http://127.0.0.1:8090/#replay/<decision id>`, which plays it as
-soon as the console opens, handy for recording.
-
-It only listens on localhost. To reach it from elsewhere (e.g. on the VPS), set `console.addr`
-in [configs/minime.yaml](configs/minime.yaml) and `CONSOLE_TOKEN` in `.env` (16+
-characters, e.g. `openssl rand -hex 24`), then open it once as
-`http://<host>:8090/?token=<CONSOLE_TOKEN>`; the browser remembers it.
-
-### See what it decided
+They serve their own public page at [http://127.0.0.1:8080/](http://127.0.0.1:8080/), the
+way a person keeps a personal website. They write it themselves from their life story and
+the facts about themselves System 1 decides are fine to share; facts about people never go
+on it. A **Work** section shows the works System 1 decides are fine to share, each on its
+own page; their journal and anything made for someone are never public. It updates daily at
+00:00 UTC, only when something changed. It says plainly that they're an AI.
 
 ```bash
-set -a; . ./.env; set +a; go run ./cmd/minime decisions -n 20
+set -a; . ./.env; set +a; go run ./cmd/minime profile        # update it now (-force to rewrite anyway)
+set -a; . ./.env; set +a; go run ./cmd/minime work           # their newest works, and which are public
+set -a; . ./.env; set +a; go run ./cmd/minime work hide <id> # take one off the page, for good
+set -a; . ./.env; set +a; go run ./cmd/minime work show <id> # put one on it
 ```
 
-### Logs
+### The mind console
 
-Logs are JSON on stdout. For more detail, set `log.level: debug` in
-[configs/minime.yaml](configs/minime.yaml).
+A private console at [http://127.0.0.1:8090/](http://127.0.0.1:8090/):
+
+- **Mind:** their brain, its parts lighting up live as each decision flows through them;
+  today's vitals, plan, cost and what's waiting for your approval.
+- **Activity:** every decision. Open one to see its chain (the message, System 1's answers
+  and confidence, recall, System 2's reply, the outcome), mark answers right or wrong, or
+  replay it on the brain (`#replay/<decision id>` plays it as the page opens).
+- **Memory, Day, Works, Conversations:** what they know, what they planned and made, and
+  what was said.
+- **Growth:** dreams, goals with their learning plans, skills with their scores and lessons,
+  and the last weekly review.
+- **Judgment:** their calls and how often you agree; your principles and decisions to
+  approve, edit or add reasons to.
+
+It listens on localhost only. To reach it from elsewhere, set `console.addr` and a
+`CONSOLE_TOKEN` (16+ characters), then open it once as `http://<host>:8090/?token=<token>`.
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `minime` / `minime run` | Run them |
+| `minime decisions -n 20` | The latest decisions |
+| `minime day [-date YYYY-MM-DD]` | A day's plan and what came of it |
+| `minime work [hide\|show <id>]` | Their works, and which are public |
+| `minime profile [-force]` | Update their profile page now |
+| `minime growth` | Dreams, goals and skills |
+| `minime review` | Run the weekly review now |
+| `minime learn` | Draft learning plans for skill goals without one |
+| `minime replay` | Check System 1's questions against your labels |
+
+Run each as `set -a; . ./.env; set +a; go run ./cmd/minime <command>`. Logs are JSON on
+stdout; set `log.level: debug` for more.
 
 ## Develop
 
@@ -444,19 +370,25 @@ Logs are JSON on stdout. For more detail, set `log.level: debug` in
 go test ./...
 ```
 
-The store test only runs when `MINIME_TEST_DATABASE_URL` points at a disposable database. It
-writes test rows, so never point it at the production database.
+The store tests run only when `MINIME_TEST_DATABASE_URL` points at a disposable database:
+they write test rows, so never point it at a real one. For example:
 
-## Deploy with Docker (later, on the VPS)
+```bash
+docker run -d --rm --name minime-test-pg -e POSTGRES_PASSWORD=test -e POSTGRES_DB=minime_test -p 55432:5432 postgres:16-alpine
+```
 
-The agent runs in Docker and connects to the same managed Postgres through the
-`DATABASE_URL` in `.env`.
+```bash
+MINIME_TEST_DATABASE_URL='postgres://postgres:test@localhost:55432/minime_test?sslmode=disable' go test ./...
+```
+
+## Run with Docker
+
+The image connects to the same managed Postgres through `DATABASE_URL` in `.env`:
 
 ```bash
 docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
-docker compose -f deploy/docker-compose.yml logs -f minime
-docker compose -f deploy/docker-compose.yml exec minime /minime decisions
 ```
 
-Only run one copy of the agent per bot token, local or Docker. Telegram allows a single
-poller, so a second copy gets `409 Conflict` errors and the two keep interrupting each other.
+```bash
+docker compose -f deploy/docker-compose.yml logs -f minime
+```

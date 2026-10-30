@@ -387,6 +387,16 @@ func (f *fakeStore) ReviewPrinciple(_ context.Context, id ulid.ULID, status, tex
 	return false, nil
 }
 
+func (f *fakeStore) RankPriority(_ context.Context, id ulid.ULID, rank int, _ time.Time) (bool, error) {
+	for i := range f.principles {
+		if f.principles[i].ID == id && f.principles[i].Kind == memory.PrincipleRank {
+			f.principles[i].Rank = rank
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (f *fakeStore) ReviewCase(_ context.Context, id ulid.ULID, status, reason string, _ time.Time) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -548,5 +558,57 @@ func TestGradeCalls(t *testing.T) {
 	}
 	if len(got.Agreement) != 1 || got.Agreement[0]["answered"] != float64(1) || got.Agreement[0]["agreed"] != float64(0) {
 		t.Errorf("agreement = %+v", got.Agreement)
+	}
+}
+
+func (f *fakeStore) SetOutcome(_ context.Context, id ulid.ULID, outcome, verdict, note, by string, _ time.Time) (bool, error) {
+	for i := range f.calls {
+		if f.calls[i].ID == id {
+			f.calls[i].Outcome, f.calls[i].Verdict, f.calls[i].OutcomeNote, f.calls[i].OutcomeBy = outcome, verdict, note, by
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func TestJudgeOutcome(t *testing.T) {
+	s, st := newServer("")
+	done := memory.Call{ID: ulid.Make(), Type: memory.CallFocus, Options: []string{"a", "b"}, Status: memory.CallAnswered,
+		Outcome: memory.OutcomeWell, Verdict: memory.VerdictGood, OutcomeBy: memory.OutcomeBySelf}
+	asked := memory.Call{ID: ulid.Make(), Type: memory.CallFocus, Options: []string{"a", "b"}, Status: memory.CallAsked}
+	st.calls = []memory.Call{done, asked}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	post := func(body string) int {
+		req, _ := http.NewRequest("POST", srv.URL+"/api/judgment/outcomes", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	for name, step := range map[string]struct {
+		body string
+		want int
+	}{
+		"bad verdict": {`{"id":"` + done.ID.String() + `","outcome":"went_well","verdict":"meh"}`, http.StatusBadRequest},
+		"bad outcome": {`{"id":"` + done.ID.String() + `","outcome":"great","verdict":"lucky"}`, http.StatusBadRequest},
+		"still asked": {`{"id":"` + asked.ID.String() + `","outcome":"went_well","verdict":"lucky"}`, http.StatusNotFound},
+	} {
+		if code := post(step.body); code != step.want {
+			t.Errorf("%s = %d, want %d", name, code, step.want)
+		}
+	}
+	if code := post(`{"id":"` + done.ID.String() + `","outcome":"went_well","verdict":"lucky","note":"the deadline moved"}`); code != http.StatusNoContent {
+		t.Fatalf("judge = %d", code)
+	}
+	var got struct {
+		Calls []map[string]any `json:"calls"`
+	}
+	getJSON(t, srv.URL+"/api/judgment", &got)
+	if got.Calls[0]["verdict"] != "lucky" || got.Calls[0]["outcome_by"] != "owner" || got.Calls[0]["outcome_note"] != "the deadline moved" {
+		t.Errorf("call = %+v", got.Calls[0])
 	}
 }

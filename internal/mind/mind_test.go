@@ -1100,7 +1100,7 @@ func TestFollowUp(t *testing.T) {
 		wantActions []string
 		wantSetID   string
 	}{
-		{"answer to mini-me's question continues to System 2", asked,
+		{"answer to minime's question continues to System 2", asked,
 			&fakeSystem1{choice: "share", confidence: 0.95, followProb: 0.97}, 1,
 			[]string{"continue", "reply"}, "incoming_message@1,follow_up@1,life_area@1"},
 		{"new request after a question is routed on intent", asked,
@@ -1649,4 +1649,29 @@ func (s *fakeStore) GiveCallReason(_ context.Context, id ulid.ULID, reason strin
 		}
 	}
 	return nil
+}
+
+func (s *fakeStore) CallsToLookBack(_ context.Context, types []string, from, to time.Time, limit int) ([]memory.Call, error) {
+	var out []memory.Call
+	for _, c := range s.calls {
+		if c.Outcome == "" && slices.Contains(types, c.Type) && !c.CreatedAt.Before(from) && c.CreatedAt.Before(to) &&
+			c.Status != memory.CallAsked && len(out) < limit {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) SetOutcome(_ context.Context, id ulid.ULID, outcome, verdict, note, by string, at time.Time) (bool, error) {
+	c := s.callAt(id)
+	if c == nil || (c.OutcomeBy == memory.OutcomeByOwner && by != memory.OutcomeByOwner) {
+		return false, nil
+	}
+	c.Outcome, c.Verdict, c.OutcomeNote, c.OutcomeBy, c.OutcomeAt = outcome, verdict, note, by, at
+	for i := range s.cases {
+		if s.cases[i].ID == c.CaseID {
+			s.cases[i].Outcome = outcome + ", " + verdict + ": " + note
+		}
+	}
+	return true, nil
 }

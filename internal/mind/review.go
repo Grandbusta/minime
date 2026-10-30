@@ -38,7 +38,7 @@ const (
 var reviewFormat = &system2.Format{Name: "weekly_review", Schema: map[string]any{
 	"type": "object", "additionalProperties": false,
 	"required": []string{"title", "text", "goals", "new_goals", "projects", "dreams", "retire_lessons", "new_lessons", "plans", "new_resources",
-		"principles"},
+		"principles", "outcomes"},
 	"properties": map[string]any{
 		"title": map[string]any{"type": "string"},
 		"text":  map[string]any{"type": "string"},
@@ -98,6 +98,7 @@ var reviewFormat = &system2.Format{Name: "weekly_review", Schema: map[string]any
 				"lesson": map[string]any{"type": "string"},
 			},
 		}},
+		"outcomes": outcomesFormat,
 		"principles": map[string]any{"type": "array", "items": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"text", "types", "calls"},
 			"properties": map[string]any{
@@ -206,6 +207,16 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 	note.WriteString(m.judgmentNote(ctx, reviewJudgment))
 	disagreements, callCases := m.disagreementsNote(ctx, now)
 	note.WriteString(disagreements)
+	lookBack, looked := m.lookBackNote(ctx, now)
+	note.WriteString(lookBack)
+	for _, c := range looked { // a principle may come from how one of the owner's decisions turned out
+		if !c.CaseID.IsZero() {
+			if callCases == nil {
+				callCases = map[string]string{}
+			}
+			callCases[c.ID.String()] = c.CaseID.String()
+		}
+	}
 
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.lifeInstructions(m.Day.ReviewPrompt),
@@ -237,6 +248,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 			Why        string   `json:"why"`
 			Confidence float64  `json:"confidence"`
 		} `json:"new_goals"`
+		Outcomes   []callOutcome `json:"outcomes"`
 		Principles []struct {
 			Text  string   `json:"text"`
 			Types []string `json:"types"`
@@ -426,6 +438,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 			}
 		}
 	}
+	changes = append(changes, m.lookBack(ctx, looked, out.Outcomes, now)...)
 	for _, pr := range out.Principles {
 		text := strings.TrimSpace(pr.Text)
 		var types, keys []string

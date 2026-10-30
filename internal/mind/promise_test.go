@@ -15,7 +15,6 @@ import (
 	"minime/internal/memory"
 	"minime/internal/perception"
 	"minime/internal/providers/system2"
-	"minime/internal/self"
 )
 
 func promiseMind(r *fakeReplier, s2 *fakeSystem2) (*Mind, *fakeStore) {
@@ -195,23 +194,21 @@ func TestPromisesTooLateOrToNobodyAreMissed(t *testing.T) {
 }
 
 func TestShippedReplyPromptIsFilledIn(t *testing.T) {
-	life, err := self.Load("../../self/life.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
 	raw, err := os.ReadFile("../../prompts/reply.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, s := promiseMind(&fakeReplier{}, &fakeSystem2{})
-	m.Life, m.ReplyPrompt = life, Prompt{Text: string(raw)}
-	got := m.instructions(context.Background(), s.people[sam], names{agent: life.Name, speaker: "Sam"})
-	if i := strings.IndexAny(got, "{}"); i >= 0 {
-		t.Errorf("placeholder left at %q", got[max(0, i-30):min(len(got), i+30)])
-	}
-	for _, want := range []string{"- lyrics: ", "- look_up: look it up"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("reply prompt is missing %q", want)
+	for _, life := range shippedLives(t) {
+		m, s := promiseMind(&fakeReplier{}, &fakeSystem2{})
+		m.Life, m.ReplyPrompt = life, Prompt{Text: string(raw)}
+		got := m.instructions(context.Background(), s.people[sam], names{agent: life.Name, speaker: "Sam"})
+		if i := strings.IndexAny(got, "{}"); i >= 0 {
+			t.Errorf("%s: placeholder left at %q", life.Name, got[max(0, i-30):min(len(got), i+30)])
+		}
+		for _, want := range []string{"- " + life.Makes[0].Kind + ": ", "- look_up: look it up"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s: reply prompt is missing %q", life.Name, want)
+			}
 		}
 	}
 }

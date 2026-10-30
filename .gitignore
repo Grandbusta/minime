@@ -2,3 +2,8 @@
 /bin/
 .DS_Store
 /minime
+
+# Your own life and judgment: written by `minime new` (or by you), never committed.
+/self/life.yaml
+/self/judgment.yaml
+/self/living.yaml

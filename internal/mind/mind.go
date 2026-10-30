@@ -114,6 +114,8 @@ type Store interface {
 	WaitingCall(ctx context.Context, since time.Time) (memory.Call, bool, error)
 	AnswerCall(ctx context.Context, c memory.Call, asCase bool) (bool, error)
 	GiveCallReason(ctx context.Context, id ulid.ULID, reason string, at time.Time) error
+	CallsToLookBack(ctx context.Context, types []string, from, to time.Time, limit int) ([]memory.Call, error)
+	SetOutcome(ctx context.Context, id ulid.ULID, outcome, verdict, note, by string, at time.Time) (bool, error)
 	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
 	SaveProject(ctx context.Context, p memory.Project) error
 	Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error)

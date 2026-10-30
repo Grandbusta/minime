@@ -63,10 +63,10 @@ func (m *Mind) bornKnowing(ctx context.Context) {
 		now := time.Now().UTC()
 		added, err := m.Store.AddPersonIfNew(ctx, memory.Person{
 			Key: key, Name: r.Name, Relation: fmt.Sprintf("%s is %s's %s.", r.Name, m.Life.Name, r.Relation),
-			Circle: circleFamily, Source: memory.KnownFromBirth, FirstSeen: now, UpdatedAt: now,
+			Circle: orDefault(r.Circle, circleFamily), Source: memory.KnownFromBirth, FirstSeen: now, UpdatedAt: now,
 		})
 		if err != nil {
-			m.Log.Warn("storing family member failed", "person", key, "err", err)
+			m.Log.Warn("storing someone it was born knowing failed", "person", key, "err", err)
 			continue
 		}
 		if added {

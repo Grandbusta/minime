@@ -517,3 +517,94 @@ func (m *Mind) ownerName(ctx context.Context) string {
 	}
 	return "your owner"
 }
+
+const (
+	// lookBackAfter is how long after a call its review looks at how it turned out.
+	lookBackAfter = 2 * 24 * time.Hour
+	// lookBackPerReview is the most calls one review looks back on.
+	lookBackPerReview = 10
+)
+
+// lookBackTypes are the calls worth looking back on: its own decisions, not
+// approvals (what happened after those is the owner's doing).
+var lookBackTypes = []string{memory.CallFocus, memory.CallStart, memory.CallNewGoal, memory.CallDropGoal}
+
+// outcomesFormat is the shape of a review's look back at its calls.
+var outcomesFormat = map[string]any{"type": "array", "items": map[string]any{
+	"type": "object", "additionalProperties": false, "required": []string{"call_id", "outcome", "verdict", "note"},
+	"properties": map[string]any{
+		"call_id": map[string]any{"type": "string"},
+		"outcome": map[string]any{"type": "string", "enum": memory.Outcomes},
+		"verdict": map[string]any{"type": "string", "enum": memory.Verdicts,
+			"description": "good_call: a good decision that went well; lucky: went well despite the decision; unlucky: a good decision that went badly anyway; bad_call: went badly because of the decision"},
+		"note": map[string]any{"type": "string", "description": "what actually happened, in a sentence, from what you made and lived"},
+	},
+}}
+
+// done is what a call led it to do: its pick, or for a before-call the
+// owner's choice when they gave one.
+func done(c memory.Call) string {
+	if c.Mode == memory.CallBefore && c.Agreed != nil {
+		if c.OwnerPick >= 0 && c.OwnerPick < len(c.Options) {
+			return c.Options[c.OwnerPick]
+		}
+		return c.OwnerChoice
+	}
+	return c.Options[c.Pick]
+}
+
+// lookBackNote is the calls its weekly review looks back on, by id: what it
+// decided, what it did, and what its owner would have chosen.
+func (m *Mind) lookBackNote(ctx context.Context, now time.Time) (string, []memory.Call) {
+	if !m.Calls.On {
+		return "", nil
+	}
+	calls, err := m.Store.CallsToLookBack(ctx, lookBackTypes, now.Add(-2*reviewWindow), now.Add(-lookBackAfter), lookBackPerReview)
+	if err != nil || len(calls) == 0 {
+		return "", nil
+	}
+	owner := m.ownerName(ctx)
+	var b strings.Builder
+	b.WriteString("\n\nCalls of yours to look back on (by call id): how did each turn out, from what you made and lived since? Judge the decision apart from the luck.")
+	for _, c := range calls {
+		fmt.Fprintf(&b, "\n- [call %s] %s, %s: you did %q.", c.ID, c.CreatedAt.In(m.Zone).Format("Mon 2 Jan"),
+			strings.TrimSuffix(c.Situation, "."), done(c))
+		if c.Agreed != nil && !*c.Agreed {
+			theirs := c.OwnerChoice
+			if c.OwnerPick >= 0 && c.OwnerPick < len(c.Options) {
+				theirs = c.Options[c.OwnerPick]
+			}
+			fmt.Fprintf(&b, " %s would have chosen %q.", owner, theirs)
+		}
+	}
+	return b.String(), calls
+}
+
+// lookBack records how the calls its review looked back on turned out. It
+// returns what it recorded, for the log.
+func (m *Mind) lookBack(ctx context.Context, calls []memory.Call, outcomes []callOutcome, now time.Time) []string {
+	byID := map[string]memory.Call{}
+	for _, c := range calls {
+		byID[c.ID.String()] = c
+	}
+	var changes []string
+	for _, o := range outcomes {
+		c, ok := byID[strings.TrimSpace(o.CallID)]
+		if !ok || !slices.Contains(memory.Outcomes, o.Outcome) || !slices.Contains(memory.Verdicts, o.Verdict) {
+			continue
+		}
+		if ok, err := m.Store.SetOutcome(ctx, c.ID, o.Outcome, o.Verdict, strings.TrimSpace(o.Note), memory.OutcomeBySelf, now.UTC()); err != nil || !ok {
+			continue
+		}
+		changes = append(changes, fmt.Sprintf("%s: %s (%s)", c.Type, strings.ReplaceAll(o.Outcome, "_", " "), strings.ReplaceAll(o.Verdict, "_", " ")))
+	}
+	return changes
+}
+
+// callOutcome is how a call turned out, as its review judges it.
+type callOutcome struct {
+	CallID  string `json:"call_id"`
+	Outcome string `json:"outcome"`
+	Verdict string `json:"verdict"`
+	Note    string `json:"note"`
+}
