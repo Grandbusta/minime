@@ -9,7 +9,8 @@ green, the same family as the mind console.
 | [mark.svg](mark.svg) | The mark, at any size. Also the favicon of the console and the profile page. |
 | [mark-512.png](mark-512.png), [mark-192.png](mark-192.png), [mark-64.png](mark-64.png), [mark-32.png](mark-32.png) | The mark as PNG. |
 | [banner-dark.png](banner-dark.png), [banner-light.png](banner-light.png) | The README banner, 1280 by 358. |
-| [banner.html](banner.html) | The banner's source: open it, or render it with `?light`. |
+| [social.png](social.png) | GitHub's social preview, 1280 by 640 (Settings, then General, then Social preview). |
+| [banner.html](banner.html) | The source of the banners and the social preview: open it, or render it with `?light` or `?social`. |
 | [concepts.html](concepts.html) | The four concepts it was chosen from. |
 
 | Colour | Hex |
@@ -25,4 +26,10 @@ To render the banners again (Chrome headless):
 
 ```bash
 cd docs/brand && "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --hide-scrollbars --virtual-time-budget=8000 --window-size=1280,358 --screenshot="$PWD/banner-dark.png" "file://$PWD/banner.html"
+```
+
+The social preview is the same page with `?social`, at 1280 by 640:
+
+```bash
+cd docs/brand && "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --hide-scrollbars --virtual-time-budget=8000 --window-size=1280,640 --screenshot="$PWD/social.png" "file://$PWD/banner.html?social"
 ```
