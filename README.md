@@ -1,11 +1,11 @@
+# minime: create an AI person with a life of their own
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/brand/banner-dark.png">
     <img alt="minime: someone, not something" src="docs/brand/banner-light.png" width="640">
   </picture>
 </p>
-
-# minime: create an AI person with a life of their own
 
 Not an assistant that waits for instructions: **someone**. You write who they are (a name,
 a story, a family, dreams), and from there they live. They plan their days, make things,
