@@ -610,7 +610,7 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.instructions(ctx, person, n),
 		History:      turns(recent),
-		Note:         m.now(p.At) + "\n\n" + note + m.promisesNote(ctx, p, person, n) + m.permissionsNote(p),
+		Note:         m.now(p.At) + "\n\n" + note + m.promisesNote(ctx, p, person, n) + m.permissionsNote(p) + nameNote(recent, n.speaker),
 		Message:      p.Text,
 		CollectFacts: true,
 	})
@@ -862,3 +862,28 @@ var intentPhrases = map[string]string{
 }
 
 func percent(f float64) string { return fmt.Sprintf("%.0f%%", f*100) }
+
+// namedLately is how many of its latest messages in a conversation count
+// when it checks whether it used someone's name.
+const namedLately = 4
+
+// nameNote tells System 2 not to use the speaker's name when it already did
+// in one of its latest messages, the way people rarely repeat a name in a
+// chat. Empty otherwise.
+func nameNote(recent []memory.Exchange, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || name == fallbackName {
+		return ""
+	}
+	n := 0
+	for i := len(recent) - 1; i >= 0 && n < namedLately; i-- {
+		if recent[i].Reply == "" {
+			continue
+		}
+		n++
+		if strings.Contains(strings.ToLower(recent[i].Reply), strings.ToLower(name)) {
+			return fmt.Sprintf("\n\nYou used %s's name in one of your last messages: don't use it in this one.", name)
+		}
+	}
+	return ""
+}

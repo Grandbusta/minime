@@ -380,10 +380,11 @@ func (m *Mind) speakFirst(ctx context.Context, p perception.Percept, person memo
 	chain = append(chain, d)
 
 	n := m.namesFor(p)
+	recent := m.recall(ctx, p)
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.instructions(ctx, person, n),
-		History:      turns(m.recall(ctx, p)),
-		Note:         m.now(p.At) + "\n\n" + s.note,
+		History:      turns(recent),
+		Note:         m.now(p.At) + "\n\n" + s.note + nameNote(recent, n.speaker),
 		CollectFacts: true, // the format the reply prompt describes; nothing new was said, so nothing is kept
 	})
 	got := failed
