@@ -489,16 +489,18 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 		ReviewQuestion string   `json:"review_question"`
 		StageDone      string   `json:"stage_done"`
 	}
-	if err := json.Unmarshal([]byte(resp.Text), &out); err != nil || strings.TrimSpace(out.Text) == "" {
+	err = json.Unmarshal([]byte(resp.Text), &out)
+	w := memory.Work{ID: ulid.Make(), IntentionID: i.ID, ProjectID: i.ProjectID, Kind: orDefault(material.WorkKind, orDefault(out.Kind, "writing")),
+		Title: orDefault(out.Title, i.Text), Text: strings.TrimSpace(out.Text), CreatedAt: now.UTC()}
+	if err == nil {
+		w.Data, w.DataKind = m.keptData(w.Kind, resp.Text)
+	}
+	if err != nil || w.Text == "" && w.Data == nil { // its data alone, like a blank template's table, is a work
 		m.finish(ctx, i, memory.IntentionMissed, "nothing came of it", now)
 		m.finishLife(ctx, d, start, decision.OutcomeFailed, fmt.Sprintf("no work in the answer (%v)", err))
 		return memory.Work{}, false
 	}
-
-	title := orDefault(out.Title, i.Text)
-	w := memory.Work{ID: ulid.Make(), IntentionID: i.ID, ProjectID: i.ProjectID, Kind: orDefault(material.WorkKind, orDefault(out.Kind, "writing")),
-		Title: title, Text: strings.TrimSpace(out.Text), CreatedAt: now.UTC()}
-	w.Data, w.DataKind = m.keptData(w.Kind, resp.Text)
+	title := w.Title
 	if project != nil {
 		w.ProjectID = project.ID // a book it just started has a new project
 	}

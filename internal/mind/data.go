@@ -62,8 +62,8 @@ func (m *Mind) dataHelp() string {
 	fs, carriers := m.dataKinds()
 	var b strings.Builder
 	for _, f := range fs {
-		fmt.Fprintf(&b, "\n\nIf what you make is a %s, also write its %s: %s If it isn't, leave the %s with nothing in it.",
-			strings.Join(carriers[f.Needs()], " or "), f.Needs(), f.DataHelp(), f.Needs())
+		fmt.Fprintf(&b, "\n\nIf what you make is a %s, also write its %s: %s Its text still says, in a line or two, what it is. "+
+			"If it isn't one, leave the %s with nothing in it.", strings.Join(carriers[f.Needs()], " or "), f.Needs(), f.DataHelp(), f.Needs())
 	}
 	return b.String()
 }

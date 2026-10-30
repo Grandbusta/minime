@@ -113,7 +113,7 @@ func TestOldMusicIsScoredToBeSentAsMIDI(t *testing.T) {
 
 func TestATableIsPromisedAndSentAsASpreadsheet(t *testing.T) {
 	r, filer := &fakeReplier{}, &fakeFiler{}
-	s2 := &fakeSystem2{formats: map[string]string{"activity": `{"title":"Clinic leads","kind":"table","text":"Three clinics to call.",
+	s2 := &fakeSystem2{formats: map[string]string{"activity": `{"title":"Clinic leads","kind":"table","text":"",
 		"project_notes":"","project_done":false,"remember":[],"lessons":[],"ask_for_review":false,"review_question":"","stage_done":"",
 		"table":{"columns":["Clinic","Fee (NGN)"],"rows":[["Smile Dental","15000"],["Yaba Dental","12000"]]},
 		"events":{"events":[]}}`}}
