@@ -1615,7 +1615,8 @@ func (s *Store) Principles(ctx context.Context, status string) ([]memory.Princip
 // JudgmentCases returns its owner's decisions, oldest first: all of them, or
 // only those with status, of any of types (all types if none).
 func (s *Store) JudgmentCases(ctx context.Context, status string, types []string) ([]memory.JudgmentCase, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, key, type, situation, options, choice, reason, status, source, outcome, at, updated_at
+	rows, err := s.pool.Query(ctx, `SELECT id, key, type, situation, options, choice, reason, status, source, outcome, at, updated_at,
+			embedding, embedded_with
 		FROM judgment_cases WHERE ($1 = '' OR status = $1) AND (cardinality($2::text[]) = 0 OR type = ANY($2))
 		ORDER BY at, key`, status, nonNil(types))
 	if err != nil {
@@ -1629,7 +1630,7 @@ func (s *Store) JudgmentCases(ctx context.Context, status string, types []string
 			id string
 		)
 		if err := rows.Scan(&id, &c.Key, &c.Type, &c.Situation, &c.Options, &c.Choice, &c.Reason, &c.Status, &c.Source, &c.Outcome, &c.At,
-			&c.UpdatedAt); err != nil {
+			&c.UpdatedAt, &c.Embedding, &c.EmbeddedWith); err != nil {
 			return nil, err
 		}
 		if c.ID, err = ulid.Parse(id); err != nil {
@@ -1656,7 +1657,8 @@ func (s *Store) ReviewPrinciple(ctx context.Context, id ulid.ULID, status, text 
 // status, and their reason when they gave one (empty keeps it). It returns
 // whether there was such a case.
 func (s *Store) ReviewCase(ctx context.Context, id ulid.ULID, status, reason string, at time.Time) (bool, error) {
-	tag, err := s.pool.Exec(ctx, `UPDATE judgment_cases SET status = $2, reason = COALESCE(NULLIF($3, ''), reason), updated_at = $4
+	tag, err := s.pool.Exec(ctx, `UPDATE judgment_cases SET status = $2, reason = COALESCE(NULLIF($3, ''), reason), updated_at = $4,
+			embedding = CASE WHEN $3 = '' OR $3 = reason THEN embedding END
 		WHERE id = $1`, id.String(), status, reason, at)
 	if err != nil {
 		return false, fmt.Errorf("review case: %w", err)
@@ -1685,13 +1687,13 @@ func (s *Store) SavePrinciple(ctx context.Context, p memory.Principle) error {
 
 const callColumns = `id, type, mode, situation, options, pick, why, confidence, ref, status, waiting, waiting_since, owner_pick,
 	owner_choice, owner_reason, agreed, answered_by, message, case_id, created_at, asked_at, answered_at, outcome, verdict, outcome_note,
-	outcome_by, outcome_at`
+	outcome_by, outcome_at, stakes, reversible`
 
 // SaveCall stores a new call.
 func (s *Store) SaveCall(ctx context.Context, c memory.Call) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO judgment_calls (id, type, mode, situation, options, pick, why, confidence, ref, status,
-		created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, c.ID.String(), c.Type, c.Mode, c.Situation, nonNil(c.Options),
-		c.Pick, c.Why, c.Confidence, nullULID(c.Ref), c.Status, c.CreatedAt)
+		created_at, stakes, reversible) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`, c.ID.String(), c.Type, c.Mode,
+		c.Situation, nonNil(c.Options), c.Pick, c.Why, c.Confidence, nullULID(c.Ref), c.Status, c.CreatedAt, c.Stakes, c.Reversible)
 	if err != nil {
 		return fmt.Errorf("save call: %w", err)
 	}
@@ -1712,7 +1714,7 @@ func scanCalls(rows pgx.Rows) ([]memory.Call, error) {
 		)
 		if err := rows.Scan(&id, &c.Type, &c.Mode, &c.Situation, &c.Options, &c.Pick, &c.Why, &c.Confidence, &ref, &c.Status, &c.Waiting,
 			&waitingAt, &ownerPick, &c.OwnerChoice, &c.OwnerReason, &c.Agreed, &c.AnsweredBy, &c.Message, &caseID, &c.CreatedAt, &asked,
-			&ans, &c.Outcome, &c.Verdict, &c.OutcomeNote, &c.OutcomeBy, &outcomeAt); err != nil {
+			&ans, &c.Outcome, &c.Verdict, &c.OutcomeNote, &c.OutcomeBy, &outcomeAt, &c.Stakes, &c.Reversible); err != nil {
 			return nil, err
 		}
 		var err error
@@ -1881,7 +1883,8 @@ func (s *Store) GiveCallReason(ctx context.Context, id ulid.ULID, reason string,
 		return fmt.Errorf("call reason: %w", err)
 	}
 	if caseID != nil {
-		if _, err := tx.Exec(ctx, `UPDATE judgment_cases SET reason = $2, updated_at = $3 WHERE id = $1`, *caseID, reason, at); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE judgment_cases SET reason = $2, updated_at = $3, embedding = NULL WHERE id = $1`, *caseID, reason,
+			at); err != nil {
 			return fmt.Errorf("call reason: %w", err)
 		}
 	}
@@ -2005,4 +2008,84 @@ func (s *Store) SetOutcome(ctx context.Context, id ulid.ULID, outcome, verdict, 
 		}
 	}
 	return true, tx.Commit(ctx)
+}
+
+// AgreementByStakes is how often the owner agreed with its calls, by what
+// they put at stake ("low", "medium", "high"; "low, can't undo", ...), over
+// the latest n they answered at each level.
+func (s *Store) AgreementByStakes(ctx context.Context, n int) ([]memory.Agreement, error) {
+	rows, err := s.pool.Query(ctx, `SELECT level, count(*), count(*) FILTER (WHERE agreed) FROM (
+			SELECT CASE WHEN stakes = '' THEN 'unknown' ELSE stakes END || CASE WHEN reversible THEN '' ELSE ', can''t undo' END AS level,
+				agreed, row_number() OVER (PARTITION BY stakes, reversible ORDER BY answered_at DESC, id DESC) AS n
+			FROM judgment_calls WHERE agreed IS NOT NULL) latest
+		WHERE n <= $1 GROUP BY level ORDER BY level`, n)
+	if err != nil {
+		return nil, fmt.Errorf("query agreement by stakes: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Agreement
+	for rows.Next() {
+		var a memory.Agreement
+		if err := rows.Scan(&a.Type, &a.Answered, &a.Agreed); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// SaveCaseEmbedding keeps what one of the owner's decisions means, as a
+// vector, and the model that embedded it.
+func (s *Store) SaveCaseEmbedding(ctx context.Context, id ulid.ULID, v []float32, model string) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE judgment_cases SET embedding = $2, embedded_with = $3 WHERE id = $1`, id.String(), v, model); err != nil {
+		return fmt.Errorf("save case embedding: %w", err)
+	}
+	return nil
+}
+
+// SaveTaste keeps something its owner likes or doesn't in its work.
+func (s *Store) SaveTaste(ctx context.Context, t memory.Taste) error {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO tastes (id, kind, likes, text, work_id, source, at) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		t.ID.String(), t.Kind, t.Likes, t.Text, nullULID(t.WorkID), t.Source, t.At); err != nil {
+		return fmt.Errorf("save taste: %w", err)
+	}
+	return nil
+}
+
+// Tastes returns its owner's tastes that are still true, newest first, up to limit.
+func (s *Store) Tastes(ctx context.Context, limit int) ([]memory.Taste, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, kind, likes, text, work_id, source, at FROM tastes WHERE retired_at IS NULL
+		ORDER BY at DESC, id DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query tastes: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Taste
+	for rows.Next() {
+		var (
+			t      memory.Taste
+			id     string
+			workID *string
+		)
+		if err := rows.Scan(&id, &t.Kind, &t.Likes, &t.Text, &workID, &t.Source, &t.At); err != nil {
+			return nil, err
+		}
+		if t.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if t.WorkID, err = parseNullULID(workID); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// RetireTaste marks a taste no longer true. It returns whether there was one.
+func (s *Store) RetireTaste(ctx context.Context, id ulid.ULID, at time.Time) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE tastes SET retired_at = $2 WHERE id = $1 AND retired_at IS NULL`, id.String(), at)
+	if err != nil {
+		return false, fmt.Errorf("retire taste: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }

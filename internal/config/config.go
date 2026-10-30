@@ -34,6 +34,9 @@ type Config struct {
 	Autonomy      Autonomy      `yaml:"autonomy"`
 	Judgment      Judgment      `yaml:"judgment"`
 	Search        Search        `yaml:"search"`
+	// Embedding finds the owner's past decisions most like the one at hand;
+	// no provider: it takes the newest instead.
+	Embedding Provider `yaml:"embedding"`
 	// Pricing per model, used to record what each decision cost.
 	Pricing map[string]pricing.Price `yaml:"pricing"`
 	Log     Log                      `yaml:"log"`

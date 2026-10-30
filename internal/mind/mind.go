@@ -36,6 +36,7 @@ import (
 	"minime/internal/decision/questions"
 	"minime/internal/memory"
 	"minime/internal/perception"
+	"minime/internal/providers/embed"
 	"minime/internal/providers/system1"
 	"minime/internal/providers/system2"
 	"minime/internal/search"
@@ -103,6 +104,9 @@ type Store interface {
 	Principles(ctx context.Context, status string) ([]memory.Principle, error)
 	JudgmentCases(ctx context.Context, status string, types []string) ([]memory.JudgmentCase, error)
 	SavePrinciple(ctx context.Context, p memory.Principle) error
+	SaveCaseEmbedding(ctx context.Context, id ulid.ULID, v []float32, model string) error
+	SaveTaste(ctx context.Context, t memory.Taste) error
+	Tastes(ctx context.Context, limit int) ([]memory.Taste, error)
 	SaveCall(ctx context.Context, c memory.Call) error
 	Call(ctx context.Context, id ulid.ULID) (memory.Call, bool, error)
 	RecentCalls(ctx context.Context, status string, limit int) ([]memory.Call, error)
@@ -199,7 +203,10 @@ type Config struct {
 	// Calls is how it learns its owner's judgment from its own decisions;
 	// zero value: off.
 	Calls Calls
-	Log   *slog.Logger
+	// Embedder finds its owner's decisions most like the one it faces; nil:
+	// it takes the newest of the right type instead.
+	Embedder embed.Embedder
+	Log      *slog.Logger
 }
 
 type Mind struct {
@@ -645,6 +652,7 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	more = append(more, m.labelMisread(ctx, p, d, resp.Misread)...)
 	more = append(more, m.takeFeedback(ctx, p, d, resp.Feedback)...)
 	more = append(more, m.takeLessons(ctx, p, d, resp.Lessons)...)
+	more = append(more, m.takeTastes(ctx, p, d, resp.Tastes)...)
 	return resp.Text, more
 }
 

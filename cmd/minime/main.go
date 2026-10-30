@@ -45,6 +45,8 @@ import (
 	"minime/internal/perception"
 	"minime/internal/portfolio"
 	"minime/internal/pricing"
+	"minime/internal/providers/embed"
+	embedopenai "minime/internal/providers/embed/openai"
 	"minime/internal/providers/system1"
 	s1openai "minime/internal/providers/system1/openai"
 	"minime/internal/providers/system2"
@@ -205,6 +207,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	if err != nil {
 		return err
 	}
+	embedder := newEmbedder(cfg, log)
 	s1, err := newDecisionModel(cfg.Decision.Provider, cfg.Pricing, log)
 	if err != nil {
 		return err
@@ -314,6 +317,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		Autonomy:   policy,
 		Asker:      tg,
 		Calls:      calls(cfg),
+		Embedder:   embedder,
 		Log:        log.With("component", "mind"),
 	})
 	sensor := telegram.NewSensor(tg, cfg.Telegram.OwnerIDs, cfg.Telegram.PollTimeoutSeconds, percepts,
@@ -462,7 +466,27 @@ func growthMind(cfg *config.Config, life self.Life, st *store.Store, log *slog.L
 		return nil, err
 	}
 	return mind.New(mind.Config{Life: life, Store: st, System2: s2, Zone: zone, Day: day, Autonomy: policy, Abilities: abilities,
-		Calls: calls(cfg), Log: log.With("component", "mind")}), nil
+		Calls: calls(cfg), Embedder: newEmbedder(cfg, log), Log: log.With("component", "mind")}), nil
+}
+
+// newEmbedder is what finds the owner's past decisions most like the one at
+// hand; nil (the newest instead) when none is configured.
+func newEmbedder(cfg *config.Config, log *slog.Logger) embed.Embedder {
+	e := cfg.Embedding
+	switch e.Provider {
+	case "":
+		return nil
+	case "openai":
+		key := e.APIKey
+		if key == "" {
+			key = cfg.Reasoning.APIKey
+		}
+		return embedopenai.New(key, orDefault(e.Model, "text-embedding-3-small"), e.BaseURL, priceFor(orDefault(e.Model, "text-embedding-3-small"),
+			cfg.Pricing, log))
+	default:
+		log.Warn("unknown embedding provider; taking the newest decisions instead", "provider", e.Provider)
+		return nil
+	}
 }
 
 // calls is how the mind learns its owner's judgment, from the config.

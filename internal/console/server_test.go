@@ -28,6 +28,7 @@ type fakeStore struct {
 	principles []memory.Principle
 	cases      []memory.JudgmentCase
 	calls      []memory.Call
+	tastes     []memory.Taste
 }
 
 func (f *fakeStore) DecisionLog(_ context.Context, after time.Time, limit int, newestFirst bool) ([]store.LogEntry, error) {
@@ -483,6 +484,16 @@ func (f *fakeStore) Agreement(context.Context, int) ([]memory.Agreement, error) 
 	return a, nil
 }
 
+func (f *fakeStore) AgreementByStakes(context.Context, int) ([]memory.Agreement, error) {
+	var a []memory.Agreement
+	for _, c := range f.calls {
+		if c.Agreed != nil {
+			a = append(a, memory.Agreement{Type: c.Stakes, Answered: 1})
+		}
+	}
+	return a, nil
+}
+
 func (f *fakeStore) Call(_ context.Context, id ulid.ULID) (memory.Call, bool, error) {
 	for _, c := range f.calls {
 		if c.ID == id {
@@ -610,5 +621,66 @@ func TestJudgeOutcome(t *testing.T) {
 	getJSON(t, srv.URL+"/api/judgment", &got)
 	if got.Calls[0]["verdict"] != "lucky" || got.Calls[0]["outcome_by"] != "owner" || got.Calls[0]["outcome_note"] != "the deadline moved" {
 		t.Errorf("call = %+v", got.Calls[0])
+	}
+}
+
+func (f *fakeStore) SaveTaste(_ context.Context, t memory.Taste) error {
+	f.tastes = append(f.tastes, t)
+	return nil
+}
+func (f *fakeStore) Tastes(context.Context, int) ([]memory.Taste, error) {
+	var out []memory.Taste
+	for _, t := range f.tastes {
+		if t.RetiredAt.IsZero() {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+func (f *fakeStore) RetireTaste(_ context.Context, id ulid.ULID, at time.Time) (bool, error) {
+	for i := range f.tastes {
+		if f.tastes[i].ID == id && f.tastes[i].RetiredAt.IsZero() {
+			f.tastes[i].RetiredAt = at
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func TestTastes(t *testing.T) {
+	s, st := newServer("")
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	post := func(path, body string) int {
+		req, _ := http.NewRequest("POST", srv.URL+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := post("/api/tastes", `{"likes":true,"text":"  "}`); code != http.StatusBadRequest {
+		t.Errorf("empty taste = %d", code)
+	}
+	if code := post("/api/tastes", `{"work_id":"`+ulid.Make().String()+`","likes":false,"text":"long intros"}`); code != http.StatusNoContent {
+		t.Fatalf("taste = %d", code)
+	}
+	if len(st.tastes) != 1 || st.tastes[0].Kind != "lyrics" || st.tastes[0].Likes || st.tastes[0].Source != memory.TasteFromConsole {
+		t.Fatalf("tastes = %+v", st.tastes)
+	}
+	var got struct {
+		Tastes []map[string]any `json:"tastes"`
+	}
+	getJSON(t, srv.URL+"/api/judgment", &got)
+	if len(got.Tastes) != 1 || got.Tastes[0]["text"] != "long intros" {
+		t.Errorf("tastes = %+v", got.Tastes)
+	}
+	if code := post("/api/tastes/retire", `{"id":"`+st.tastes[0].ID.String()+`"}`); code != http.StatusNoContent {
+		t.Errorf("retire = %d", code)
+	}
+	if code := post("/api/tastes/retire", `{"id":"`+st.tastes[0].ID.String()+`"}`); code != http.StatusNotFound {
+		t.Errorf("retire again = %d", code)
 	}
 }

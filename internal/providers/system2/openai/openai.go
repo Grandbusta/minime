@@ -58,7 +58,7 @@ type wireFormat struct {
 var replyWithFacts = &wireText{Format: wireFormat{
 	Type: "json_schema", Name: "reply_with_facts", Strict: true,
 	Schema: map[string]any{
-		"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises", "permissions", "corrections", "misread", "feedback", "lessons"},
+		"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises", "permissions", "corrections", "misread", "feedback", "lessons", "tastes"},
 		"properties": map[string]any{
 			"reply":        map[string]any{"type": "string"},
 			"who_they_are": map[string]any{"type": "string"},
@@ -90,6 +90,14 @@ var replyWithFacts = &wireText{Format: wireFormat{
 				"properties": map[string]any{
 					"skill":  map[string]any{"type": "string"},
 					"lesson": map[string]any{"type": "string"},
+				},
+			}},
+			"tastes": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object", "additionalProperties": false, "required": []string{"kind", "likes", "taste"},
+				"properties": map[string]any{
+					"kind":  map[string]any{"type": "string"},
+					"likes": map[string]any{"type": "boolean"},
+					"taste": map[string]any{"type": "string"},
 				},
 			}},
 			"feedback": map[string]any{"type": "array", "items": map[string]any{
@@ -227,6 +235,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		misread    string
 		feedback   []system2.Feedback
 		lessons    []system2.LessonLearned
+		tastes     []system2.Taste
 	)
 	switch {
 	case refusal.Len() > 0:
@@ -268,6 +277,11 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 				Skill  string `json:"skill"`
 				Lesson string `json:"lesson"`
 			} `json:"lessons"`
+			Tastes []struct {
+				Kind  string `json:"kind"`
+				Likes bool   `json:"likes"`
+				Taste string `json:"taste"`
+			} `json:"tastes"`
 		}
 		if err := json.Unmarshal([]byte(reply), &out); err != nil {
 			return system2.Response{}, fmt.Errorf("openai responses: reply is not the requested JSON: %w", err)
@@ -300,6 +314,11 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		for _, l := range out.Lessons {
 			if skill, text := strings.TrimSpace(l.Skill), strings.TrimSpace(l.Lesson); skill != "" && text != "" {
 				lessons = append(lessons, system2.LessonLearned{Skill: skill, Text: text})
+			}
+		}
+		for _, t := range out.Tastes {
+			if text := strings.TrimSpace(t.Taste); text != "" {
+				tastes = append(tastes, system2.Taste{Kind: strings.TrimSpace(t.Kind), Likes: t.Likes, Text: text})
 			}
 		}
 		for _, f := range out.Feedback {
@@ -335,6 +354,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		Misread:     misread,
 		Feedback:    feedback,
 		Lessons:     lessons,
+		Tastes:      tastes,
 		Usage:       system2.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, ReasoningTokens: u.OutputTokensDetails.ReasoningTokens},
 		CostUSD: c.price.Cost(pricing.Usage{
 			InputTokens: u.InputTokens, CachedTokens: u.InputTokensDetails.CachedTokens,

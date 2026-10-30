@@ -84,6 +84,9 @@ The person is a folder, self/, with three files; the code has nothing about them
 - **self/judgment.yaml** ([example](../self/README.md)): the owner's past decisions (cases) and
   principles. Seeded on start as *proposed*, once per case key and principle text
   (`seedJudgment`), so edits and rejections stay.
+- **Embeddings** ([internal/providers/embed](../internal/providers/embed)): your approved
+  decisions as vectors, stored with them, so the ones most like a decision at hand go into
+  the note (`similarCases`). Switchable like System 1 and 2; without one, the newest.
 - **self/living.yaml** ([internal/config](../internal/config)): how they live: check-in
   times, the day's times and budget, abilities and web caps, autonomy, judgment calls. Read
   over the config's defaults, with the same keys.

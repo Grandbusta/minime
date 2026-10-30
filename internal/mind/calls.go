@@ -12,6 +12,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"minime/internal/action"
 	"minime/internal/decision"
 	"minime/internal/memory"
 	"minime/internal/perception"
@@ -66,11 +67,14 @@ type planCall struct {
 	Pick       int      `json:"pick"`
 	Why        string   `json:"why"`
 	Confidence float64  `json:"confidence"`
+	Stakes     string   `json:"stakes"`
+	Reversible bool     `json:"reversible"`
 }
 
 // callsSchema is the shape of a day plan's calls.
 var callsSchema = map[string]any{"type": "array", "items": map[string]any{
-	"type": "object", "additionalProperties": false, "required": []string{"type", "situation", "options", "pick", "why", "confidence"},
+	"type": "object", "additionalProperties": false,
+	"required": []string{"type", "situation", "options", "pick", "why", "confidence", "stakes", "reversible"},
 	"properties": map[string]any{
 		"type":       map[string]any{"type": "string", "enum": planCallTypes},
 		"situation":  map[string]any{"type": "string", "description": "what you're deciding, in a sentence"},
@@ -78,6 +82,9 @@ var callsSchema = map[string]any{"type": "array", "items": map[string]any{
 		"pick":       map[string]any{"type": "integer", "description": "the option you chose, by its index from 0"},
 		"why":        map[string]any{"type": "string"},
 		"confidence": map[string]any{"type": "number", "description": "how sure you are your owner would choose the same, 0 to 1"},
+		"stakes": map[string]any{"type": "string", "enum": memory.StakesLevels,
+			"description": "what's lost if it's the wrong choice: low (an afternoon, a draft), medium (days of work, a goal, someone's expectations), high (money, reputation, a relationship, something public)"},
+		"reversible": map[string]any{"type": "boolean", "description": "whether you could easily undo it if it's wrong"},
 	},
 }}
 
@@ -97,7 +104,8 @@ func newCall(typ, mode, situation string, options []string, pick int, why string
 		confidence = 0
 	}
 	return memory.Call{ID: ulid.Make(), Type: typ, Mode: mode, Situation: situation, Options: opts, Pick: pick,
-		Why: strings.TrimSpace(why), Confidence: math.Max(0, math.Min(1, confidence)), Status: memory.CallLogged, CreatedAt: now.UTC()}, true
+		Why: strings.TrimSpace(why), Confidence: math.Max(0, math.Min(1, confidence)), Reversible: true, Status: memory.CallLogged,
+		CreatedAt: now.UTC()}, true
 }
 
 // logPlanCalls keeps the calls its day plan made, to ask or be graded.
@@ -115,6 +123,10 @@ func (m *Mind) logPlanCalls(ctx context.Context, calls []planCall, now time.Time
 			m.Log.Warn("dropped a call that isn't one", "type", pc.Type, "situation", pc.Situation, "options", len(pc.Options))
 			continue
 		}
+		if slices.Contains(memory.StakesLevels, pc.Stakes) {
+			c.Stakes = pc.Stakes
+		}
+		c.Reversible = pc.Reversible
 		if err := m.Store.SaveCall(ctx, c); err != nil {
 			m.Log.Error("save call", "err", err)
 			continue
@@ -125,7 +137,8 @@ func (m *Mind) logPlanCalls(ctx context.Context, calls []planCall, now time.Time
 }
 
 // sendCalls asks its owner what they'd choose: every before-call, and the
-// after-calls it made today, least sure first, up to AsksPerDay.
+// after-calls it made today, up to AsksPerDay: first what puts the most at
+// stake and it's least sure of.
 func (m *Mind) sendCalls(ctx context.Context, now time.Time) {
 	chooser, ok := m.Asker.(Chooser)
 	if !m.Calls.On || !ok || m.Autonomy.Owner == "" {
@@ -153,7 +166,8 @@ func (m *Mind) sendCalls(ctx context.Context, now time.Time) {
 			after = append(after, c)
 		}
 	}
-	slices.SortStableFunc(after, func(a, b memory.Call) int { return cmp.Compare(a.Confidence, b.Confidence) })
+	worth := func(c memory.Call) float64 { return c.AtStake() * (1 - c.Confidence) }
+	slices.SortStableFunc(after, func(a, b memory.Call) int { return cmp.Compare(worth(b), worth(a)) })
 	for _, c := range after {
 		if asked >= m.Calls.AsksPerDay {
 			break
@@ -205,7 +219,18 @@ func (m *Mind) callText(c memory.Call, now time.Time) string {
 	if c.Confidence > 0 {
 		fmt.Fprintf(&b, " (%d%% sure you'd pick it too)", int(math.Round(c.Confidence*100)))
 	}
-	b.WriteString(". What would you do?")
+	b.WriteString(".")
+	if c.Stakes != "" {
+		at := map[string]string{memory.StakesLow: "Not much rides on it", memory.StakesMedium: "A fair bit rides on it",
+			memory.StakesHigh: "A lot rides on it"}[c.Stakes]
+		if c.Reversible {
+			at += ", and I can undo it."
+		} else {
+			at += ", and I can't undo it."
+		}
+		b.WriteString(" " + at)
+	}
+	b.WriteString(" What would you do?")
 	if c.Mode == memory.CallBefore && m.Autonomy.AskExpires > 0 {
 		fmt.Fprintf(&b, "\n\n(If I don't hear back by %s, I'll go with mine.)", now.Add(m.Autonomy.AskExpires).In(m.Zone).Format("Mon 2 Jan 15:04"))
 	}
@@ -430,6 +455,7 @@ func (m *Mind) approvalCall(ctx context.Context, a memory.Approval, now time.Tim
 	situation, _, _ := strings.Cut(m.request(ctx, a), "\n\n(If I don't")
 	c := memory.Call{ID: ulid.Make(), Type: a.Class, Mode: memory.CallBefore, Situation: situation, Options: []string{"yes", "no"},
 		Ref: a.ID, Status: memory.CallLogged, CreatedAt: a.AskedAt}
+	c.Stakes, c.Reversible = approvalStakes(action.Class(a.Class))
 	if err := m.Store.SaveCall(ctx, c); err != nil {
 		m.Log.Error("save call", "err", err)
 		return
@@ -468,7 +494,7 @@ func (m *Mind) goalCall(ctx context.Context, typ string, g memory.Goal, why stri
 	if !ok {
 		return false
 	}
-	c.Ref = g.ID
+	c.Ref, c.Stakes, c.Reversible = g.ID, memory.StakesMedium, typ == memory.CallNewGoal // a set goal can be dropped; a dropped one's plan is gone
 	if err := m.Store.SaveCall(ctx, c); err != nil {
 		m.Log.Error("save call", "err", err)
 		return false
@@ -607,4 +633,23 @@ type callOutcome struct {
 	Outcome string `json:"outcome"`
 	Verdict string `json:"verdict"`
 	Note    string `json:"note"`
+}
+
+// approvalStakes is what an approval puts at stake, by what it asks to do: a
+// message sent can't be unsent, a promise is hard to take back, a work can
+// come off the page, a dream can change again.
+func approvalStakes(class action.Class) (string, bool) {
+	switch class {
+	case action.ReachOut:
+		return memory.StakesMedium, false
+	case action.Commit:
+		return memory.StakesMedium, false
+	case action.Publish:
+		return memory.StakesMedium, true
+	case action.Dream:
+		return memory.StakesHigh, true
+	case action.Spend, action.ExternalMessage:
+		return memory.StakesHigh, false
+	}
+	return memory.StakesLow, true
 }

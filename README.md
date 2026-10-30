@@ -272,6 +272,15 @@ They learn how you decide, so their choices become more like yours:
   part of the work"), so `priorities` says what matters most to you, in order: the higher
   one wins. `boundaries` are what you never do, whatever the gain; they also go into
   everything they make. You reorder priorities in the console with ↑ and ↓.
+- **Like this one.** The past decisions of yours they see are the ones most like what
+  they're deciding, by meaning ("start a new song or finish the beat?" finds "three
+  unfinished projects: start a fourth?"), not just the newest. `embedding` in the config
+  sets how (OpenAI embeddings, a fraction of a cent a day); remove it to use the newest.
+- **Your taste.** Beyond how good their work is, what you like and don't: "I love when a
+  hook repeats one word", "not into long intros". They pick it up when you comment on
+  Telegram, or you add it on any work in the console. It goes into everything they make,
+  beside what makes it good, and the Judgment view lists it so you can retire what's no
+  longer true.
 - **How it turned out.** A few days after a call, their Sunday review looks back at what
   actually happened and judges the decision apart from the luck: a *good call*, *lucky*
   (it went well despite the decision), *unlucky* (a good decision that went badly anyway)
@@ -288,11 +297,13 @@ They learn how you decide, so their choices become more like yours:
   | `new_goal`, `drop_goal` | their weekly review | it waits for your answer; unanswered in 24h, they go with their pick |
   | `publish`, `commit`, `reach_out`, `dream` | approvals | your yes or no counts as agreeing or not |
 
+  Each call also says what's at stake (low, medium or high) and whether it can be undone.
   On Telegram you get a button per option (their pick starred) and **Something else**:
-  every goal call, and up to 3 day-plan calls a day, the ones they're least sure of. Pick
+  every goal call, and up to 3 day-plan calls a day: first what puts the most at stake and
+  they're least sure of. Pick
   differently and they ask what tipped it; your next message is your reason. Every answer
   becomes one of your decisions. The rest you can grade in the console, which shows how
-  often you agree, by kind of call, over the last 20. Their weekly review turns
+  often you agree, by kind of call and by stakes, over the last 20. Their weekly review turns
   disagreements into new principles, proposed for you to approve.
 
 ### Corrections and replay

@@ -81,6 +81,14 @@ type Feedback struct {
 }
 
 // LessonLearned is specific advice the speaker gave about doing a skill well.
+// Taste is something the speaker likes or doesn't in work like the agent's,
+// beyond how good it is.
+type Taste struct {
+	Kind  string // the kind of work it's about; "" any
+	Likes bool
+	Text  string // in general terms, e.g. "likes hooks built on one repeated word"
+}
+
 type LessonLearned struct {
 	Skill string // one of its skills
 	Text  string // the lesson, as a rule for next time
@@ -121,6 +129,8 @@ type Response struct {
 	Feedback []Feedback
 	// Lessons, with CollectFacts: specific advice the speaker gave about its work (only the owner's count).
 	Lessons []LessonLearned
+	// Tastes, with CollectFacts: what the speaker likes or doesn't in its work (only the owner's count).
+	Tastes  []Taste
 	Usage   Usage
 	CostUSD float64 // 0 when no price is configured
 }

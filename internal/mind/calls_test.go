@@ -279,12 +279,44 @@ func TestLookingBackOnCalls(t *testing.T) {
 		t.Error("recorded an outcome for a call it wasn't asked about")
 	}
 	// How it turned out goes with Busta's decision into later notes.
-	if note := m.judgmentNote(ctx, planJudgment); !strings.Contains(note, "How it turned out: went_badly, bad_call: I pushed on tired") {
+	if note := m.judgmentNote(ctx, planJudgment, ""); !strings.Contains(note, "How it turned out: went_badly, bad_call: I pushed on tired") {
 		t.Errorf("judgment note:\n%s", note)
 	}
 	// The owner's verdict stands over a later review's.
 	s.SetOutcome(ctx, ok.ID, memory.OutcomeMixed, memory.VerdictLucky, "", memory.OutcomeByOwner, now)
 	if done, _ := s.SetOutcome(ctx, ok.ID, memory.OutcomeWell, memory.VerdictGood, "", memory.OutcomeBySelf, now); done {
 		t.Error("its review overrode the owner's verdict")
+	}
+}
+
+func TestStakes(t *testing.T) {
+	ctx := context.Background()
+	s2 := &fakeSystem2{formats: map[string]string{"day_plan": `{"activities":[],"calls":[
+		{"type":"focus","situation":"Unsure but cheap","options":["a","b"],"pick":0,"why":"","confidence":0.3,"stakes":"low","reversible":true},
+		{"type":"start","situation":"Surer but costly","options":["start it","go on"],"pick":0,"why":"","confidence":0.6,"stakes":"high","reversible":false}]}`}}
+	m, s, asker, _ := callsMind(s2)
+	m.planDay(ctx, at(29, 8, 1))
+	if len(s.calls) != 2 || s.calls[0].Stakes != memory.StakesLow || !s.calls[0].Reversible || s.calls[1].Stakes != memory.StakesHigh || s.calls[1].Reversible {
+		t.Fatalf("calls = %+v", s.calls)
+	}
+	// Asked first: what puts the most at stake and it's least sure of (6 x 0.4 against 1 x 0.7).
+	m.sendCalls(ctx, at(29, 8, 2))
+	if len(asker.asked) != 1 || asker.ids[0] != s.calls[1].ID.String() || !strings.Contains(asker.asked[0], "A lot rides on it, and I can't undo it.") {
+		t.Errorf("asked %v: %q", asker.ids, asker.asked)
+	}
+
+	// A dropped goal can't be undone; a message sent can't be unsent; a published work can come off the page.
+	g := memory.Goal{ID: ulid.Make(), Text: "three beats", Status: memory.GoalActive}
+	m.goalCall(ctx, memory.CallDropGoal, g, "", 0.5, now)
+	if c := s.calls[len(s.calls)-1]; c.Stakes != memory.StakesMedium || c.Reversible {
+		t.Errorf("drop goal call = %+v", c)
+	}
+	for class, reversible := range map[action.Class]bool{action.ReachOut: false, action.Publish: true} {
+		a := memory.Approval{ID: ulid.Make(), Class: string(class), What: "x", Status: memory.ApprovalPending, AskedAt: time.Now()}
+		s.approvals = append(s.approvals, a)
+		m.decide(ctx, a, memory.ApprovalApproved, ulid.ULID{})
+		if c := s.calls[len(s.calls)-1]; c.Type != string(class) || c.Reversible != reversible || c.Stakes == "" {
+			t.Errorf("%s call = %+v", class, c)
+		}
 	}
 }

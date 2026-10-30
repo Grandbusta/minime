@@ -5,6 +5,7 @@ package memory
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -349,7 +350,43 @@ type JudgmentCase struct {
 	Outcome   string // how it turned out, when it came from a call that was looked back on; else empty
 	At        time.Time
 	UpdatedAt time.Time
+	// Embedding is what it means, as a vector (embedded with EmbeddedWith),
+	// to find the decisions most like one being made; nil until embedded.
+	Embedding    []float32
+	EmbeddedWith string
 }
+
+// Text is a decision as one piece of text: what was on the table, what was
+// chosen and why. It's what is embedded.
+func (c JudgmentCase) Text() string {
+	t := strings.TrimSuffix(c.Situation, ".") + "."
+	if len(c.Options) > 0 {
+		t += " Options: " + strings.Join(c.Options, "; ") + "."
+	}
+	t += " Chose: " + strings.TrimSuffix(c.Choice, ".") + "."
+	if c.Reason != "" {
+		t += " Why: " + c.Reason
+	}
+	return t
+}
+
+// Taste is something its owner likes or doesn't in its work, beyond how good
+// it is: "likes hooks built on one repeated word".
+type Taste struct {
+	ID        ulid.ULID
+	Kind      string // the kind of work it's about, e.g. "beat_idea"; "" any
+	Likes     bool   // a like, or a dislike
+	Text      string // the taste, in general terms
+	WorkID    ulid.ULID
+	Source    string // TasteFromTelegram or TasteFromConsole
+	At        time.Time
+	RetiredAt time.Time // zero while true
+}
+
+const (
+	TasteFromTelegram = "telegram"
+	TasteFromConsole  = "console"
+)
 
 // Kinds of principle.
 const (
@@ -379,6 +416,8 @@ type Call struct {
 	Pick        int // its pick, an index into Options
 	Why         string
 	Confidence  float64   // how sure it is the owner would agree, 0 to 1; 0 unknown
+	Stakes      string    // StakesLow, StakesMedium or StakesHigh: what it puts at stake; "" unknown
+	Reversible  bool      // whether it can be undone
 	Ref         ulid.ULID // the goal or approval it is about; zero if none
 	Status      string    // CallLogged, CallAsked, CallAnswered or CallExpired
 	Waiting     string    // CallWaitingReason or CallWaitingAnswer: what the owner's next message is; "" nothing
@@ -399,6 +438,29 @@ type Call struct {
 	OutcomeNote string // what happened
 	OutcomeBy   string // OutcomeBySelf or OutcomeByOwner
 	OutcomeAt   time.Time
+}
+
+// What a call puts at stake.
+const (
+	StakesLow    = "low"    // little lost if it's wrong: an afternoon, a draft
+	StakesMedium = "medium" // days of work, a goal, someone's expectations
+	StakesHigh   = "high"   // money, reputation, a relationship, something public
+)
+
+// StakesLevels are the values Stakes may take, lowest first.
+var StakesLevels = []string{StakesLow, StakesMedium, StakesHigh}
+
+// AtStake is how much a call puts at stake, for asking about what matters
+// most first: its stakes (1 to 3, 2 if unknown), doubled if it can't be undone.
+func (c Call) AtStake() float64 {
+	w := map[string]float64{StakesLow: 1, StakesMedium: 2, StakesHigh: 3}[c.Stakes]
+	if w == 0 {
+		w = 2
+	}
+	if !c.Reversible {
+		w *= 2
+	}
+	return w
 }
 
 // How a call turned out.

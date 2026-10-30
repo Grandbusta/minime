@@ -1,6 +1,7 @@
 package mind
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"minime/internal/memory"
+	"minime/internal/providers/embed"
 )
 
 // Judgment: how its owner decides, so it can learn to decide the way they
@@ -70,9 +72,10 @@ func (m *Mind) seedJudgment(ctx context.Context) {
 
 // judgmentNote is how its owner decides, for a note: what they never do,
 // what matters most to them in order, the rules they approved that apply to
-// these types of decision, and a few of their past decisions of those types.
-// Empty when none are approved.
-func (m *Mind) judgmentNote(ctx context.Context, types []string) string {
+// these types of decision, and a few of their past decisions: the ones most
+// like what it's deciding (about), or else the newest of these types. Empty
+// when none are approved.
+func (m *Mind) judgmentNote(ctx context.Context, types []string, about string) string {
 	ps, err := m.Store.Principles(ctx, memory.JudgmentApproved)
 	if err != nil {
 		m.Log.Warn("loading principles failed", "err", err)
@@ -90,12 +93,14 @@ func (m *Mind) judgmentNote(ctx context.Context, types []string) string {
 			}
 		}
 	}
-	cs, err := m.Store.JudgmentCases(ctx, memory.JudgmentApproved, types)
-	if err != nil {
-		m.Log.Warn("loading its owner's decisions failed", "err", err)
-	}
-	if len(cs) > judgmentCases { // the newest
-		cs = cs[len(cs)-judgmentCases:]
+	cs, ok := m.similarCases(ctx, about)
+	if !ok {
+		if cs, err = m.Store.JudgmentCases(ctx, memory.JudgmentApproved, types); err != nil {
+			m.Log.Warn("loading its owner's decisions failed", "err", err)
+		}
+		if len(cs) > judgmentCases { // the newest
+			cs = cs[len(cs)-judgmentCases:]
+		}
 	}
 	if len(limits) == 0 && len(ranks) == 0 && len(rules) == 0 && len(cs) == 0 {
 		return ""
@@ -122,7 +127,11 @@ func (m *Mind) judgmentNote(ctx context.Context, types []string) string {
 		}
 	}
 	if len(cs) > 0 {
-		fmt.Fprintf(&b, "\nSome of %s's decisions:", owner)
+		if ok {
+			fmt.Fprintf(&b, "\n%s's decisions most like this one:", owner)
+		} else {
+			fmt.Fprintf(&b, "\nSome of %s's decisions:", owner)
+		}
 		for _, c := range cs {
 			fmt.Fprintf(&b, "\n- %s: %s chose %s.", strings.TrimSuffix(c.Situation, "."), owner, strings.TrimSuffix(c.Choice, "."))
 			if len(c.Options) > 0 {
@@ -156,4 +165,91 @@ func (m *Mind) boundariesNote(ctx context.Context) string {
 		return ""
 	}
 	return fmt.Sprintf("\n\nWhat %s never does, whatever the gain (you don't either):", m.ownerName(ctx)) + b.String()
+}
+
+// minSimilarity is how alike (cosine) a past decision must be to count as
+// like the one at hand.
+const minSimilarity = 0.2
+
+// similarCases are its owner's approved decisions most like about, most
+// alike first, embedding any not embedded yet. ok is false when it can't
+// tell (no embedder, nothing to compare, or the embedder failed), so the
+// caller falls back to the newest.
+func (m *Mind) similarCases(ctx context.Context, about string) ([]memory.JudgmentCase, bool) {
+	if m.Embedder == nil || strings.TrimSpace(about) == "" {
+		return nil, false
+	}
+	cs, err := m.Store.JudgmentCases(ctx, memory.JudgmentApproved, nil)
+	if err != nil || len(cs) == 0 {
+		return nil, false
+	}
+	// One call: what it's deciding, and each decision not embedded yet.
+	texts := []string{about}
+	var missing []int
+	for i, c := range cs {
+		if len(c.Embedding) == 0 {
+			texts, missing = append(texts, c.Text()), append(missing, i)
+		}
+	}
+	out, err := m.Embedder.Embed(ctx, texts)
+	if err != nil {
+		m.Log.Warn("embedding failed; taking the newest of its owner's decisions instead", "err", err)
+		return nil, false
+	}
+	for n, i := range missing {
+		cs[i].Embedding = out.Vectors[n+1]
+		if err := m.Store.SaveCaseEmbedding(ctx, cs[i].ID, cs[i].Embedding, out.Model); err != nil {
+			m.Log.Warn("saving an embedding failed", "err", err)
+		}
+	}
+	if len(missing) > 0 {
+		m.Log.Info("embedded its owner's decisions", "cases", len(missing), "model", out.Model, "cost_usd", out.CostUSD)
+	}
+	type scored struct {
+		c   memory.JudgmentCase
+		sim float64
+	}
+	var best []scored
+	for _, c := range cs {
+		if sim := embed.Similarity(out.Vectors[0], c.Embedding); sim >= minSimilarity {
+			best = append(best, scored{c, sim})
+		}
+	}
+	slices.SortStableFunc(best, func(a, b scored) int { return cmp.Compare(b.sim, a.sim) })
+	var picked []memory.JudgmentCase
+	for i := 0; i < len(best) && i < judgmentCases; i++ {
+		picked = append(picked, best[i].c)
+	}
+	return picked, true
+}
+
+// dayAbout is what planning a day is about, to find the owner's decisions
+// most like it: what to focus on among its goals and projects.
+func (m *Mind) dayAbout(ctx context.Context, projects []memory.Project) string {
+	var parts []string
+	if goals, err := m.Store.Goals(ctx, true); err == nil {
+		for _, g := range goals {
+			parts = append(parts, "goal: "+g.Text)
+		}
+	}
+	for _, p := range projects {
+		parts = append(parts, "project: "+p.Title)
+	}
+	if len(parts) == 0 {
+		return "Planning the day: what to focus on, and whether to start something new."
+	}
+	return "Planning the day: what to focus on, and whether to start something new or finish what's started. " + strings.Join(parts, "; ") + "."
+}
+
+// reviewAbout is what a weekly review is about: which goals to keep, set or
+// drop, among these.
+func reviewAbout(goals []memory.Goal, projects []memory.Project) string {
+	var parts []string
+	for _, g := range goals {
+		parts = append(parts, "goal: "+g.Text)
+	}
+	for _, p := range projects {
+		parts = append(parts, "project: "+p.Title)
+	}
+	return "Reviewing the week: whether to keep, drop or set goals, and what to focus on next. " + strings.Join(parts, "; ")
 }

@@ -55,6 +55,7 @@ type fakeStore struct {
 	principles     []memory.Principle
 	cases          []memory.JudgmentCase
 	calls          []memory.Call
+	tastes         []memory.Taste
 	reviewAsked    map[ulid.ULID]time.Time
 	plans          []memory.LearningPlan
 	resources      []memory.Resource
@@ -745,6 +746,7 @@ type fakeSystem2 struct {
 	perms      []system2.Permission
 	lessons    []system2.LessonLearned
 	feedback   []system2.Feedback
+	tastes     []system2.Taste
 	formats    map[string]string // reply text by Format.Name, for structured requests
 	requests   []system2.Request
 }
@@ -757,7 +759,7 @@ func (f *fakeSystem2) Reason(_ context.Context, req system2.Request) (system2.Re
 	if req.Format != nil {
 		return system2.Response{Provider: "fake2/1", Text: f.formats[req.Format.Name], CostUSD: 0.002}, nil
 	}
-	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, Promises: f.promises, Permissions: f.perms, Lessons: f.lessons, Feedback: f.feedback, CostUSD: 0.001}, nil
+	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, Promises: f.promises, Permissions: f.perms, Lessons: f.lessons, Feedback: f.feedback, Tastes: f.tastes, CostUSD: 0.001}, nil
 }
 
 var testSet = questions.Set{
@@ -1674,4 +1676,28 @@ func (s *fakeStore) SetOutcome(_ context.Context, id ulid.ULID, outcome, verdict
 		}
 	}
 	return true, nil
+}
+
+func (s *fakeStore) SaveCaseEmbedding(_ context.Context, id ulid.ULID, v []float32, model string) error {
+	for i := range s.cases {
+		if s.cases[i].ID == id {
+			s.cases[i].Embedding, s.cases[i].EmbeddedWith = v, model
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) SaveTaste(_ context.Context, t memory.Taste) error {
+	s.tastes = append(s.tastes, t)
+	return nil
+}
+
+func (s *fakeStore) Tastes(_ context.Context, limit int) ([]memory.Taste, error) {
+	var out []memory.Taste
+	for i := len(s.tastes) - 1; i >= 0 && len(out) < limit; i-- {
+		if s.tastes[i].RetiredAt.IsZero() {
+			out = append(out, s.tastes[i])
+		}
+	}
+	return out, nil
 }

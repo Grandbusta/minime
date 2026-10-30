@@ -1219,3 +1219,110 @@ func TestOutcomes(t *testing.T) {
 		t.Error("looked back on it twice")
 	}
 }
+
+func TestAgreementByStakes(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond).AddDate(4, 0, 0)
+	before, err := s.AgreementByStakes(ctx, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := func(as []memory.Agreement, level string) memory.Agreement {
+		for _, a := range as {
+			if a.Type == level {
+				return a
+			}
+		}
+		return memory.Agreement{}
+	}
+	for i, c := range []struct {
+		stakes     string
+		reversible bool
+		agree      bool
+	}{{memory.StakesHigh, false, true}, {memory.StakesHigh, false, false}, {memory.StakesLow, true, true}} {
+		call := memory.Call{ID: ulid.Make(), Type: memory.CallFocus, Mode: memory.CallAfter, Situation: "s", Options: []string{"a", "b"},
+			Status: memory.CallLogged, Stakes: c.stakes, Reversible: c.reversible, CreatedAt: now}
+		if err := s.SaveCall(ctx, call); err != nil {
+			t.Fatal(err)
+		}
+		call.OwnerPick, call.AnsweredBy, call.AnsweredAt = 1, memory.AnsweredInConsole, now.Add(time.Duration(i)*time.Second)
+		if c.agree {
+			call.OwnerPick = 0
+		}
+		if _, err := s.AnswerCall(ctx, call, false); err != nil {
+			t.Fatal(err)
+		}
+		got, _, _ := s.Call(ctx, call.ID)
+		if got.Stakes != c.stakes || got.Reversible != c.reversible {
+			t.Errorf("call = %+v", got)
+		}
+	}
+	after, _ := s.AgreementByStakes(ctx, 1000)
+	high, low := count(after, "high, can't undo"), count(after, "low")
+	if high.Answered-count(before, "high, can't undo").Answered != 2 || high.Agreed-count(before, "high, can't undo").Agreed != 1 ||
+		low.Answered-count(before, "low").Answered != 1 {
+		t.Errorf("by stakes = %+v (before %+v)", after, before)
+	}
+}
+
+func TestCaseEmbeddings(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	c := memory.JudgmentCase{ID: ulid.Make(), Key: "emb-" + ulid.Make().String(), Type: "life", Situation: "s", Choice: "c",
+		Status: memory.JudgmentApproved, Source: memory.JudgmentFromSeed, At: now}
+	if _, _, err := s.SeedJudgment(ctx, []memory.JudgmentCase{c}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveCaseEmbedding(ctx, c.ID, []float32{0.5, -1, 2}, "openai/x"); err != nil {
+		t.Fatal(err)
+	}
+	find := func() memory.JudgmentCase {
+		cs, _ := s.JudgmentCases(ctx, "", nil)
+		for _, x := range cs {
+			if x.ID == c.ID {
+				return x
+			}
+		}
+		t.Fatal("case gone")
+		return memory.JudgmentCase{}
+	}
+	if got := find(); len(got.Embedding) != 3 || got.Embedding[2] != 2 || got.EmbeddedWith != "openai/x" {
+		t.Errorf("case = %+v", got)
+	}
+	s.ReviewCase(ctx, c.ID, memory.JudgmentApproved, "", now) // same text: kept
+	if got := find(); len(got.Embedding) != 3 {
+		t.Error("a review that didn't change the text cleared the embedding")
+	}
+	s.ReviewCase(ctx, c.ID, memory.JudgmentApproved, "a new reason", now) // new text: embedded again
+	if got := find(); got.Embedding != nil || got.Reason != "a new reason" {
+		t.Errorf("after a new reason = %+v", got)
+	}
+}
+
+func TestTastes(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond).AddDate(5, 0, 0) // newest of all tests' tastes
+	a := memory.Taste{ID: ulid.Make(), Kind: "lyrics", Likes: true, Text: "one repeated word", Source: memory.TasteFromTelegram, At: now}
+	b := memory.Taste{ID: ulid.Make(), Likes: false, Text: "long intros", Source: memory.TasteFromConsole, At: now.Add(time.Second)}
+	for _, x := range []memory.Taste{a, b} {
+		if err := s.SaveTaste(ctx, x); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ts, err := s.Tastes(ctx, 2)
+	if err != nil || len(ts) != 2 || ts[0].ID != b.ID || ts[1].Kind != "lyrics" || !ts[1].Likes {
+		t.Fatalf("tastes = %+v, %v", ts, err)
+	}
+	if ok, err := s.RetireTaste(ctx, b.ID, now); err != nil || !ok {
+		t.Fatalf("retire = %v, %v", ok, err)
+	}
+	if ok, _ := s.RetireTaste(ctx, b.ID, now); ok {
+		t.Error("retired twice")
+	}
+	if ts, _ := s.Tastes(ctx, 1); len(ts) != 1 || ts[0].ID != a.ID {
+		t.Errorf("after retiring = %+v", ts)
+	}
+}

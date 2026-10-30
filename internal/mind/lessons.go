@@ -188,3 +188,59 @@ func lessonSource(s string) string {
 	}
 	return "your own mistakes"
 }
+
+// tastesInNote is the most of its owner's tastes a note on making something holds.
+const tastesInNote = 12
+
+// takeTastes keeps what its owner said they like or don't in its work. Only
+// the owner's taste counts; a kind it doesn't make counts for any.
+func (m *Mind) takeTastes(ctx context.Context, p perception.Percept, reply *decision.Decision, ts []system2.Taste) []*decision.Decision {
+	if len(ts) == 0 || p.Speaker == "" || p.Speaker != m.Autonomy.Owner {
+		return nil
+	}
+	asked, _, _ := m.Store.AskedForReview(ctx, p.At.Add(-reviewAnswerWithin))
+	var out []*decision.Decision
+	for _, t := range ts {
+		kind := t.Kind
+		if !slices.Contains(m.craftKinds(), kind) {
+			kind = ""
+		}
+		taste := memory.Taste{ID: ulid.Make(), Kind: kind, Likes: t.Likes, Text: t.Text, WorkID: asked.ID, Source: memory.TasteFromTelegram,
+			At: time.Now().UTC()}
+		if err := m.Store.SaveTaste(ctx, taste); err != nil {
+			m.Log.Error("save taste", "err", err)
+			continue
+		}
+		d := m.child(p, reply, "taste")
+		d.Outcome.Detail = tasteLine(taste)
+		out = append(out, d)
+		m.Log.Info("learned its owner's taste", "kind", kind, "likes", t.Likes, "taste", t.Text)
+	}
+	return out
+}
+
+// tasteNote is its owner's taste, for a note on making something: what they
+// like and don't, by the kind of work it's about.
+func (m *Mind) tasteNote(ctx context.Context) string {
+	ts, err := m.Store.Tastes(ctx, tastesInNote)
+	if err != nil || len(ts) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n\nWhat %s likes and doesn't in your work (their taste: weigh it when it applies, beside what makes it good):", m.ownerName(ctx))
+	for _, t := range ts {
+		fmt.Fprintf(&b, "\n- %s", tasteLine(t))
+	}
+	return b.String()
+}
+
+func tasteLine(t memory.Taste) string {
+	line := "likes"
+	if !t.Likes {
+		line = "doesn't like"
+	}
+	if t.Kind != "" {
+		line = strings.ReplaceAll(t.Kind, "_", " ") + ", " + line
+	}
+	return line + ": " + t.Text
+}

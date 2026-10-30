@@ -67,10 +67,14 @@ type Store interface {
 	ReviewCase(ctx context.Context, id ulid.ULID, status, reason string, at time.Time) (bool, error)
 	RecentCalls(ctx context.Context, status string, limit int) ([]memory.Call, error)
 	Agreement(ctx context.Context, n int) ([]memory.Agreement, error)
+	AgreementByStakes(ctx context.Context, n int) ([]memory.Agreement, error)
 	Call(ctx context.Context, id ulid.ULID) (memory.Call, bool, error)
 	AnswerCall(ctx context.Context, c memory.Call, asCase bool) (bool, error)
 	GiveCallReason(ctx context.Context, id ulid.ULID, reason string, at time.Time) error
 	SetOutcome(ctx context.Context, id ulid.ULID, outcome, verdict, note, by string, at time.Time) (bool, error)
+	SaveTaste(ctx context.Context, t memory.Taste) error
+	Tastes(ctx context.Context, limit int) ([]memory.Taste, error)
+	RetireTaste(ctx context.Context, id ulid.ULID, at time.Time) (bool, error)
 }
 
 // agreementOver is how many of the latest answered calls of a type its
@@ -116,6 +120,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/judgment", s.reviewJudgment)
 	mux.HandleFunc("POST /api/judgment/calls", s.gradeCall)
 	mux.HandleFunc("POST /api/judgment/outcomes", s.judgeOutcome)
+	mux.HandleFunc("POST /api/tastes", s.addTaste)
+	mux.HandleFunc("POST /api/tastes/retire", s.retireTaste)
 	return s.auth(headers(mux))
 }
 
@@ -630,22 +636,42 @@ func (s *Server) judgment(w http.ResponseWriter, r *http.Request) {
 	if s.failed(w, err) {
 		return
 	}
+	byStakes, err := s.Store.AgreementByStakes(r.Context(), agreementOver)
+	if s.failed(w, err) {
+		return
+	}
 	callv := make([]map[string]any, len(calls))
 	for i, c := range calls {
 		v := map[string]any{"id": c.ID.String(), "type": c.Type, "mode": c.Mode, "situation": c.Situation, "options": nonNil(c.Options),
 			"pick": c.Pick, "why": c.Why, "confidence": c.Confidence, "status": c.Status, "waiting": c.Waiting, "created_at": c.CreatedAt,
 			"answered_by": c.AnsweredBy, "owner_choice": c.OwnerChoice, "owner_reason": c.OwnerReason, "agreed": c.Agreed,
-			"outcome": c.Outcome, "verdict": c.Verdict, "outcome_note": c.OutcomeNote, "outcome_by": c.OutcomeBy}
+			"outcome": c.Outcome, "verdict": c.Verdict, "outcome_note": c.OutcomeNote, "outcome_by": c.OutcomeBy,
+			"stakes": c.Stakes, "reversible": c.Reversible}
 		if c.Agreed != nil {
 			v["owner_pick"] = c.OwnerPick
 		}
 		callv[i] = v
 	}
-	av := make([]map[string]any, len(agreement))
-	for i, a := range agreement {
-		av[i] = map[string]any{"type": a.Type, "answered": a.Answered, "agreed": a.Agreed}
+	views := func(as []memory.Agreement) []map[string]any {
+		out := make([]map[string]any, len(as))
+		for i, a := range as {
+			out[i] = map[string]any{"type": a.Type, "answered": a.Answered, "agreed": a.Agreed}
+		}
+		return out
 	}
-	s.json(w, map[string]any{"principles": pv, "cases": cv, "calls": callv, "agreement": av, "agreement_over": agreementOver})
+	tastes, err := s.Store.Tastes(r.Context(), 100)
+	if s.failed(w, err) {
+		return
+	}
+	tv := make([]map[string]any, len(tastes))
+	for i, t := range tastes {
+		tv[i] = map[string]any{"id": t.ID.String(), "kind": t.Kind, "likes": t.Likes, "text": t.Text, "source": t.Source, "at": t.At}
+		if !t.WorkID.IsZero() {
+			tv[i]["work_id"] = t.WorkID.String()
+		}
+	}
+	s.json(w, map[string]any{"principles": pv, "cases": cv, "calls": callv, "tastes": tv, "agreement": views(agreement),
+		"agreement_by_stakes": views(byStakes), "agreement_over": agreementOver})
 }
 
 // gradeCall records what the owner would have chosen on one of its calls
@@ -797,6 +823,77 @@ func (s *Server) judgeOutcome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.Store.SetOutcome(r.Context(), id, in.Outcome, in.Verdict, in.Note, memory.OutcomeByOwner, time.Now().UTC()); s.failed(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// addTaste keeps something the owner likes or doesn't in its work, from the
+// console: about a work they're looking at (its kind), or any work.
+func (s *Server) addTaste(w http.ResponseWriter, r *http.Request) {
+	if !fromConsole(w, r) {
+		return
+	}
+	var in struct {
+		WorkID string `json:"work_id"` // the work it's about; "" none
+		Likes  bool   `json:"likes"`
+		Text   string `json:"text"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil {
+		http.Error(w, "bad taste", http.StatusBadRequest)
+		return
+	}
+	in.Text = strings.TrimSpace(in.Text)
+	if in.Text == "" || len([]rune(in.Text)) > 300 {
+		http.Error(w, "bad taste", http.StatusBadRequest)
+		return
+	}
+	t := memory.Taste{ID: ulid.Make(), Likes: in.Likes, Text: in.Text, Source: memory.TasteFromConsole, At: time.Now().UTC()}
+	if in.WorkID != "" {
+		id, err := ulid.Parse(in.WorkID)
+		if err != nil {
+			http.Error(w, "bad taste", http.StatusBadRequest)
+			return
+		}
+		work, ok, err := s.Store.Work(r.Context(), id)
+		if s.failed(w, err) {
+			return
+		}
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		t.WorkID, t.Kind = work.ID, work.Kind
+	}
+	if s.failed(w, s.Store.SaveTaste(r.Context(), t)) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// retireTaste marks a taste of the owner's no longer true.
+func (s *Server) retireTaste(w http.ResponseWriter, r *http.Request) {
+	if !fromConsole(w, r) {
+		return
+	}
+	var in struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&in); err != nil {
+		http.Error(w, "bad taste", http.StatusBadRequest)
+		return
+	}
+	id, err := ulid.Parse(in.ID)
+	if err != nil {
+		http.Error(w, "bad taste", http.StatusBadRequest)
+		return
+	}
+	ok, err := s.Store.RetireTaste(r.Context(), id, time.Now().UTC())
+	if s.failed(w, err) {
+		return
+	}
+	if !ok {
+		http.NotFound(w, r)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

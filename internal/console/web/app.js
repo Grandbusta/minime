@@ -894,7 +894,24 @@ async function openWork(id) {
   const w = await api("/api/works/" + id), col = kindColor(w.kind);
   openDrawer(w.kind.replace("_", " ").toUpperCase(), `<h2 style="margin:0 0 4px;font:600 24px var(--sans)">${esc(w.title)}</h2>
     <div style="font:11px var(--mono);color:var(--muted);margin-bottom:18px"><span style="color:${col}">●</span> ${fmtTime(w.created_at, true)} · ${w.words} words · ${publicTag(w)}</div>
-    <div class="reader">${esc(w.text)}</div>`);
+    <div class="reader">${esc(w.text)}</div>
+    <div class="taste-form" data-work="${esc(w.id)}">
+      <div class="card-h">YOUR TASTE <span class="muted">· what you like or don't in work like this</span></div>
+      <div class="jbtns"><button class="jb jpick on" data-likes="1">I like</button><button class="jb jpick" data-likes="0">I don't like</button></div>
+      <textarea rows="2" maxlength="300" placeholder="e.g. hooks built on one repeated word"></textarea>
+      <div class="jbtns"><button class="jb jb-approved" data-tsave="1">save</button><span class="taste-saved"></span></div>
+    </div>`);
+  const f = document.querySelector(".taste-form");
+  f.addEventListener("click", async (e) => {
+    const b = e.target.closest(".jb");
+    if (!b) return;
+    if (b.dataset.likes) return f.querySelectorAll("[data-likes]").forEach((x) => x.classList.toggle("on", x === b));
+    const text = f.querySelector("textarea").value.trim();
+    if (!b.dataset.tsave || !text) return;
+    const r = await fetch("/api/tastes", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ work_id: f.dataset.work, likes: f.querySelector("[data-likes].on").dataset.likes === "1", text }) });
+    if (r.ok) { f.querySelector("textarea").value = ""; f.querySelector(".taste-saved").textContent = "kept: he'll weigh it next time"; }
+  });
 }
 
 /* ---------- growth ---------- */
@@ -941,9 +958,24 @@ async function loadGrowth() {
 let judgment = null, jFilter = "proposed";
 const J_STATUS = { proposed: "to review", approved: "approved", rejected: "rejected", all: "all" };
 
+function renderTastes() {
+  const ts = judgment.tastes || [];
+  $("#tastes").innerHTML = ts.length ? ts.map((t) => `<div class="taste ${t.likes ? "likes" : "dislikes"}">
+      <span>${t.likes ? "likes" : "doesn't like"}${t.kind ? " · " + esc(t.kind.replace(/_/g, " ")) : ""}</span>
+      <p>${esc(t.text)}</p><button class="jb" data-retire="${esc(t.id)}" title="no longer true">✕</button></div>`).join("")
+    : `<div class="empty">nothing yet: tell him what you like on Telegram, or open one of his works</div>`;
+}
+$("#tastes").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-retire]");
+  if (!b) return;
+  const r = await fetch("/api/tastes/retire", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: b.dataset.retire }) });
+  if (r.ok) loadJudgment();
+});
+
 async function loadJudgment() {
   const first = !judgment;
   judgment = await api("/api/judgment");
+  renderTastes();
   if (first && ![...judgment.principles, ...judgment.cases].some((x) => x.status === "proposed")) jFilter = "all";
   renderCalls();
   renderJudgment();
@@ -1005,6 +1037,7 @@ function callHTML(c) {
   const gradable = c.status === "logged" || c.status === "expired";
   return `<div class="jcall ${c.agreed === true ? "agree" : c.agreed === false ? "differ" : ""}" data-id="${esc(c.id)}">
     <div class="jtop"><b>${esc(CALL_TYPES[c.type] || c.type)}${c.mode === "before" ? " · waits for you" : ""}</b><span>${esc(state)} · ${fmtTime(c.created_at, true)}</span></div>
+    ${c.stakes ? `<div class="jstakes s-${esc(c.stakes)}">${esc(c.stakes)} stakes${c.reversible ? "" : " · can't undo"}</div>` : ""}
     <p class="jsit">${esc(c.situation)}</p>
     <div class="jopts">${opts}${c.owner_pick === -1 ? `<span class="yours">yours: ${esc(c.owner_choice)}</span>` : ""}</div>
     ${c.why ? `<p class="jreason">his why: ${esc(c.why)}${c.confidence ? ` · ${Math.round(c.confidence * 100)}% sure you'd agree` : ""}</p>` : ""}
@@ -1037,6 +1070,11 @@ function renderCalls() {
     return `<div class="agr ${a.answered >= over && a.agreed >= Math.ceil(over * 0.9) ? "earned" : ""}"><b>${esc(CALL_TYPES[a.type] || a.type)}</b>
       <span>${a.agreed}/${a.answered} agreed${a.answered < over ? ` · ${over - a.answered} more to judge` : ""}</span><i style="width:${pct}%"></i></div>`;
   }).join("") : `<div class="empty">no answered calls yet</div>`;
+  const bs = judgment.agreement_by_stakes || [];
+  if (bs.length) $("#agreement").innerHTML += `<div class="agr-by">by stakes</div>` + bs.map((a) => {
+    const pct = Math.round((a.agreed / a.answered) * 100);
+    return `<div class="agr"><b>${esc(a.type)}</b><span>${a.agreed}/${a.answered} agreed</span><i style="width:${pct}%"></i></div>`;
+  }).join("");
   $("#calls").innerHTML = judgment.calls.length ? judgment.calls.filter((c) => c.answered_by !== "approval").slice(0, 30).map(callHTML).join("")
     : `<div class="empty">no calls yet: he makes them when he plans his day and reviews his week</div>`;
 }

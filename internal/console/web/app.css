@@ -336,6 +336,21 @@ b { font-weight: 600; }
 .jp details { margin-top: 10px; }
 .jp summary { cursor: pointer; font: 10px var(--mono); color: var(--muted); letter-spacing: .06em; }
 .calls-card { margin-bottom: 16px; }
+.tastes { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.taste { position: relative; padding: 8px 32px 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: rgba(0,0,0,.25); }
+.taste span { font: 9px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.taste.likes span { color: var(--accent); } .taste.dislikes span { color: var(--lf); }
+.taste p { margin: 3px 0 0; font-size: 13px; color: var(--soft); }
+.taste .jb { position: absolute; top: 6px; right: 6px; padding: 2px 7px; }
+.taste-form { margin-top: 22px; padding-top: 14px; border-top: 1px dashed var(--line); }
+.taste-form textarea { width: 100%; margin-top: 8px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: rgba(0,0,0,.4);
+  color: var(--ink); font: 13px/1.45 var(--sans); resize: vertical; }
+.taste-saved { font: 10px var(--mono); color: var(--accent); align-self: center; }
+.jstakes { display: inline-block; margin-top: 6px; padding: 1px 8px; border-radius: 999px; font: 9px var(--mono); letter-spacing: .08em;
+  text-transform: uppercase; border: 1px solid var(--line); color: var(--muted); }
+.jstakes.s-medium { color: var(--lf); border-color: rgba(255,195,92,.35); }
+.jstakes.s-high { color: var(--bad); border-color: rgba(255,107,139,.4); }
+.agr-by { grid-column: 1 / -1; font: 9px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
 .jout { margin: 8px 0 0; font-size: 12px; color: var(--soft); }
 .jout b { font-weight: 600; color: var(--ink); }
 .jout em { font-style: normal; font: 9px var(--mono); color: var(--muted); margin-left: 6px; letter-spacing: .06em; text-transform: uppercase; }

@@ -204,7 +204,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 	}
 	fmt.Fprintf(&note, "\n\nWhat you can study with (for new resources):\n%s", m.readingList())
 	fmt.Fprintf(&note, "\n\nYou can have at most %d goals at a time, and %d dreams.", maxActiveGoals, maxActiveDreams)
-	note.WriteString(m.judgmentNote(ctx, reviewJudgment))
+	note.WriteString(m.judgmentNote(ctx, reviewJudgment, reviewAbout(goals, projects)))
 	disagreements, callCases := m.disagreementsNote(ctx, now)
 	note.WriteString(disagreements)
 	lookBack, looked := m.lookBackNote(ctx, now)

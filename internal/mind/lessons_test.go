@@ -115,3 +115,32 @@ func TestTheReviewTidiesLessons(t *testing.T) {
 		t.Errorf("lessons = %+v", s.lessons)
 	}
 }
+
+func TestTheOwnersTaste(t *testing.T) {
+	m, s, _ := gatedMind(&fakeReplier{}, &fakeSystem2{tastes: []system2.Taste{
+		{Kind: "writing", Likes: true, Text: "hooks built on one repeated word"},
+		{Kind: "juggling", Likes: false, Text: "long intros"}, // not a kind it makes: about any work
+	}})
+	work := memory.Work{ID: ulid.Make(), Kind: "lyrics", Title: "Hook"}
+	s.works = append(s.works, work)
+	s.reviewAsked = map[ulid.ULID]time.Time{work.ID: now.Add(-time.Hour)}
+	p := percept("1", "I love when a hook repeats one word. Not into long intros though")
+	p.Speaker, p.SpeakerName = owner, "Busta"
+	m.handle(context.Background(), p)
+	if len(s.tastes) != 2 || s.tastes[0].Kind != "writing" || !s.tastes[0].Likes || s.tastes[0].WorkID != work.ID ||
+		s.tastes[0].Source != memory.TasteFromTelegram || s.tastes[1].Kind != "" || s.tastes[1].Likes {
+		t.Fatalf("tastes = %+v", s.tastes)
+	}
+	// Someone else's taste isn't the owner's.
+	m.handle(context.Background(), percept("2", "I like long intros"))
+	if len(s.tastes) != 2 {
+		t.Error("took someone else's taste")
+	}
+	note := m.tasteNote(context.Background())
+	for _, want := range []string{"What Busta likes and doesn't in your work", "- writing, likes: hooks built on one repeated word",
+		"- doesn't like: long intros"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note is missing %q:\n%s", want, note)
+		}
+	}
+}

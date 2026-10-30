@@ -182,7 +182,7 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 	note.WriteString(m.growthNote(ctx, now))
 	note.WriteString(m.plansNote(ctx, false))
 	note.WriteString(m.foundNote(ctx))
-	note.WriteString(m.judgmentNote(ctx, planJudgment))
+	note.WriteString(m.judgmentNote(ctx, planJudgment, m.dayAbout(ctx, projects)))
 	if j, ok, err := m.Store.LatestWork(ctx, "journal"); err == nil && ok {
 		fmt.Fprintf(&note, "\n\nYour last journal entry (%s):\n%s", j.CreatedAt.In(m.Zone).Format("Monday 2 Jan"), j.Text)
 	}
@@ -506,6 +506,7 @@ func (m *Mind) activityNote(ctx context.Context, i memory.Intention, what string
 	b.WriteString(m.now(now))
 	b.WriteString("\n\n" + what)
 	b.WriteString(m.lessonsNote(ctx))
+	b.WriteString(m.tasteNote(ctx))
 	b.WriteString(m.boundariesNote(ctx))
 	if i.ProjectID.IsZero() {
 		return b.String(), nil, true

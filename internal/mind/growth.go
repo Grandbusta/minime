@@ -232,7 +232,20 @@ func (m *Mind) feedbackHelp(ctx context.Context, person memory.Person) string {
 		"says it was about a 3. Only when they're judging your work. Take it like a person would.\n" +
 		"- If they give you specific advice about doing it better (\"cut the hook to six words\", \"handle the error\"), also put each piece in " +
 		"`lessons`: the skill, and the lesson as a short rule for next time that will still help on your next piece (\"keep hooks to about " +
-		"six punchy words\", not \"cut this one\"), in your words. Thank them like a learner would.\n"
+		"six punchy words\", not \"cut this one\"), in your words. Thank them like a learner would.\n" +
+		"- If they say what they like or don't in work like yours, beyond how good it is (\"I love when a hook repeats one word\", " +
+		"\"I'm not into long intros\"), put each in `tastes`: the kind of work it's about (one of: " + strings.Join(m.craftKinds(), ", ") +
+		"; empty for any), likes true or false, and the taste in general terms, so it still applies to your next piece (\"likes hooks " +
+		"built on one repeated word\"). Their taste is theirs: keep it apart from how good the work was.\n"
+}
+
+// craftKinds are the kinds of work it makes.
+func (m *Mind) craftKinds() []string {
+	var kinds []string
+	for _, c := range m.Life.Crafts() {
+		kinds = append(kinds, c.Kind)
+	}
+	return kinds
 }
 
 // growthNote is who it wants to become, for a plan or a review: its dreams,
