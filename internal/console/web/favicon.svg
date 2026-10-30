@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="minime">
+  <title>minime</title>
+  <path d="M19 116 Q19 79 60 79 Q101 79 101 116 Z" fill="#0e7c4a"/>
+  <circle cx="60" cy="50" r="28" fill="#2fcb6b"/>
+  <path d="M57.5 23 C52 12 60.5 6 66.5 9 C72.5 12 70.5 20 63.5 19" fill="none" stroke="#2fcb6b" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="50.5" cy="50" r="3.6" fill="#0b1f14"/>
+  <circle cx="69.5" cy="50" r="3.6" fill="#0b1f14"/>
+  <circle cx="44.5" cy="58.5" r="3.4" fill="#b6f5c9"/>
+  <circle cx="75.5" cy="58.5" r="3.4" fill="#b6f5c9"/>
+  <path d="M53.5 60 Q60 66 66.5 60" fill="none" stroke="#0b1f14" stroke-width="3" stroke-linecap="round"/>
+</svg>

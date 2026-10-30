@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Minime Banner</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@600&family=Inter:wght@500&display=block">
+<style>
+  /* Rendered to banner-dark.png and banner-light.png at 1280x358; ?light for the light one. */
+  :root { --bg: #0c0f0d; --ink: #f2f5f2; --sub: #9aa69e; --green: #2fcb6b; --glow: rgba(47, 203, 107, .35); }
+  :root.light { --bg: #f5f8f4; --ink: #0b1f14; --sub: #5b6b61; --green: #19a956; --glow: rgba(47, 203, 107, .28); }
+  * { margin: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 358px; overflow: hidden; background: var(--bg); }
+  body { display: flex; align-items: center; gap: 64px; padding: 0 0 0 150px; font-family: Inter, sans-serif; }
+  .mark { width: 250px; height: 250px; filter: drop-shadow(0 0 28px var(--glow)); flex: none; }
+  .word { font: 600 120px/1 Fredoka, sans-serif; letter-spacing: -2px; color: var(--ink); }
+  .word b { color: var(--green); font-weight: 600; }
+  .tag { margin-top: 18px; font: 600 26px/1 Fredoka, sans-serif; letter-spacing: 5px; text-transform: uppercase; color: var(--green); }
+  .sub { margin-top: 18px; font-size: 25px; color: var(--sub); }
+</style>
+<script>if (location.search.includes("light")) document.documentElement.classList.add("light");</script>
+</head>
+<body>
+  <img class="mark" src="mark.svg" alt="">
+  <div>
+    <div class="word">mini<b>me</b></div>
+    <div class="tag">Someone, not something</div>
+    <div class="sub">An AI person with a life of their own, who learns how you decide.</div>
+  </div>
+</body>
+</html>

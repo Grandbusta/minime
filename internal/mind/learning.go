@@ -306,3 +306,54 @@ func (m *Mind) foundNote(ctx context.Context) string {
 	}
 	return b.String()
 }
+
+// stagesNote is where its learning plans stand, for a note on making
+// something: each one's current stage, so it can say when what it made
+// meets a stage's "done when". Empty without plans.
+func (m *Mind) stagesNote(ctx context.Context) string {
+	plans, err := m.Store.Plans(ctx, true)
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, p := range plans {
+		if p.Stage >= len(p.Stages) {
+			continue
+		}
+		st := p.Stages[p.Stage]
+		fmt.Fprintf(&b, "\n- [plan %s] %s, stage %d of %d: practise %s Done when: %s.", p.ID, p.Skill, p.Stage+1, len(p.Stages),
+			strings.TrimSuffix(st.Practice, ".")+".", strings.TrimSuffix(orDefault(st.DoneWhen, "you're confident"), "."))
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return "\n\nWhere your learning plans are. If what you make now really meets a stage's \"done when\", give that plan's id as " +
+		"stage_done and you move on to the next stage; be strict, a start isn't done. Otherwise leave it empty:" + b.String()
+}
+
+// stageDone moves a learning plan on to its next stage, when what it just
+// made met its current one. It returns what it did, for the log.
+func (m *Mind) stageDone(ctx context.Context, planID string, now time.Time) string {
+	if planID == "" {
+		return ""
+	}
+	plans, err := m.Store.Plans(ctx, true)
+	if err != nil {
+		return ""
+	}
+	for _, p := range plans {
+		if p.ID.String() != planID || p.Stage >= len(p.Stages) {
+			continue
+		}
+		if err := m.Store.AdvancePlan(ctx, p.ID, now.UTC()); err != nil {
+			m.Log.Error("advance plan", "err", err)
+			return ""
+		}
+		m.Log.Info("finished a learning stage", "skill", p.Skill, "stage", p.Stage+1, "of", len(p.Stages))
+		if p.Stage+1 >= len(p.Stages) {
+			return fmt.Sprintf("finished the last stage of learning %s", p.Skill)
+		}
+		return fmt.Sprintf("finished stage %d of %d of learning %s; next: %s", p.Stage+1, len(p.Stages), p.Skill, p.Stages[p.Stage+1].Learn)
+	}
+	return ""
+}

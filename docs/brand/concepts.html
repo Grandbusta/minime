@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minime Logo Concepts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&family=Inter:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --page: #f6f3ee; --card: #ffffff; --text: #1d1a17; --muted: #6b645c; --line: #e7e1d8; --dark: #111214;
+    /* palette: set by the buttons */
+    --a: #ff6b4a; --b: #ffb547; --ink: #2b1d1a; --n: #3a2e2b; --c: #ff8a73; --paper: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --page: #0d0e10; --card: #17181b; --text: #ece8e2; --muted: #9a948c; --line: #26272b; }
+  }
+  :root[data-theme="dark"] { --page: #0d0e10; --card: #17181b; --text: #ece8e2; --muted: #9a948c; --line: #26272b; }
+  body[data-palette="sunrise"] { --a: #ff6b4a; --b: #ffb547; --ink: #2b1d1a; --n: #3a2e2b; --c: #ff9c86; }
+  body[data-palette="green"]   { --a: #2fcb6b; --b: #0e7c4a; --ink: #0b1f14; --n: #24352c; --c: #8be3a8; }
+  body[data-palette="dusk"]    { --a: #7b5cff; --b: #ff7ab6; --ink: #1b1530; --n: #2e2747; --c: #ffa3c9; }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font: 15px/1.5 Inter, system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font: 600 30px Fredoka, sans-serif; margin: 0 0 6px; }
+  .lead { color: var(--muted); margin: 0 0 22px; max-width: 70ch; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 28px; }
+  .bar span { color: var(--muted); font-size: 13px; margin-right: 4px; }
+  .bar button { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 7px 14px;
+    font: 500 13px Inter, sans-serif; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+  .bar button.on { border-color: var(--text); }
+  .sw { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 500px), 1fr)); gap: 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 20px; }
+  .card h2 { font: 600 19px Fredoka, sans-serif; margin: 0; }
+  .card p { color: var(--muted); margin: 4px 0 16px; font-size: 14px; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { border-radius: 14px; display: grid; place-items: center; aspect-ratio: 1.25; }
+  .tile.light { background: #fbf8f3; } .tile.dark { background: var(--dark); }
+  .tile svg { width: 58%; height: auto; }
+  .lockup { margin-top: 10px; border-radius: 14px; background: #fbf8f3; padding: 18px; display: flex; align-items: center; gap: 12px; }
+  .lockup.dark { background: var(--dark); }
+  .lockup svg { width: 54px; height: 54px; flex: none; }
+  .word { font: 600 40px/1 Fredoka, sans-serif; letter-spacing: -0.5px; color: var(--ink); }
+  .lockup.dark .word { color: #f3efe9; }
+  .word b { color: var(--a); font-weight: 600; }
+  .sizes { display: flex; align-items: end; gap: 14px; margin-top: 12px; color: var(--muted); font-size: 12px; }
+  .sizes div { display: grid; justify-items: center; gap: 4px; }
+  @media (max-width: 520px) { .word { font-size: 32px; } }
+</style>
+</head>
+<body data-palette="sunrise">
+<main>
+  <h1>Minime logo concepts</h1>
+  <p class="lead">Four ways of saying "a person, not an agent", each on light and dark, with the wordmark, and at icon sizes. Switch the colours to compare palettes.</p>
+  <div class="bar"><span>Colour</span>
+    <button data-p="sunrise" class="on"><i class="sw" style="background:#ff6b4a"></i>Sunrise, warm and human</button>
+    <button data-p="green"><i class="sw" style="background:#2fcb6b"></i>Living green, matches the console</button>
+    <button data-p="dusk"><i class="sw" style="background:#7b5cff"></i>Dusk, thoughtful</button>
+  </div>
+  <div class="grid" id="grid"></div>
+</main>
+
+<script>
+// Each mark is drawn in a 120x120 box, coloured by the palette's variables.
+const marks = {
+  mini: {
+    name: "1. Mini",
+    about: "A friendly character, like OpenClaw's mascot but a person: head, shoulders, a face. The curl on top is their own mind, a thought growing.",
+    svg: `<path d="M24 114 Q24 80 60 80 Q96 80 96 114 Z" fill="var(--b)"/>
+      <circle cx="60" cy="52" r="30" fill="var(--a)"/>
+      <path d="M57 23 C52 12 60 6 66 9 C72 12 70 20 63 19" fill="none" stroke="var(--a)" stroke-width="5" stroke-linecap="round"/>
+      <circle cx="50" cy="52" r="3.8" fill="var(--ink)"/><circle cx="70" cy="52" r="3.8" fill="var(--ink)"/>
+      <circle cx="44" cy="61" r="3.6" fill="var(--c)" opacity=".75"/><circle cx="76" cy="61" r="3.6" fill="var(--c)" opacity=".75"/>
+      <path d="M53 62 Q60 68 67 62" fill="none" stroke="var(--ink)" stroke-width="3" stroke-linecap="round"/>`
+  },
+  pair: {
+    name: "2. You and me",
+    about: "A larger figure and a small one beside them: literally a mini me. The relationship at the heart of it, like Busta and Daniel. The spark is the small one's own life.",
+    svg: `<circle cx="46" cy="38" r="18" fill="var(--n)"/>
+      <path d="M16 106 Q16 64 46 64 Q76 64 76 106 Z" fill="var(--n)"/>
+      <circle cx="84" cy="62" r="13" fill="var(--a)"/>
+      <path d="M62 106 Q62 80 84 80 Q106 80 106 106 Z" fill="var(--a)"/>
+      <path d="M100 34 L102.6 41.4 L110 44 L102.6 46.6 L100 54 L97.4 46.6 L90 44 L97.4 41.4 Z" fill="var(--b)"/>`
+  },
+  m: {
+    name: "3. The m",
+    about: "A lowercase m whose two arches are two people side by side, each with a head. It doubles as a letter, so it works as an app icon and favicon.",
+    svg: `<path d="M24 102 V66 A18 18 0 0 1 60 66 V102" fill="none" stroke="var(--n)" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M60 66 A18 18 0 0 1 96 66 V102" fill="none" stroke="var(--a)" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="42" cy="28" r="11" fill="var(--n)"/>
+      <circle cx="78" cy="30" r="9" fill="var(--a)"/>`
+  },
+  bubble: {
+    name: "4. Someone in your chat",
+    about: "A chat bubble with a face in it: they live in your Telegram as someone, not something. The tail is shoulders as much as a speech tail.",
+    svg: `<g transform="translate(0 8)"><path d="M32 18 H88 A28 28 0 0 1 116 46 V62 A28 28 0 0 1 88 90 H50 L28 108 L32 88 A28 28 0 0 1 4 62 V46 A28 28 0 0 1 32 18 Z" fill="var(--a)"/>
+      <circle cx="46" cy="50" r="5" fill="var(--paper)"/><circle cx="74" cy="50" r="5" fill="var(--paper)"/>
+      <path d="M48 64 Q60 74 72 64" fill="none" stroke="var(--paper)" stroke-width="4.5" stroke-linecap="round"/></g>
+      <path d="M84 21 C79 11 89 5 94 11 C97 15 93 19 89 17" fill="none" stroke="var(--a)" stroke-width="4.5" stroke-linecap="round"/>`
+  }
+};
+const svg = (m, extra = "") => `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${m.name}" ${extra}>${m.svg}</svg>`;
+// On dark, the neutral figures need to be light.
+const dark = (s) => s.replaceAll("var(--n)", "#e9e3da").replaceAll("var(--ink)", "#1a1410");
+
+document.getElementById("grid").innerHTML = Object.values(marks).map((m) => `
+  <section class="card"><h2>${m.name}</h2><p>${m.about}</p>
+    <div class="tiles"><div class="tile light">${svg(m)}</div><div class="tile dark">${dark(svg(m))}</div></div>
+    <div class="lockup">${svg(m)}<span class="word">mini<b>me</b></span></div>
+    <div class="lockup dark">${dark(svg(m))}<span class="word">mini<b>me</b></span></div>
+    <div class="sizes">${[64, 32, 16].map((s) => `<div>${svg(m, `width="${s}" height="${s}"`)}${s}px</div>`).join("")}</div>
+  </section>`).join("");
+
+document.querySelectorAll(".bar button").forEach((b) => b.onclick = () => {
+  document.body.dataset.palette = b.dataset.p;
+  document.querySelectorAll(".bar button").forEach((x) => x.classList.toggle("on", x === b));
+});
+</script>
+</body>
+</html>

@@ -581,7 +581,8 @@ func (m *Mind) lookBackNote(ctx context.Context, now time.Time) (string, []memor
 	if !m.Calls.On {
 		return "", nil
 	}
-	calls, err := m.Store.CallsToLookBack(ctx, lookBackTypes, now.Add(-2*reviewWindow), now.Add(-lookBackAfter), lookBackPerReview)
+	calls, err := m.Store.CallsToLookBack(ctx, lookBackTypes, now.Add(-2*reviewWindow), now.Add(-max(3*time.Hour, m.paced(lookBackAfter))),
+		lookBackPerReview)
 	if err != nil || len(calls) == 0 {
 		return "", nil
 	}

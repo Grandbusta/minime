@@ -293,7 +293,7 @@ func (m *Mind) goalsHelp(ctx context.Context, person memory.Person) string {
 	b.WriteString("\nGoals they ask you to take on:\n- If they ask you to learn something or take on a goal (\"add that to your goals\", " +
 		"\"you should learn sales\") and you agree, put it in `goals`, so it really becomes yours: you'll plan how to learn it and " +
 		"practise it in your days. The skill it grows (one of yours by its exact name, or a new one, with level your honest starting " +
-		"level 1-10: a beginner is 1-2), the goal, done_when (a concrete test from what you'll make), due (YYYY-MM-DD, weeks away), and " +
+		"level 1-10: a beginner is 1-2), the goal, done_when (a concrete test from what you'll make), due (YYYY-MM-DD, " + m.goalDue() + "), and " +
 		"the dream it serves (dream_id), or new_dream (third person with your name) if none fits. Only say you've added it if you " +
 		"put it in `goals`. The goal is to learn it yourself, not to make them a plan.\n")
 	if dreams, err := m.Store.Dreams(ctx, true); err == nil && len(dreams) > 0 {
@@ -353,7 +353,7 @@ func (m *Mind) takeGoal(ctx context.Context, gt system2.GoalTaken, now time.Time
 	}
 	due, err := time.ParseInLocation("2006-01-02", gt.Due, m.Zone)
 	if err != nil || !due.After(now) || due.Sub(now) > goalHorizon {
-		due = now.AddDate(0, 0, 28).In(m.Zone) // four weeks, when the date it gave isn't one
+		due = now.Add(m.paced(28 * 24 * time.Hour)).In(m.Zone) // four person-weeks, when the date it gave isn't one
 	}
 	dreams, err := m.Store.Dreams(ctx, true)
 	if err != nil {

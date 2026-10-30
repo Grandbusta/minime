@@ -377,7 +377,8 @@ func activityFormat(crafts []self.Craft) *system2.Format {
 	}
 	return &system2.Format{Name: "activity", Schema: map[string]any{
 		"type": "object", "additionalProperties": false,
-		"required": []string{"title", "kind", "text", "project_notes", "project_done", "remember", "lessons", "ask_for_review", "review_question"},
+		"required": []string{"title", "kind", "text", "project_notes", "project_done", "remember", "lessons", "ask_for_review", "review_question",
+			"stage_done"},
 		"properties": map[string]any{
 			"title":           map[string]any{"type": "string"},
 			"kind":            map[string]any{"type": "string", "enum": kinds},
@@ -388,6 +389,8 @@ func activityFormat(crafts []self.Craft) *system2.Format {
 			"lessons":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 			"ask_for_review":  map[string]any{"type": "boolean"},
 			"review_question": map[string]any{"type": "string"},
+			"stage_done": map[string]any{"type": "string",
+				"description": "the id of the learning plan whose current stage what you made meets the done when of; empty if none"},
 		},
 	}}
 }
@@ -440,6 +443,11 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	d.Tier, d.SetID, d.Action = decision.TierSystem2, m.Day.ActivityPrompt.Ref, action
 
 	note, project, ok := m.activityNote(ctx, i, what, now)
+	plans := ""
+	if action == "activity" { // its own practice, not what it makes for someone
+		plans = m.stagesNote(ctx)
+		note += plans
+	}
 	if !ok {
 		m.finish(ctx, i, memory.IntentionCancelled, "project not found", now)
 		m.finishLife(ctx, d, start, decision.OutcomeFailed, "project not found")
@@ -493,6 +501,7 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 		Lessons        []string `json:"lessons"`
 		AskForReview   bool     `json:"ask_for_review"`
 		ReviewQuestion string   `json:"review_question"`
+		StageDone      string   `json:"stage_done"`
 	}
 	if err := json.Unmarshal([]byte(resp.Text), &out); err != nil || strings.TrimSpace(out.Text) == "" {
 		m.finish(ctx, i, memory.IntentionMissed, "nothing came of it", now)
@@ -531,7 +540,13 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 		}
 	}
 	d.Reply = title + "\n\n" + w.Text
-	m.finishLife(ctx, d, start, decision.OutcomeOK, fmt.Sprintf("made %s %q", w.Kind, title))
+	detail := fmt.Sprintf("made %s %q", w.Kind, title)
+	if plans != "" {
+		if done := m.stageDone(ctx, strings.TrimSpace(out.StageDone), now); done != "" {
+			detail += "; " + done
+		}
+	}
+	m.finishLife(ctx, d, start, decision.OutcomeOK, detail)
 	m.scoreWork(ctx, w, p.ID, &d.ID)
 	source := memory.LessonFromSelf
 	if ab != nil && ab.Risk() == ability.ReadsWeb {
@@ -659,7 +674,8 @@ func (m *Mind) lifeInstructions(p Prompt) string {
 	return strings.NewReplacer("{name}", m.Life.Name, "{life_story}", list(m.Life.Story, "- (none)"),
 		"{personality}", list(m.Life.Personality, "- Be yourself."),
 		"{routine}", list(m.Life.Routine, "- No fixed routine: plan as you like."),
-		"{max}", fmt.Sprint(m.Day.MaxActivities), "{owner}", m.ownerName(context.Background()), "{makes}", m.makesList(), "{kinds}", strings.Join(kinds, ", ")).Replace(p.Text)
+		"{max}", fmt.Sprint(m.Day.MaxActivities), "{owner}", m.ownerName(context.Background()),
+		"{goal_due}", m.goalDue(), "{practice_time}", m.practiceTime(), "{makes}", m.makesList(), "{kinds}", strings.Join(kinds, ", ")).Replace(p.Text)
 }
 
 func (m *Mind) finishLife(ctx context.Context, d *decision.Decision, start time.Time, status decision.OutcomeStatus, detail string) {
@@ -677,4 +693,27 @@ func orDefault(s, def string) string {
 		return s
 	}
 	return def
+}
+
+// pace is how much faster than a person it works: 1 at a person's pace.
+func (m *Mind) pace() int { return max(1, m.Day.Pace) }
+
+// paced is how long something that takes a person d takes it, at its pace.
+func (m *Mind) paced(d time.Duration) time.Duration { return d / time.Duration(m.pace()) }
+
+// goalDue is when a goal should be due, in words, at its pace.
+func (m *Mind) goalDue() string {
+	if m.pace() == 1 {
+		return "within weeks"
+	}
+	return fmt.Sprintf("within days: you work about %d times faster than a person, so what takes a person four weeks takes you "+
+		"about %d days", m.pace(), max(1, int(m.paced(28*24*time.Hour).Hours()/24+0.5)))
+}
+
+// practiceTime is how long a practice piece should take, in words, at its pace.
+func (m *Mind) practiceTime() string {
+	if m.pace() == 1 {
+		return "a day or two"
+	}
+	return "a round or two of your day"
 }

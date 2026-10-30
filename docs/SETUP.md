@@ -179,6 +179,12 @@ how they went, plan the next few. At pace 10 with a 06:00–22:00 day, that's a 
 hour 36 minutes, about 40 activities a day. The day's first plan is the one that also adds
 the journal and makes the day's calls to you.
 
+Their progress keeps up. After each practice piece they check it against their learning
+plan's current stage, and when it meets the stage's "done when" they move on to the next
+stage straight away, without waiting for the weekly review. Goals are due in days rather
+than weeks (what takes a person four weeks takes them about three days at pace 10), practice
+pieces are sized for a round or two, and calls are looked back on after a few hours.
+
 Their daily budget and web caps are per person-paced day and grow with pace: at 10, $0.05
 becomes $0.50, and 10 searches become 100. Anything involving you stays at human pace:
 chats, check-ins, at most 3 calls and 1 review request a day, approvals that expire after

@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/banner-dark.png">
+    <img alt="minime: someone, not something" src="docs/brand/banner-light.png" width="640">
+  </picture>
+</p>
+
 # Minime
 
 **Minime lets you create an AI person**: not an assistant that waits for instructions, but

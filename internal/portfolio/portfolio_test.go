@@ -285,8 +285,11 @@ func TestHandlerRendersThePage(t *testing.T) {
 	if strings.Contains(html, "Lately") {
 		t.Error("empty now section was shown")
 	}
-	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") {
+	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") || !strings.Contains(csp, "img-src data:;") {
 		t.Errorf("CSP = %q", csp)
+	}
+	if !strings.Contains(html, `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,`) || strings.Contains(html, "ZgotmplZ") {
+		t.Error("the favicon is missing, or the template refused it")
 	}
 
 	if resp, _ := http.Get(srv.URL + "/admin"); resp.StatusCode != http.StatusNotFound {

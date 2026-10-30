@@ -94,6 +94,8 @@ func TestADuePromiseIsMadeAndSent(t *testing.T) {
 	m.Day.BudgetUSD = 0.05
 	i := promised("Tobi writes Sam a verse about Sunday mornings", "", "", now.Add(-time.Minute))
 	s.intentions = []memory.Intention{i}
+	s.plans = []memory.LearningPlan{{ID: ulid.Make(), Skill: "lyric writing", Status: memory.PlanActive,
+		Stages: []memory.Stage{{Learn: "hooks", Practice: "a hook", DoneWhen: "a hook"}}}}
 	s.exchanges = []memory.Exchange{
 		{At: i.CreatedAt.Add(-5 * time.Second), Message: "Write me a verse about Sunday mornings tonight?", Reply: "Sure, by 8."},
 		{At: i.CreatedAt.Add(time.Minute), Message: "Make it funny", Reply: "Funny it is."},
@@ -109,6 +111,9 @@ func TestADuePromiseIsMadeAndSent(t *testing.T) {
 	}
 	if note := s2.requests[0].Note; !strings.Contains(note, "\nSam: Make it funny\nTobi: Funny it is.") || strings.Contains(note, "Unrelated") {
 		t.Errorf("making note doesn't carry what was said about it:\n%s", note)
+	}
+	if strings.Contains(s2.requests[0].Note, "Where your learning plans are") {
+		t.Error("what it makes for someone else was offered as practice for its own plan")
 	}
 	if note := s2.requests[1].Note; !strings.Contains(note, "word for word:\n\nSunday Mornings\n\nBells over Yaba") {
 		t.Errorf("message note:\n%s", note)

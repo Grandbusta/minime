@@ -368,3 +368,49 @@ func TestRounds(t *testing.T) {
 		t.Errorf("after a restart, round 3 wasn't planned: %d requests", len(s2.requests))
 	}
 }
+
+func TestAPracticeThatMeetsItsStageMovesThePlanOn(t *testing.T) {
+	ctx := context.Background()
+	plan := memory.LearningPlan{ID: ulid.Make(), GoalID: ulid.Make(), Skill: "sales and marketing", Status: memory.PlanActive, Stages: []memory.Stage{
+		{N: 0, Learn: "start with the customer", Practice: "a one-page customer note", DoneWhen: "a note naming the user, problem and workaround"},
+		{N: 1, Learn: "B2B outreach", Practice: "two intro emails", DoneWhen: "two emails with one clear request"},
+	}}
+	for name, c := range map[string]struct {
+		stageDone string
+		want      int
+	}{"met": {plan.ID.String(), 1}, "not yet": {"", 0}, "another plan": {ulid.Make().String(), 0}} {
+		m, s, s2, _, _ := activityMind()
+		p := plan
+		p.Stages = append([]memory.Stage{}, plan.Stages...)
+		s.plans = []memory.LearningPlan{p}
+		s2.formats["activity"] = `{"title":"Customer note","kind":"notes","text":"The user is a clinic manager...","project_notes":"","project_done":false,
+			"remember":[],"lessons":[],"ask_for_review":false,"review_question":"","stage_done":"` + c.stageDone + `"}`
+		m.tick(ctx, at(29, 10, 0))
+		note := s2.requests[0].Note
+		if !strings.Contains(note, "[plan "+plan.ID.String()+"] sales and marketing, stage 1 of 2: practise a one-page customer note.") {
+			t.Errorf("%s: note doesn't show where the plan is:\n%s", name, note)
+		}
+		if s.plans[0].Stage != c.want {
+			t.Errorf("%s: stage = %d, want %d", name, s.plans[0].Stage, c.want)
+		}
+	}
+}
+
+func TestTimeWordsFollowPace(t *testing.T) {
+	m, _ := lifeMind(&fakeSystem2{})
+	in := m.lifeInstructions(Prompt{Text: "due {goal_due}; practise for {practice_time}"})
+	if in != "due within weeks; practise for a day or two" {
+		t.Errorf("pace 1: %q", in)
+	}
+	m.Day.Pace = 10
+	in = m.lifeInstructions(Prompt{Text: "due {goal_due}; practise for {practice_time}"})
+	if !strings.Contains(in, "about 10 times faster") || !strings.Contains(in, "takes you about 3 days") || !strings.Contains(in, "a round or two") {
+		t.Errorf("pace 10: %q", in)
+	}
+	for _, path := range []string{"../../prompts/review.md", "../../prompts/learn.md"} {
+		raw, _ := os.ReadFile(path)
+		if got := m.lifeInstructions(Prompt{Text: string(raw)}); strings.Contains(got, "{goal_due}") || strings.Contains(got, "{practice_time}") {
+			t.Errorf("%s: a pace placeholder is left", path)
+		}
+	}
+}
