@@ -653,6 +653,8 @@ type fakeSystem1 struct {
 	circleCalls []system1.Request
 	scores      map[string]float64 // work title → level index (0-9), for skill scoring
 	scoreCalls  []system1.Request
+	stageMet    map[string]float64 // work title → how sure it meets the stage
+	stageCalls  []system1.Request
 }
 
 type lifeAnswer struct {
@@ -668,6 +670,13 @@ func (f *fakeSystem1) Decide(_ context.Context, req system1.Request) (system1.Re
 		title := state["work"].(map[string]string)["title"]
 		return system1.Response{Provider: "fake1/1", CostUSD: 0.00002, Answers: map[string]decision.Answer{
 			"level": {Type: decision.QuestionScore, Score: f.scores[title]},
+		}}, nil
+	}
+	if state, ok := req.State.(map[string]any); ok && state["stage"] != nil {
+		f.stageCalls = append(f.stageCalls, req)
+		title := state["work"].(map[string]string)["title"]
+		return system1.Response{Provider: "fake1/1", CostUSD: 0.00002, Answers: map[string]decision.Answer{
+			"met": {Type: decision.QuestionPredicate, Probability: f.stageMet[title]},
 		}}, nil
 	}
 	if state, ok := req.State.(map[string]any); ok && state["relation"] != nil {

@@ -3,6 +3,9 @@ package mind
 import (
 	"context"
 	"errors"
+	"github.com/Grandbusta/minime/internal/decision"
+	"github.com/Grandbusta/minime/internal/decision/questions"
+	"github.com/Grandbusta/minime/internal/providers/system1"
 	"os"
 	"path/filepath"
 	"strings"
@@ -409,6 +412,46 @@ func TestTimeWordsFollowPace(t *testing.T) {
 		raw, _ := os.ReadFile(path)
 		if got := m.lifeInstructions(Prompt{Text: string(raw)}); strings.Contains(got, "{goal_due}") || strings.Contains(got, "{practice_time}") {
 			t.Errorf("%s: a pace placeholder is left", path)
+		}
+	}
+}
+
+func TestAStageMovesOnOnlyWhenTheCheckAgrees(t *testing.T) {
+	ctx := context.Background()
+	for name, c := range map[string]struct {
+		sure float64
+		want int
+	}{"the check agrees": {0.9, 1}, "notes about it, not the thing": {0.2, 0}} {
+		m, s, s2, _, _ := activityMind()
+		s1 := &fakeSystem1{stageMet: map[string]float64{"Outreach notes": c.sure}}
+		m.System1 = s1
+		m.StageCheck = questions.Set{ID: "stage_check", Version: 1, Primary: "met",
+			Questions:  []system1.Question{{Name: "met", Type: decision.QuestionPredicate, Instructions: "?"}},
+			Thresholds: questions.Thresholds{Act: 0.7, Ask: 0.5}}
+		plan := memory.LearningPlan{ID: ulid.Make(), Skill: "sales and marketing", Status: memory.PlanActive, Stages: []memory.Stage{
+			{Learn: "outreach", Practice: "two intro emails", DoneWhen: "two emails with one clear request"}, {Learn: "calls"}}}
+		s.plans = []memory.LearningPlan{plan}
+		s2.formats["activity"] = `{"title":"Outreach notes","kind":"notes","text":"How to write outreach...","project_notes":"","project_done":false,
+			"remember":[],"lessons":[],"ask_for_review":false,"review_question":"","stage_done":"` + plan.ID.String() + `"}`
+		m.tick(ctx, at(29, 10, 0))
+		if s.plans[0].Stage != c.want {
+			t.Errorf("%s: stage = %d, want %d", name, s.plans[0].Stage, c.want)
+		}
+		if len(s1.stageCalls) != 1 {
+			t.Fatalf("%s: checked %d times", name, len(s1.stageCalls))
+		}
+		st := s1.stageCalls[0].State.(map[string]any)["stage"].(map[string]string)
+		if st["done_when"] != "two emails with one clear request" {
+			t.Errorf("%s: checked against %+v", name, st)
+		}
+		var check *decision.Decision
+		for i := range s.decisions {
+			if s.decisions[i].Action == "check_stage" {
+				check = &s.decisions[i]
+			}
+		}
+		if check == nil || check.ParentID == nil {
+			t.Errorf("%s: the check wasn't recorded under the work's decision", name)
 		}
 	}
 }

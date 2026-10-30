@@ -11,6 +11,7 @@ import (
 
 	"github.com/Grandbusta/minime/internal/decision"
 	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/providers/system1"
 	"github.com/Grandbusta/minime/internal/providers/system2"
 )
 
@@ -313,27 +314,69 @@ func (m *Mind) stagesNote(ctx context.Context) string {
 		"stage_done and you move on to the next stage; be strict, a start isn't done. Otherwise leave it empty:" + b.String()
 }
 
-func (m *Mind) stageDone(ctx context.Context, planID string, now time.Time) string {
+// stageDone moves a learning plan on when it says what it just made (w) met
+// the current stage and System 1 agrees (StageCheck): at a fast pace, its own
+// word alone would move it on too soon.
+func (m *Mind) stageDone(ctx context.Context, planID string, w memory.Work, percept ulid.ULID, parent *ulid.ULID, now time.Time) {
 	if planID == "" {
-		return ""
+		return
 	}
 	plans, err := m.Store.Plans(ctx, true)
 	if err != nil {
-		return ""
+		return
 	}
 	for _, p := range plans {
 		if p.ID.String() != planID || p.Stage >= len(p.Stages) {
 			continue
 		}
+		if !m.stageMet(ctx, p, p.Stages[p.Stage], w, percept, parent) {
+			m.Log.Info("said it finished a learning stage; the check didn't agree", "skill", p.Skill, "stage", p.Stage+1, "work", w.Title)
+			return
+		}
 		if err := m.Store.AdvancePlan(ctx, p.ID, now.UTC()); err != nil {
 			m.Log.Error("advance plan", "err", err)
-			return ""
+			return
 		}
-		m.Log.Info("finished a learning stage", "skill", p.Skill, "stage", p.Stage+1, "of", len(p.Stages))
-		if p.Stage+1 >= len(p.Stages) {
-			return fmt.Sprintf("finished the last stage of learning %s", p.Skill)
-		}
-		return fmt.Sprintf("finished stage %d of %d of learning %s; next: %s", p.Stage+1, len(p.Stages), p.Skill, p.Stages[p.Stage+1].Learn)
+		m.Log.Info("finished a learning stage", "skill", p.Skill, "stage", p.Stage+1, "of", len(p.Stages), "work", w.Title)
+		return
 	}
-	return ""
+}
+
+// stageMet is System 1's independent check that w meets a stage's "done
+// when", recorded as a decision. Without the check set, its word is enough.
+func (m *Mind) stageMet(ctx context.Context, p memory.LearningPlan, st memory.Stage, w memory.Work, percept ulid.ULID, parent *ulid.ULID) bool {
+	if m.StageCheck.ID == "" || len(m.StageCheck.Questions) == 0 {
+		return true
+	}
+	text := w.Text
+	if r := []rune(text); len(r) > scoreChars {
+		text = string(r[:scoreChars])
+	}
+	start := time.Now()
+	d := &decision.Decision{ID: ulid.Make(), ParentID: parent, At: start.UTC(), PerceptID: percept, Tier: decision.TierSystem1,
+		SetID: m.StageCheck.Ref(), Action: "check_stage", Gate: decision.GateAuto}
+	resp, err := m.System1.Decide(ctx, system1.Request{
+		State: map[string]any{
+			"stage": map[string]string{"skill": p.Skill, "learn": st.Learn, "practice": st.Practice, "done_when": orDefault(st.DoneWhen, st.Practice)},
+			"work":  map[string]string{"title": w.Title, "kind": w.Kind, "text": text},
+		},
+		Questions: m.StageCheck.Questions,
+	})
+	if err != nil {
+		m.Log.Warn("checking a learning stage failed; it stays on this stage", "err", err)
+		return false
+	}
+	a, ok := resp.Answers[m.StageCheck.Questions[0].Name]
+	met := ok && !a.Refused && a.Probability >= m.StageCheck.Thresholds.Act
+	d.Provider, d.Answers, d.CostUSD, d.Latency = resp.Provider, resp.Answers, resp.CostUSD, time.Since(start)
+	verdict := "not yet"
+	if met {
+		verdict = "met"
+	}
+	d.Outcome = &decision.Outcome{Status: decision.OutcomeOK, At: time.Now().UTC(),
+		Detail: fmt.Sprintf("%s stage %d of %d, %q: %s (%.2f)", p.Skill, p.Stage+1, len(p.Stages), w.Title, verdict, a.Probability)}
+	if err := m.Store.SaveDecision(ctx, *d); err != nil {
+		m.Log.Error("save decision", "err", err)
+	}
+	return met
 }

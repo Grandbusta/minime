@@ -175,6 +175,9 @@ type Config struct {
 	Abilities *ability.Set
 	// SkillLevel zero value: works aren't scored, and skills only move with feedback.
 	SkillLevel questions.Set
+	// StageCheck checks that a piece of work meets a learning stage before
+	// the stage moves on (one predicate); zero value: its own word is enough.
+	StageCheck questions.Set
 	// Autonomy is what it may do on its own; the zero value allows everything.
 	Autonomy action.Policy
 	// Asker nil: requests to the owner wait unsent and expire.

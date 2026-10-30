@@ -1,0 +1,18 @@
+# Does a piece of work the agent made meet a stage of its learning plan? The
+# agent says so itself when it makes the piece; this checks it independently,
+# so a stage moves on only when both agree. The state is `stage` (what it's
+# learning, the practice piece and its "done when") and `work` (title, kind,
+# text). A start, notes about doing it, or a piece of a different kind is not
+# done: at a fast pace, this is what keeps fast from turning into shallow.
+id: stage_check
+version: 1
+primary: met
+
+questions:
+  - name: met
+    type: predicate
+    instructions: "Does `work` itself fully meet `stage.done_when`? Read it strictly, like a teacher deciding whether a learner is ready for the next stage: the work must be the kind of thing the done-when asks for and do everything it names. Notes about how to do it, a plan to do it, or only part of it do not meet it."
+
+thresholds:
+  act: 0.7 # it moves on only this sure
+  ask: 0.5

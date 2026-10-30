@@ -518,13 +518,10 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 		}
 	}
 	d.Reply = title + "\n\n" + w.Text
-	detail := fmt.Sprintf("made %s %q", w.Kind, title)
+	m.finishLife(ctx, d, start, decision.OutcomeOK, fmt.Sprintf("made %s %q", w.Kind, title))
 	if plans != "" {
-		if done := m.stageDone(ctx, strings.TrimSpace(out.StageDone), now); done != "" {
-			detail += "; " + done
-		}
+		m.stageDone(ctx, strings.TrimSpace(out.StageDone), w, p.ID, &d.ID, now)
 	}
-	m.finishLife(ctx, d, start, decision.OutcomeOK, detail)
 	m.scoreWork(ctx, w, p.ID, &d.ID)
 	source := memory.LessonFromSelf
 	if ab != nil && ab.Risk() == ability.ReadsWeb {

@@ -255,6 +255,12 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	} else if len(skillLevel.Questions) != 1 || skillLevel.Questions[0].Type != decision.QuestionScore {
 		return fmt.Errorf("question set %s must be exactly one score question", skillLevel.Ref())
 	}
+	stageCheck, ok := sets["stage_check"]
+	if !ok {
+		log.Warn("question set stage_check not found; a learning stage moves on when the agent alone says it's done")
+	} else if len(stageCheck.Questions) != 1 || stageCheck.Questions[0].Type != decision.QuestionPredicate {
+		return fmt.Errorf("question set %s must be exactly one predicate", stageCheck.Ref())
+	}
 	followUp, ok := sets["follow_up"]
 	if !ok {
 		log.Warn("question set follow_up not found; replies to the agent's questions are routed on intent alone",
@@ -345,6 +351,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		Ticks:   ticks, Zone: zone, CheckIns: mind.CheckIns{Times: checkIns, Quiet: cfg.Initiative.Quiet}, Day: day,
 		Abilities:  abilitySet,
 		SkillLevel: skillLevel,
+		StageCheck: stageCheck,
 		Autonomy:   policy,
 		Asker:      tg,
 		Calls:      calls(cfg),
