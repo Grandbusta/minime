@@ -1,4 +1,4 @@
-// Package openai is the System 1 provider for OpenAI's Decisions API (POST /v1/decisions).
+// Package openai is the System 1 provider for OpenAI's Decisions API.
 package openai
 
 import (
@@ -6,11 +6,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
+
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
+	"github.com/openai/openai-go/v3/shared"
 
 	"minime/internal/decision"
 	"minime/internal/pricing"
-	"minime/internal/providers/openaihttp"
+	"minime/internal/providers/openaiclient"
 	"minime/internal/providers/system1"
 )
 
@@ -20,7 +25,7 @@ const (
 )
 
 type Client struct {
-	api   *openaihttp.Client
+	api   openai.Client
 	model string
 	price pricing.Price // the model's input and cache rates; Decisions output is free
 }
@@ -30,118 +35,111 @@ func New(apiKey, model, baseURL string, price pricing.Price) *Client {
 	if model == "" {
 		model = DefaultModel
 	}
-	return &Client{api: openaihttp.New(apiKey, baseURL, requestTimeout), model: model, price: price}
+	return &Client{api: openaiclient.New(apiKey, baseURL, requestTimeout), model: model, price: price}
 }
 
 func (c *Client) Decide(ctx context.Context, req system1.Request) (system1.Response, error) {
-	var resp wireResponse
-	if err := c.api.Post(ctx, "/decisions", c.wireRequest(req), &resp); err != nil {
+	params, err := c.params(req)
+	if err != nil {
 		return system1.Response{}, err
+	}
+	resp, err := c.api.Decisions.New(ctx, params)
+	if err != nil {
+		return system1.Response{}, fmt.Errorf("openai decisions: %w", err)
 	}
 	return toResponse(req, resp, c.price)
 }
 
-// --- request ---
-
-type wireRequest struct {
-	Model     string         `json:"model"`
-	Input     any            `json:"input"`
-	Questions []wireQuestion `json:"questions"`
-}
-
-type wireQuestion struct {
-	Type         string       `json:"type"`
-	Name         string       `json:"name"`
-	Instructions string       `json:"instructions"`
-	Choices      []wireChoice `json:"choices,omitempty"`
-	Levels       []wireLevel  `json:"levels,omitempty"`
-}
-
-type wireChoice struct {
-	Value       string `json:"value"`
-	Description string `json:"description,omitempty"`
-}
-
-type wireLevel struct {
-	Label       string `json:"label"`
-	Description string `json:"description,omitempty"`
-}
-
-func (c *Client) wireRequest(req system1.Request) wireRequest {
-	w := wireRequest{Model: c.model, Input: wireInput(req.State)}
-	for _, q := range req.Questions {
-		wq := wireQuestion{Type: string(q.Type), Name: q.Name, Instructions: q.Instructions}
-		for _, ch := range q.Choices {
-			wq.Choices = append(wq.Choices, wireChoice{Value: ch.Value, Description: ch.Description})
-		}
-		for _, l := range q.Levels {
-			wq.Levels = append(wq.Levels, wireLevel{Label: l.Label, Description: l.Description})
-		}
-		w.Questions = append(w.Questions, wq)
+// params is the request: the state as input, and the questions.
+func (c *Client) params(req system1.Request) (openai.DecisionNewParams, error) {
+	p := openai.DecisionNewParams{Model: c.model}
+	input, err := wireInput(req.State)
+	if err != nil {
+		return p, err
 	}
-	return w
+	p.Input = input
+	for _, q := range req.Questions {
+		var wq openai.DecisionNewParamsQuestionUnion
+		switch q.Type {
+		case decision.QuestionPredicate:
+			wq.OfPredicate = &openai.DecisionNewParamsQuestionPredicate{Name: param.NewOpt(q.Name),
+				Instructions: openai.DecisionNewParamsQuestionPredicateInstructionsUnion{OfString: param.NewOpt(q.Instructions)}}
+		case decision.QuestionChoice:
+			ch := &openai.DecisionNewParamsQuestionChoice{Name: param.NewOpt(q.Name),
+				Instructions: openai.DecisionNewParamsQuestionChoiceInstructionsUnion{OfString: param.NewOpt(q.Instructions)}}
+			for _, c := range q.Choices {
+				wc := openai.DecisionNewParamsQuestionChoiceChoice{
+					Value: openai.DecisionNewParamsQuestionChoiceChoiceValueUnion{OfString: param.NewOpt(c.Value)}}
+				if c.Description != "" {
+					wc.Description = param.NewOpt(c.Description)
+				}
+				ch.Choices = append(ch.Choices, wc)
+			}
+			wq.OfChoice = ch
+		case decision.QuestionScore:
+			sc := &openai.DecisionNewParamsQuestionScore{Name: param.NewOpt(q.Name),
+				Instructions: openai.DecisionNewParamsQuestionScoreInstructionsUnion{OfString: param.NewOpt(q.Instructions)}}
+			for _, l := range q.Levels {
+				wl := openai.DecisionNewParamsQuestionScoreLevel{Label: l.Label}
+				if l.Description != "" {
+					wl.Description = param.NewOpt(l.Description)
+				}
+				sc.Levels = append(sc.Levels, wl)
+			}
+			wq.OfScore = sc
+		default:
+			return p, fmt.Errorf("openai decisions: question %q has unknown type %q", q.Name, q.Type)
+		}
+		p.Questions = append(p.Questions, wq)
+	}
+	return p, nil
 }
 
 // wireInput sends a string state as plain text and anything else as a JSON
 // part of a user message, so its structure reaches the model intact.
-func wireInput(state any) any {
+func wireInput(state any) (openai.DecisionNewParamsInputUnion, error) {
 	if s, ok := state.(string); ok {
-		return s
+		return openai.DecisionNewParamsInputUnion{OfString: param.NewOpt(s)}, nil
 	}
-	return []map[string]any{{
-		"role":    "user",
-		"content": []map[string]any{{"type": "input_json", "data": state}},
-	}}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return openai.DecisionNewParamsInputUnion{}, fmt.Errorf("openai decisions: state: %w", err)
+	}
+	var data shared.DecisionInputJSONDataUnionParam
+	if bytes.HasPrefix(bytes.TrimSpace(raw), []byte("[")) {
+		err = json.Unmarshal(raw, &data.OfArrayOfValues)
+	} else {
+		err = json.Unmarshal(raw, &data.OfAnyMap)
+	}
+	if err != nil {
+		return openai.DecisionNewParamsInputUnion{}, fmt.Errorf("openai decisions: state must be an object or a list of objects: %w", err)
+	}
+	part := openai.DecisionInputPartUnionParam{OfInputJSON: &shared.DecisionInputJSONParam{Data: data}}
+	return openai.DecisionNewParamsInputUnion{OfDecisionInputMessageArray: []openai.DecisionInputMessageParam{{
+		Content: openai.DecisionInputMessageContentUnionParam{OfParts: []openai.DecisionInputPartUnionParam{part}}}}}, nil
 }
 
-// --- response ---
-
-type wireResponse struct {
-	Model   string       `json:"model"`
-	Answers []wireAnswer `json:"answers"`
-	Usage   struct {
-		InputTokens        int `json:"input_tokens"`
-		InputTokensDetails struct {
-			CachedTokens     int `json:"cached_tokens"`
-			CacheWriteTokens int `json:"cache_write_tokens"`
-		} `json:"input_tokens_details"`
-	} `json:"usage"`
-}
-
-type wireAnswer struct {
-	Type          string            `json:"type"` // predicate | choice | score | refusal
-	Name          *string           `json:"name"`
-	Probability   float64           `json:"probability"`
-	Choice        json.RawMessage   `json:"choice"` // string or boolean
-	Score         float64           `json:"score"`
-	Confidence    float64           `json:"confidence"`
-	Probabilities []wireProbability `json:"probabilities"`
-}
-
-type wireProbability struct {
-	Value       json.RawMessage `json:"value"` // choice: string or boolean; score: level index
-	Probability float64         `json:"probability"`
-}
-
-func toResponse(req system1.Request, w wireResponse, price pricing.Price) (system1.Response, error) {
+// toResponse turns the API's answers into System 1's, checking they answer
+// the questions asked, in order.
+func toResponse(req system1.Request, w *openai.Decision, price pricing.Price) (system1.Response, error) {
 	if len(w.Answers) != len(req.Questions) {
 		return system1.Response{}, fmt.Errorf("openai decisions: got %d answers for %d questions", len(w.Answers), len(req.Questions))
 	}
-	d := w.Usage.InputTokensDetails
+	u, d := w.Usage, w.Usage.InputTokensDetails
 	resp := system1.Response{
 		Provider: "openai/" + w.Model,
 		Answers:  make(map[string]decision.Answer, len(w.Answers)),
-		Usage:    system1.Usage{InputTokens: w.Usage.InputTokens, CachedTokens: d.CachedTokens},
-		CostUSD: price.Cost(pricing.Usage{ // output tokens are not charged on /v1/decisions
-			InputTokens: w.Usage.InputTokens, CachedTokens: d.CachedTokens, CacheWriteTokens: d.CacheWriteTokens,
+		Usage:    system1.Usage{InputTokens: int(u.InputTokens), CachedTokens: int(d.CachedTokens)},
+		CostUSD: price.Cost(pricing.Usage{ // output tokens are not charged on Decisions
+			InputTokens: int(u.InputTokens), CachedTokens: int(d.CachedTokens), CacheWriteTokens: int(d.CacheWriteTokens),
 		}),
 	}
-	// Answers come back in question order. The echoed name (null if the model
+	// Answers come back in question order. The echoed name (empty if the model
 	// refused an unnamed question) double-checks that pairing.
 	for i, wa := range w.Answers {
 		q := req.Questions[i]
-		if wa.Name != nil && *wa.Name != q.Name {
-			return system1.Response{}, fmt.Errorf("openai decisions: answer %d is for %q, expected %q", i, *wa.Name, q.Name)
+		if wa.Name != "" && wa.Name != q.Name {
+			return system1.Response{}, fmt.Errorf("openai decisions: answer %d is for %q, expected %q", i, wa.Name, q.Name)
 		}
 		a := decision.Answer{Type: q.Type}
 		switch wa.Type {
@@ -150,13 +148,19 @@ func toResponse(req system1.Request, w wireResponse, price pricing.Price) (syste
 		case "predicate":
 			a.Probability = wa.Probability
 		case "choice":
-			a.Choice = rawValue(wa.Choice)
-			a.Confidence = wa.Confidence
-			a.Probabilities = probabilities(wa.Probabilities)
+			ch := wa.AsChoice()
+			a.Choice, a.Confidence = rawValue(ch.Choice.RawJSON()), ch.Confidence
+			a.Probabilities = make(map[string]float64, len(ch.Probabilities))
+			for _, p := range ch.Probabilities {
+				a.Probabilities[rawValue(p.Value.RawJSON())] = p.Probability
+			}
 		case "score":
-			a.Score = wa.Score
-			a.Confidence = wa.Confidence
-			a.Probabilities = probabilities(wa.Probabilities)
+			sc := wa.AsScore()
+			a.Score, a.Confidence = sc.Score, sc.Confidence
+			a.Probabilities = make(map[string]float64, len(sc.Probabilities))
+			for _, p := range sc.Probabilities {
+				a.Probabilities[strconv.FormatInt(p.Value, 10)] = p.Probability
+			}
 		default:
 			return system1.Response{}, fmt.Errorf("openai decisions: unknown answer type %q for %q", wa.Type, q.Name)
 		}
@@ -168,19 +172,11 @@ func toResponse(req system1.Request, w wireResponse, price pricing.Price) (syste
 	return resp, nil
 }
 
-func probabilities(ps []wireProbability) map[string]float64 {
-	m := make(map[string]float64, len(ps))
-	for _, p := range ps {
-		m[rawValue(p.Value)] = p.Probability
-	}
-	return m
-}
-
-// rawValue turns a JSON string, boolean or number into its plain text form.
-func rawValue(raw json.RawMessage) string {
+// rawValue turns a JSON string or boolean into its plain text form.
+func rawValue(raw string) string {
 	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
+	if err := json.Unmarshal([]byte(raw), &s); err == nil {
 		return s
 	}
-	return string(bytes.TrimSpace(raw)) // true, false, 2
+	return string(bytes.TrimSpace([]byte(raw))) // true, false
 }

@@ -25,7 +25,6 @@ import (
 // ask its owner first (dream). The review itself is kept as a private work.
 
 const (
-	maxActiveGoals  = 3
 	maxActiveDreams = 5
 	// reviewWindow is how far back a review looks.
 	reviewWindow = 7 * 24 * time.Hour
@@ -203,7 +202,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 		}
 	}
 	fmt.Fprintf(&note, "\n\nWhat you can study with (for new resources):\n%s", m.readingList())
-	fmt.Fprintf(&note, "\n\nYou can have at most %d goals at a time, and %d dreams.", maxActiveGoals, maxActiveDreams)
+	fmt.Fprintf(&note, "\n\nYou can have at most %d dreams.", maxActiveDreams)
 	note.WriteString(m.judgmentNote(ctx, reviewJudgment, reviewAbout(goals, projects)))
 	disagreements, callCases := m.disagreementsNote(ctx, now)
 	note.WriteString(disagreements)
@@ -319,7 +318,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 		due, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(ng.Due), m.Zone)
 		_, dreamOK := activeDreams[strings.TrimSpace(ng.DreamID)]
 		text := strings.TrimSpace(ng.Text)
-		if err != nil || !dreamOK || text == "" || !due.After(now) || due.Sub(now) > goalHorizon || len(activeGoals)+len(proposed) >= maxActiveGoals {
+		if err != nil || !dreamOK || text == "" || !due.After(now) || due.Sub(now) > goalHorizon {
 			m.Log.Warn("dropped a new goal", "text", ng.Text, "due", ng.Due, "dream", ng.DreamID, "err", err)
 			continue
 		}

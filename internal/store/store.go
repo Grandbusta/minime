@@ -2089,3 +2089,35 @@ func (s *Store) RetireTaste(ctx context.Context, id ulid.ULID, at time.Time) (bo
 	}
 	return tag.RowsAffected() == 1, nil
 }
+
+// ErrNotTheirs means the database holds someone else's memory.
+var ErrNotTheirs = errors.New("this database holds someone else's memory")
+
+// Whose returns whose memory the database holds, and whether anyone's yet.
+func (s *Store) Whose(ctx context.Context) (string, bool, error) {
+	var name string
+	err := s.pool.QueryRow(ctx, `SELECT name FROM whose`).Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("whose: %w", err)
+	}
+	return name, true, nil
+}
+
+// Claim makes the database name's memory, the first time; after that only
+// name may use it (ErrNotTheirs otherwise, naming whose it is).
+func (s *Store) Claim(ctx context.Context, name string, at time.Time) error {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO whose (name, since) VALUES ($1, $2) ON CONFLICT DO NOTHING`, name, at); err != nil {
+		return fmt.Errorf("claim: %w", err)
+	}
+	whose, _, err := s.Whose(ctx)
+	if err != nil {
+		return err
+	}
+	if whose != name {
+		return fmt.Errorf("%w: %s's, not %s's; give %s their own database", ErrNotTheirs, whose, name, name)
+	}
+	return nil
+}

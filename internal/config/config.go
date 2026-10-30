@@ -124,11 +124,15 @@ type DailyLife struct {
 	Abilities []string `yaml:"abilities"`
 	// Reading is the old switch for read_book and read_article, used only
 	// when Abilities is unset. Deprecated: list abilities instead.
-	Reading        *bool   `yaml:"reading"`
-	PlanAt         string  `yaml:"plan_at"`    // "HH:MM" in its time zone
-	JournalAt      string  `yaml:"journal_at"` // "HH:MM" in its time zone
-	ReviewAt       string  `yaml:"review_at"`  // its weekly review, "Sun 20:00" in its time zone
-	Activities     int     `yaml:"activities"` // things it plans a day, besides the journal
+	Reading    *bool  `yaml:"reading"`
+	PlanAt     string `yaml:"plan_at"`    // "HH:MM" in its time zone
+	JournalAt  string `yaml:"journal_at"` // "HH:MM" in its time zone
+	ReviewAt   string `yaml:"review_at"`  // its weekly review, "Sun 20:00" in its time zone
+	Activities int    `yaml:"activities"` // things it plans a round (a day at pace 1), besides the journal
+	// Pace is how much faster than a person it works and learns: its waking
+	// day runs in this many rounds, and its budget and web caps (per pace-1
+	// day) grow with it. 1 (the default): a person's pace.
+	Pace           int     `yaml:"pace"`
 	BudgetUSD      float64 `yaml:"budget_usd"` // most its own day may cost
 	PlanPrompt     string  `yaml:"plan_prompt"`
 	ActivityPrompt string  `yaml:"activity_prompt"`
@@ -309,7 +313,7 @@ func Load(path string) (*Config, error) {
 		Memory:        Memory{RecallCandidates: 30},
 		Portfolio:     Portfolio{Prompt: "prompts/profile.md", UpdateAt: "00:00"},
 		Initiative:    Initiative{Quiet: 4 * time.Hour},
-		DailyLife: DailyLife{Enabled: true, PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
+		DailyLife: DailyLife{Enabled: true, Pace: 1, PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
 			PlanPrompt: "prompts/plan.md", ActivityPrompt: "prompts/activity.md",
 			ReviewAt: "Sun 20:00", ReviewPrompt: "prompts/review.md", LearnPrompt: "prompts/learn.md",
 			Web: Web{Searches: 10, Pages: 15}},
@@ -323,6 +327,14 @@ func Load(path string) (*Config, error) {
 	}
 	if err := cfg.loadLiving(); err != nil {
 		return nil, err
+	}
+	// Where it listens, from the environment when set: in a container it must
+	// listen on all addresses, not localhost.
+	if addr, ok := os.LookupEnv("MINIME_CONSOLE_ADDR"); ok {
+		cfg.Console.Addr = addr
+	}
+	if addr, ok := os.LookupEnv("MINIME_PROFILE_ADDR"); ok {
+		cfg.Portfolio.Addr = addr
 	}
 	if cfg.Database.URL == "" {
 		return nil, errors.New("config: database.url is required")
@@ -391,6 +403,9 @@ func (c *Config) ValidateAgent() error {
 	if c.DailyLife.Enabled {
 		if _, _, err := c.DailyLife.Times(); err != nil {
 			return err
+		}
+		if c.DailyLife.Pace < 1 || c.DailyLife.Pace > 100 {
+			return errors.New("config: daily_life.pace must be from 1 (a person's pace) to 100")
 		}
 		if c.DailyLife.Activities < 1 || c.DailyLife.BudgetUSD < 0 {
 			return errors.New("config: daily_life.activities must be at least 1 and budget_usd not negative")

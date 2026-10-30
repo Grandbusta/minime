@@ -307,3 +307,64 @@ func shippedLifePrompts(t *testing.T, m *Mind, life self.Life) {
 		}
 	}
 }
+
+func TestRounds(t *testing.T) {
+	ctx := context.Background()
+	s2 := &fakeSystem2{formats: map[string]string{"day_plan": `{"activities":[
+		{"at":"08:30","what":"Study customer discovery","project_id":"","new_project_title":"","project_kind":"","ability":"","query":"","goal_id":"","resource_id":""},
+		{"at":"12:00","what":"Write outreach email","project_id":"","new_project_title":"","project_kind":"","ability":"","query":"","goal_id":"","resource_id":""},
+		{"at":"16:00","what":"Role-play a sales call","project_id":"","new_project_title":"","project_kind":"","ability":"","query":"","goal_id":"","resource_id":""}],
+		"calls":[{"type":"focus","situation":"What to focus on","options":["sales","music"],"pick":0,"why":"","confidence":0.6,"stakes":"low","reversible":true}]}`}}
+	m, s := lifeMind(s2)
+	m.Calls = Calls{On: true, AsksPerDay: 3}
+	m.Day.Pace = 4 // 08:00 to 22:00 in four rounds: 08:00, 11:30, 15:00, 18:30
+
+	due := func(from, to time.Time) []string {
+		var out []string
+		is, _ := s.IntentionsDue(ctx, from, to)
+		for _, i := range is {
+			out = append(out, i.Text)
+		}
+		return out
+	}
+
+	m.planDay(ctx, at(29, 8, 1))
+	if got := due(at(29, 0, 0), at(29, 23, 59)); len(got) != 2 || got[0] != "Study customer discovery" || got[1] != journalText {
+		t.Fatalf("first round = %q; want only what's before 11:30, and the journal", got)
+	}
+	if len(s.calls) != 1 || !strings.Contains(s2.requests[0].Note, "round 1 of 4") || !strings.Contains(s2.requests[0].Note, "until 11:30") {
+		t.Errorf("calls %d; note:\n%s", len(s.calls), s2.requests[0].Note)
+	}
+
+	m.planDay(ctx, at(29, 9, 0)) // still the first round
+	if len(s2.requests) != 1 {
+		t.Fatal("planned the same round again")
+	}
+
+	s.works = append(s.works, memory.Work{ID: ulid.Make(), Kind: "notes", Title: "Customer discovery notes", CreatedAt: at(29, 8, 40)})
+	m.planDay(ctx, at(29, 11, 31))
+	note := s2.requests[1].Note
+	for _, want := range []string{"round 2 of 4", "until 15:00", "Leave calls empty", "notes: Customer discovery notes"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("round 2 note is missing %q:\n%s", want, note)
+		}
+	}
+	if got := due(at(29, 11, 30), at(29, 15, 0)); len(got) != 1 || got[0] != "Write outreach email" {
+		t.Errorf("round 2 = %q", got)
+	}
+	if len(s.calls) != 1 {
+		t.Error("a later round made calls")
+	}
+
+	// Restarted mid-round: it doesn't plan this round again, and goes on with the next.
+	m2, _ := lifeMind(s2)
+	m2.Store, m2.Day.Pace = s, 4
+	m2.planDay(ctx, at(29, 12, 0))
+	if len(s2.requests) != 2 {
+		t.Fatal("planned again after a restart")
+	}
+	m2.planDay(ctx, at(29, 15, 1))
+	if len(s2.requests) != 3 || !strings.Contains(s2.requests[2].Note, "round 3 of 4") {
+		t.Errorf("after a restart, round 3 wasn't planned: %d requests", len(s2.requests))
+	}
+}

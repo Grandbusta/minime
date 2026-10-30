@@ -213,7 +213,9 @@ type Mind struct {
 	Config
 	lastTick time.Time // when the clock last ticked; zero before the first tick
 	planned  string    // the local date ("2006-01-02") its day was last planned for
+	round    int       // the last round of that day it planned (0: the morning plan)
 	reviewed time.Time // the weekly review time it last considered
+	toPlan   bool      // a goal was taken on in a chat: draft its learning plan on the next tick
 }
 
 func New(c Config) *Mind {
@@ -653,6 +655,7 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	more = append(more, m.takeFeedback(ctx, p, d, resp.Feedback)...)
 	more = append(more, m.takeLessons(ctx, p, d, resp.Lessons)...)
 	more = append(more, m.takeTastes(ctx, p, d, resp.Tastes)...)
+	more = append(more, m.takeGoals(ctx, p, d, resp.Goals)...)
 	return resp.Text, more
 }
 
@@ -786,7 +789,7 @@ func (m *Mind) instructions(ctx context.Context, person memory.Person, n names) 
 		"{personality}", personality, "{who_they_are}", m.whoTheyAre(ctx, person, n),
 		"{makes}", m.makesList(), "{abilities}", m.abilitiesList(), "{intents}", strings.Join(m.intents(), ", "),
 		"{correct_self}", m.correctSelf(person), "{permissions_help}", m.permissionsHelp(person, n),
-		"{feedback_help}", m.feedbackHelp(ctx, person)).Replace(m.ReplyPrompt.Text)
+		"{feedback_help}", m.feedbackHelp(ctx, person)+m.goalsHelp(ctx, person)).Replace(m.ReplyPrompt.Text)
 }
 
 // turns lays recalled exchanges out as a conversation for System 2.

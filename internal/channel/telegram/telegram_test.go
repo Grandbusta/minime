@@ -3,14 +3,16 @@ package telegram
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-telegram/bot/models"
 
 	"minime/internal/bus"
 	"minime/internal/perception"
@@ -18,85 +20,133 @@ import (
 
 const testToken = "123:SECRET"
 
-func newTestClient(t *testing.T, h http.HandlerFunc) *Client {
-	t.Helper()
-	srv := httptest.NewServer(h)
+var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+// fakeAPI is the Bot API: it records each call (method and form fields) and
+// answers with the result reply gives, or {} by default.
+type fakeAPI struct {
+	mu    sync.Mutex
+	calls []map[string]string
+	reply func(method string) (status int, result string)
+}
+
+func (f *fakeAPI) serve(t *testing.T) *httptest.Server {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		if !strings.HasPrefix(r.URL.Path, "/bot"+testToken+"/") {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		r.ParseMultipartForm(1 << 20)
+		call := map[string]string{"method": method}
+		for k, v := range r.Form {
+			call[k] = v[0]
+		}
+		f.mu.Lock()
+		f.calls = append(f.calls, call)
+		f.mu.Unlock()
+		status, result := http.StatusOK, `{"message_id":77,"date":0,"chat":{"id":7,"type":"private"}}`
+		if f.reply != nil {
+			status, result = f.reply(method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		if status != http.StatusOK {
+			io.WriteString(w, `{"ok":false,"error_code":`+itoa(status)+`,"description":"`+result+`"}`)
+			return
+		}
+		io.WriteString(w, `{"ok":true,"result":`+result+`}`)
+	}))
 	t.Cleanup(srv.Close)
-	return &Client{base: srv.URL + "/bot" + testToken, http: srv.Client()}
+	return srv
 }
 
-func TestGetUpdatesDecodesResult(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/getUpdates") {
-			t.Errorf("path = %s", r.URL.Path)
+func (f *fakeAPI) sent(method string) []map[string]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []map[string]string
+	for _, c := range f.calls {
+		if c["method"] == method {
+			out = append(out, c)
 		}
-		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
-		if body["offset"].(float64) != 5 {
-			t.Errorf("offset = %v", body["offset"])
-		}
-		io.WriteString(w, `{"ok":true,"result":[{"update_id":5,"message":{"message_id":9,"from":{"id":42},"chat":{"id":7},"date":1700000000,"text":"hi"}}]}`)
-	})
-
-	updates, err := c.GetUpdates(context.Background(), 5, 1)
-	if err != nil {
-		t.Fatal(err)
 	}
-	if len(updates) != 1 || updates[0].Message.Text != "hi" || updates[0].Message.From.ID != 42 {
-		t.Fatalf("updates = %+v", updates)
-	}
+	return out
 }
 
-func TestAPIErrorCarriesRetryAfter(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		io.WriteString(w, `{"ok":false,"error_code":429,"description":"Too Many Requests","parameters":{"retry_after":3}}`)
-	})
-
-	err := c.SendMessage(context.Background(), 1, "x")
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != 429 || apiErr.RetryAfter != 3*time.Second {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestTransportErrorHidesToken(t *testing.T) {
-	srv := httptest.NewServer(http.NotFoundHandler())
-	c := &Client{base: srv.URL + "/bot" + testToken, http: srv.Client()}
-	srv.Close() // connection refused
-
-	err := c.SendMessage(context.Background(), 1, "x")
-	if err == nil {
-		t.Fatal("expected an error")
-	}
-	if strings.Contains(err.Error(), "SECRET") {
-		t.Fatalf("error leaks token: %v", err)
-	}
-}
+func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
 
 func TestSensorKeepsOnlyOwnerMessages(t *testing.T) {
-	s := NewSensor(nil, []int64{42}, 1, bus.New[perception.Percept](1), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := NewSensor(nil, []int64{42}, 1, bus.New[perception.Percept](1), quiet)
 
-	owner := Update{UpdateID: 1, Message: &Message{MessageID: 9, From: &User{ID: 42, FirstName: "Sam"}, Chat: Chat{ID: 7}, Date: 1700000000, Text: "hi"}}
+	owner := &models.Update{ID: 1, Message: &models.Message{ID: 9, From: &models.User{ID: 42, FirstName: "Sam"}, Chat: models.Chat{ID: 7},
+		Date: 1700000000, Text: "hi"}}
 	p, ok := s.percept(owner)
 	if !ok {
 		t.Fatal("owner message dropped")
 	}
 	if p.Source != Source || p.ExternalID != "7:9" || p.Thread != "7" || p.Text != "hi" || p.Kind != "message" ||
-		p.Speaker != "telegram:42" || p.SpeakerName != "Sam" {
+		p.Speaker != "telegram:42" || p.SpeakerName != "Sam" || !p.At.Equal(time.Unix(1700000000, 0)) {
 		t.Fatalf("percept = %+v", p)
 	}
 	var pl MessagePayload
-	if err := json.Unmarshal(p.Payload, &pl); err != nil || pl.ChatID != 7 || pl.UserID != 42 {
+	if err := json.Unmarshal(p.Payload, &pl); err != nil || pl.ChatID != 7 || pl.MessageID != 9 || pl.UserID != 42 {
 		t.Fatalf("payload = %s (%v)", p.Payload, err)
 	}
 
-	stranger := Update{UpdateID: 2, Message: &Message{MessageID: 10, From: &User{ID: 99}, Chat: Chat{ID: 8}, Text: "hey"}}
+	stranger := &models.Update{ID: 2, Message: &models.Message{ID: 10, From: &models.User{ID: 99}, Chat: models.Chat{ID: 8}, Text: "hey"}}
 	if _, ok := s.percept(stranger); ok {
 		t.Fatal("non-owner message kept")
 	}
-	if _, ok := s.percept(Update{UpdateID: 3}); ok {
+	if _, ok := s.percept(&models.Update{ID: 3}); ok {
 		t.Fatal("update without message kept")
+	}
+}
+
+func TestSensorRunsOnTheBotAPI(t *testing.T) {
+	api := &fakeAPI{}
+	served := false
+	api.reply = func(method string) (int, string) {
+		switch method {
+		case "getMe":
+			return http.StatusOK, `{"id":1,"is_bot":true,"first_name":"Bot","username":"test_bot"}`
+		case "getUpdates":
+			api.mu.Lock()
+			defer api.mu.Unlock()
+			if served {
+				return http.StatusOK, `[]`
+			}
+			served = true
+			return http.StatusOK, `[{"update_id":5,"message":{"message_id":9,"date":1700000000,"text":"hello","chat":{"id":7,"type":"private"},
+				"from":{"id":42,"is_bot":false,"first_name":"Sam"}}},
+				{"update_id":6,"message":{"message_id":10,"date":1700000001,"text":"spam","chat":{"id":8,"type":"private"},
+				"from":{"id":99,"is_bot":false,"first_name":"X"}}}]`
+		}
+		return http.StatusOK, `true`
+	}
+	srv := api.serve(t)
+	out := bus.New[perception.Percept](4)
+	got := out.Subscribe()
+	s := NewSensor(newClient(testToken, srv.URL), []int64{42}, 1, out, quiet)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go s.Run(ctx)
+	select {
+	case p := <-got:
+		if p.Text != "hello" || p.Speaker != "telegram:42" {
+			t.Errorf("percept = %+v", p)
+		}
+	case <-ctx.Done():
+		t.Fatal("no percept from the owner's message")
+	}
+}
+
+func TestSensorStopsOnABadToken(t *testing.T) {
+	api := &fakeAPI{reply: func(string) (int, string) { return http.StatusUnauthorized, "Unauthorized" }}
+	srv := api.serve(t)
+	s := NewSensor(newClient(testToken, srv.URL), []int64{42}, 1, bus.New[perception.Percept](1), quiet)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.Run(ctx); err == nil || !strings.Contains(err.Error(), "rejected the bot token") {
+		t.Errorf("err = %v", err)
 	}
 }
 
@@ -123,14 +173,15 @@ func TestSplitLongMessages(t *testing.T) {
 	}
 }
 
+func tap(from int64, data string) *models.Update {
+	return &models.Update{ID: 1, CallbackQuery: &models.CallbackQuery{ID: "cb1", From: models.User{ID: from, FirstName: "Busta"},
+		Message: models.MaybeInaccessibleMessage{Message: &models.Message{ID: 5, Chat: models.Chat{ID: 7}}}, Data: data}}
+}
+
 func TestSensorTurnsButtonTapsIntoAnswers(t *testing.T) {
-	s := NewSensor(nil, []int64{42}, 1, bus.New[perception.Percept](1), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	tap := func(from int64, data string) Update {
-		return Update{UpdateID: 1, CallbackQuery: &CallbackQuery{ID: "cb1", From: &User{ID: from, FirstName: "Busta"},
-			Message: &Message{MessageID: 5, Chat: Chat{ID: 7}}, Data: data}}
-	}
+	s := NewSensor(nil, []int64{42}, 1, bus.New[perception.Percept](1), quiet)
 	p, ok := s.percept(tap(42, "gate:01ABC:y"))
-	if !ok || p.Kind != perception.KindApproval || p.Text != "" || p.Speaker != "telegram:42" || p.ExternalID != "callback:cb1" {
+	if !ok || p.Kind != perception.KindApproval || p.Text != "" || p.Speaker != "telegram:42" || p.ExternalID != "callback:cb1" || p.Thread != "7" {
 		t.Fatalf("percept = %+v, %v", p, ok)
 	}
 	var a perception.Answer
@@ -140,7 +191,7 @@ func TestSensorTurnsButtonTapsIntoAnswers(t *testing.T) {
 	if p, _ := s.percept(tap(42, "gate:01ABC:n")); !strings.Contains(string(p.Payload), `"approve":false`) {
 		t.Errorf("deny = %s", p.Payload)
 	}
-	for _, u := range []Update{tap(99, "gate:01ABC:y"), tap(42, "other:1"), tap(42, "gate:01ABC:maybe")} {
+	for _, u := range []*models.Update{tap(99, "gate:01ABC:y"), tap(42, "other:1"), tap(42, "gate:01ABC:maybe")} {
 		if _, ok := s.percept(u); ok {
 			t.Errorf("kept %+v", u.CallbackQuery)
 		}
@@ -148,38 +199,29 @@ func TestSensorTurnsButtonTapsIntoAnswers(t *testing.T) {
 }
 
 func TestAskAndSettle(t *testing.T) {
-	var calls []map[string]any
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
-		body["method"] = r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
-		calls = append(calls, body)
-		io.WriteString(w, `{"ok":true,"result":{"message_id":77,"chat":{"id":7}}}`)
-	})
+	api := &fakeAPI{}
+	c := newClient(testToken, api.serve(t).URL)
 	p := perception.Percept{Source: Source, Payload: json.RawMessage(`{"chat_id":7,"message_id":1,"user_id":42}`)}
 	where, err := c.Ask(context.Background(), p, "Can I?", "01ABC")
 	if err != nil || string(where) != `{"chat_id":7,"message_id":77}` {
 		t.Fatalf("ask = %s, %v", where, err)
 	}
-	kb, _ := json.Marshal(calls[0]["reply_markup"])
-	if calls[0]["method"] != "sendMessage" || !strings.Contains(string(kb), `"callback_data":"gate:01ABC:y"`) ||
-		!strings.Contains(string(kb), `"callback_data":"gate:01ABC:n"`) {
-		t.Errorf("sent %v", calls[0])
+	sent := api.sent("sendMessage")
+	if len(sent) != 1 || sent[0]["chat_id"] != "7" || sent[0]["text"] != "Can I?" ||
+		!strings.Contains(sent[0]["reply_markup"], `"callback_data":"gate:01ABC:y"`) || !strings.Contains(sent[0]["reply_markup"], `"callback_data":"gate:01ABC:n"`) {
+		t.Errorf("sent %v", sent)
 	}
 	if err := c.Settle(context.Background(), where, "Can I?\n\n✅ You said yes."); err != nil {
 		t.Fatal(err)
 	}
-	if calls[1]["method"] != "editMessageText" || calls[1]["message_id"] != float64(77) || calls[1]["reply_markup"] != nil {
-		t.Errorf("settled %v", calls[1])
+	edited := api.sent("editMessageText")
+	if len(edited) != 1 || edited[0]["message_id"] != "77" || edited[0]["reply_markup"] != "" || !strings.Contains(edited[0]["text"], "You said yes") {
+		t.Errorf("settled %v", edited)
 	}
 }
 
 func TestCallButtons(t *testing.T) {
-	s := NewSensor(nil, []int64{42}, 1, bus.New[perception.Percept](1), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	tap := func(from int64, data string) Update {
-		return Update{UpdateID: 1, CallbackQuery: &CallbackQuery{ID: "cb2", From: &User{ID: from, FirstName: "Busta"},
-			Message: &Message{MessageID: 5, Chat: Chat{ID: 7}}, Data: data}}
-	}
+	s := NewSensor(nil, []int64{42}, 1, bus.New[perception.Percept](1), quiet)
 	for data, want := range map[string]int{"call:01ABC:1": 1, "call:01ABC:x": -1} {
 		p, ok := s.percept(tap(42, data))
 		var pick perception.Pick
@@ -187,28 +229,22 @@ func TestCallButtons(t *testing.T) {
 			t.Errorf("%s: percept = %+v, %v; pick %+v", data, p, ok, pick)
 		}
 	}
-	for _, u := range []Update{tap(99, "call:01ABC:1"), tap(42, "call:01ABC:two"), tap(42, "call::1"), tap(42, "call:01ABC:-3")} {
+	for _, u := range []*models.Update{tap(99, "call:01ABC:1"), tap(42, "call:01ABC:two"), tap(42, "call::1"), tap(42, "call:01ABC:-3")} {
 		if _, ok := s.percept(u); ok {
 			t.Errorf("kept %+v", u.CallbackQuery)
 		}
 	}
 
-	var calls []map[string]any
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
-		calls = append(calls, body)
-		io.WriteString(w, `{"ok":true,"result":{"message_id":78,"chat":{"id":7}}}`)
-	})
+	api := &fakeAPI{}
+	c := newClient(testToken, api.serve(t).URL)
 	p := perception.Percept{Source: Source, Payload: json.RawMessage(`{"chat_id":7,"message_id":1,"user_id":42}`)}
 	where, err := c.Choose(context.Background(), p, "What would you do?", "01ABC", 3, 1)
-	if err != nil || string(where) != `{"chat_id":7,"message_id":78}` {
+	if err != nil || string(where) != `{"chat_id":7,"message_id":77}` {
 		t.Fatalf("choose = %s, %v", where, err)
 	}
-	kb, _ := json.Marshal(calls[0]["reply_markup"])
-	for _, want := range []string{`"callback_data":"call:01ABC:1","text":"2 ★"`, `"callback_data":"call:01ABC:2","text":"3"`,
-		`"callback_data":"call:01ABC:x"`} {
-		if !strings.Contains(string(kb), want) {
+	kb := api.sent("sendMessage")[0]["reply_markup"]
+	for _, want := range []string{`"text":"2 ★","callback_data":"call:01ABC:1"`, `"text":"3","callback_data":"call:01ABC:2"`, `"callback_data":"call:01ABC:x"`} {
+		if !strings.Contains(kb, want) {
 			t.Errorf("keyboard %s is missing %s", kb, want)
 		}
 	}

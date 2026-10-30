@@ -1,8 +1,8 @@
 # Architecture
 
 How minime works today: every part of the AI person, what flows between them, and what
-each model sees and returns. For what it does and how to run it, see the
-[README](../README.md).
+each model sees and returns. For what it does, see the [README](../README.md); for setting
+it up and every setting, [SETUP.md](SETUP.md).
 
 ## The whole system
 
@@ -273,7 +273,9 @@ are in [internal/search](../internal/search):
   search's own sources or citations are kept, never an address the model wrote.
 - **Fetcher:** https only; connects only to public addresses, checked when dialling, so a
   redirect or a DNS answer can't reach a private network; caps on size, time and
-  redirects; strips pages to readable text.
+  redirects; keeps a page's article text with Readability
+  ([go-readability](https://codeberg.org/readeck/go-readability), the algorithm behind
+  Firefox's reader view), dropping menus, ads and footers.
 - Every search and page is logged (`web_log`) and capped per day (10 and 15); found pages
   are kept (`web_found`), and `read_page` reads only those, so a link on a page can never
   send it anywhere.
@@ -285,7 +287,7 @@ Dreams → goals → projects → activities ([growth.go](../internal/mind/growt
 [lessons.go](../internal/mind/lessons.go)).
 
 - **Dreams:** open-ended, at most 5 active. Changing one is the `dream` class.
-- **Goals:** checkable (a "done when", a due date), at most 3 active, each serving a dream
+- **Goals:** checkable (a "done when", a due date), each serving a dream; set in the weekly review, or taken on in a chat when the owner asks
   and usually growing one skill. Projects link to the goal they serve.
 - **Skills** grow from evidence (`skill_evidence`): each work whose kind is in a skill's
   `shown_by` is scored by System 1 ([skill_level](../decisions/skill_level.yaml), one score
@@ -408,8 +410,10 @@ confident answers right. It changes nothing.
 | Search | `Searcher`, `Fetcher` ([search](../internal/search)) | OpenAI web search; the HTTPS fetcher |
 
 A provider is chosen in the config and built in `cmd/minime`; a new one is a package and a
-`case`. The OpenAI ones share [openaihttp](../internal/providers/openaihttp) (auth,
-errors, retries). Costs come from the `pricing:` table in the config.
+`case`. The OpenAI ones use the official SDK ([openai-go](https://github.com/openai/openai-go)),
+made in one place ([openaiclient](../internal/providers/openaiclient)) with its retries
+(rate limits, server errors, `Retry-After`). A structured answer cut off by its output limit
+is an error (`system2.ErrCutOff`), never half a JSON. Costs come from the `pricing:` table in the config.
 
 System 1's questions live in versioned files in [decisions/](../decisions), loaded and
 validated on start ([questions](../internal/decision/questions)): each set has an id, a
@@ -473,7 +477,7 @@ cmd/minime/              the binary: commands, wiring, providers chosen from con
 internal/
   perception/            percepts and their kinds
   bus/                   in-process percept bus
-  channel/telegram/      sensor (messages, taps), replies, approval and call buttons
+  channel/telegram/      on go-telegram/bot: sensor (messages, taps), replies, buttons
   mind/                  the mind
     mind.go              handle a percept: meet, read, recall, reason, act, record
     router.go            act / ask / escalate from System 1's confidence
@@ -494,8 +498,9 @@ internal/
   action/                action classes and the autonomy policy
   memory/                the types memory holds
   decision/              the decision record; questions/ loads question sets
-  providers/             system1/, system2/ and their OpenAI providers; openaihttp/
+  providers/             system1/, system2/, embed/ and their OpenAI providers; openaiclient/
   store/                 Postgres queries and migrations/
+  setup/                 `minime new`: questions with huh, .env with godotenv
   portfolio/             the profile page: writer and server
   console/               the mind console: API, live stream, web/
   replay/                labelled messages re-asked
@@ -505,5 +510,5 @@ decisions/               System 1's question sets
 prompts/                 System 2's instructions
 self/                    who the person is, and how the owner decides
 configs/                 the config
-deploy/                  Dockerfile and docker-compose.yml
+deploy/                  Dockerfile: one person per container
 ```

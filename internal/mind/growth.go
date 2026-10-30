@@ -282,3 +282,118 @@ func (m *Mind) growthNote(ctx context.Context, now time.Time) string {
 	}
 	return b.String()
 }
+
+// goalsHelp tells System 2 how to take on a goal its owner asks for: its
+// dreams and skills by name, and how many more goals it has room for.
+func (m *Mind) goalsHelp(ctx context.Context, person memory.Person) string {
+	if person.Key == "" || person.Key != m.Autonomy.Owner {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\nGoals they ask you to take on:\n- If they ask you to learn something or take on a goal (\"add that to your goals\", " +
+		"\"you should learn sales\") and you agree, put it in `goals`, so it really becomes yours: you'll plan how to learn it and " +
+		"practise it in your days. The skill it grows (one of yours by its exact name, or a new one, with level your honest starting " +
+		"level 1-10: a beginner is 1-2), the goal, done_when (a concrete test from what you'll make), due (YYYY-MM-DD, weeks away), and " +
+		"the dream it serves (dream_id), or new_dream (third person with your name) if none fits. Only say you've added it if you " +
+		"put it in `goals`. The goal is to learn it yourself, not to make them a plan.\n")
+	if dreams, err := m.Store.Dreams(ctx, true); err == nil && len(dreams) > 0 {
+		b.WriteString("  Your dreams:")
+		for _, d := range dreams {
+			fmt.Fprintf(&b, " [%s] %s;", d.ID, d.Text)
+		}
+		b.WriteString("\n")
+	}
+	if skills, err := m.Store.Skills(ctx); err == nil && len(skills) > 0 {
+		names := make([]string, len(skills))
+		for i, sk := range skills {
+			names[i] = fmt.Sprintf("%s (%.1f)", sk.Name, sk.Level)
+		}
+		fmt.Fprintf(&b, "  Your skills: %s.\n", strings.Join(names, ", "))
+	}
+	if goals, err := m.Store.Goals(ctx, true); err == nil {
+		if len(goals) > 0 {
+			b.WriteString("  Your goals now (already yours: never add one again):")
+			for _, g := range goals {
+				fmt.Fprintf(&b, " %s (%s);", g.Text, orDefault(g.Skill, "no skill"))
+			}
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+// takeGoals takes on goals its owner asked for: the skill (new ones start
+// where it honestly is), the dream it serves (a new one if none fits), and
+// the goal itself, set now. Its learning plan follows on the next tick.
+func (m *Mind) takeGoals(ctx context.Context, p perception.Percept, reply *decision.Decision, gs []system2.GoalTaken) []*decision.Decision {
+	if len(gs) == 0 || p.Speaker == "" || p.Speaker != m.Autonomy.Owner {
+		return nil
+	}
+	now := time.Now().UTC()
+	var out []*decision.Decision
+	for _, gt := range gs {
+		d := m.child(p, reply, "take_goal")
+		d.Outcome.Detail = m.takeGoal(ctx, gt, now)
+		out = append(out, d)
+		m.Log.Info("took on a goal its owner asked for", "goal", gt.Text, "skill", gt.Skill, "detail", d.Outcome.Detail)
+	}
+	return out
+}
+
+// takeGoal takes on one goal, and returns what it did, for the log.
+func (m *Mind) takeGoal(ctx context.Context, gt system2.GoalTaken, now time.Time) string {
+	goals, err := m.Store.Goals(ctx, true)
+	if err != nil {
+		return "loading goals failed: " + err.Error()
+	}
+	for _, g := range goals {
+		if strings.EqualFold(strings.TrimSpace(g.Text), strings.TrimSpace(gt.Text)) {
+			return "already a goal: " + g.Text
+		}
+	}
+	due, err := time.ParseInLocation("2006-01-02", gt.Due, m.Zone)
+	if err != nil || !due.After(now) || due.Sub(now) > goalHorizon {
+		due = now.AddDate(0, 0, 28).In(m.Zone) // four weeks, when the date it gave isn't one
+	}
+	dreams, err := m.Store.Dreams(ctx, true)
+	if err != nil {
+		return "loading dreams failed: " + err.Error()
+	}
+	var dream ulid.ULID
+	for _, d := range dreams {
+		if d.ID.String() == gt.DreamID {
+			dream = d.ID
+		}
+	}
+	if dream.IsZero() {
+		text := gt.NewDream
+		if text == "" {
+			text = fmt.Sprintf("%s wants to get good at %s.", m.Life.Name, gt.Skill)
+		}
+		if len(dreams) >= maxActiveDreams {
+			dream = dreams[len(dreams)-1].ID // no room for another: the newest it has
+		} else {
+			d := memory.Dream{ID: ulid.Make(), Text: text, Status: memory.DreamActive, Source: memory.DreamFromOwner, Since: now}
+			if err := m.Store.SaveDream(ctx, d); err != nil {
+				return "saving the dream failed: " + err.Error()
+			}
+			dream = d.ID
+		}
+	}
+	skill := m.skillNamed(ctx, gt.Skill)
+	if skill == "" {
+		level := max(1, min(10, gt.Level))
+		skill = gt.Skill
+		if err := m.Store.AddSkill(ctx, memory.Skill{Name: skill, Level: float64(level), ShownBy: []string{"notes", "writing", "reading_notes"}, UpdatedAt: now}); err != nil {
+			return "adding the skill failed: " + err.Error()
+		}
+		m.startingScore(ctx, skill, float64(level))
+	}
+	g := memory.Goal{ID: ulid.Make(), DreamID: dream, Text: gt.Text, Skill: skill, DoneWhen: gt.DoneWhen,
+		Due: time.Date(due.Year(), due.Month(), due.Day(), 23, 59, 0, 0, m.Zone).UTC(), Status: memory.GoalActive, CreatedAt: now, UpdatedAt: now}
+	if err := m.Store.SaveGoal(ctx, g); err != nil {
+		return "saving the goal failed: " + err.Error()
+	}
+	m.toPlan = true
+	return fmt.Sprintf("goal set (%s): %s", skill, g.Text)
+}

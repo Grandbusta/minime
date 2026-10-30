@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"slices"
 	"strings"
@@ -1324,5 +1325,27 @@ func TestTastes(t *testing.T) {
 	}
 	if ts, _ := s.Tastes(ctx, 1); len(ts) != 1 || ts[0].ID != a.ID {
 		t.Errorf("after retiring = %+v", ts)
+	}
+}
+
+func TestWhose(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	name, ok, err := s.Whose(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok { // a fresh test database: the first claim makes it theirs
+		if err := s.Claim(ctx, "Tobi", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		name = "Tobi"
+	}
+	if err := s.Claim(ctx, name, time.Now()); err != nil {
+		t.Errorf("claiming it again: %v", err)
+	}
+	err = s.Claim(ctx, name+"-someone-else", time.Now())
+	if !errors.Is(err, ErrNotTheirs) || !strings.Contains(err.Error(), name+"'s") {
+		t.Errorf("someone else's claim = %v", err)
 	}
 }

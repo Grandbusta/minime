@@ -26,6 +26,7 @@ import (
 
 	_ "time/tzdata" // time zones work without the system's database, e.g. in a slim container
 
+	"github.com/joho/godotenv"
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/errgroup"
 
@@ -77,6 +78,17 @@ func run(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// Secrets from .env, unless the environment already has them.
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf(".env: %w", err)
+	}
+	if cmd == "new" {
+		start, err := newPerson(context.Background())
+		if err != nil || !start {
+			return err
+		}
+		cmd = "run"
+	}
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -103,6 +115,9 @@ func run(args []string) error {
 		// Who the agent is comes first: without a life story it does not start,
 		// and the database is not touched.
 		life, err := self.Load(cfg.Self.LifeFile())
+		if errors.Is(err, os.ErrNotExist) {
+			return errors.New("no one lives here yet: start someone with `go run ./cmd/minime new`")
+		}
 		if err != nil {
 			return err
 		}
@@ -111,6 +126,9 @@ func run(args []string) error {
 			return err
 		}
 		defer st.Close()
+		if err := st.Claim(ctx, life.Name, time.Now().UTC()); err != nil {
+			return err
+		}
 		return runAgent(ctx, cfg, life, st, log)
 	case "decisions":
 		st, err := store.Open(ctx, cfg.Database.URL)
@@ -132,6 +150,9 @@ func run(args []string) error {
 			return err
 		}
 		defer st.Close()
+		if err := st.Claim(ctx, life.Name, time.Now().UTC()); err != nil {
+			return err
+		}
 		return updateProfile(ctx, cfg, life, st, *force, log)
 	case "day":
 		zone, err := cfg.Initiative.Zone()
@@ -157,6 +178,9 @@ func run(args []string) error {
 			return err
 		}
 		defer st.Close()
+		if err := st.Claim(ctx, life.Name, time.Now().UTC()); err != nil {
+			return err
+		}
 		return runReview(ctx, cfg, life, st, log)
 	case "growth":
 		zone, err := cfg.Initiative.Zone()
@@ -182,6 +206,9 @@ func run(args []string) error {
 			return err
 		}
 		defer st.Close()
+		if err := st.Claim(ctx, life.Name, time.Now().UTC()); err != nil {
+			return err
+		}
 		return runLearn(ctx, cfg, life, st, log)
 	case "replay":
 		st, err := store.Open(ctx, cfg.Database.URL)
@@ -198,7 +225,7 @@ func run(args []string) error {
 		defer st.Close()
 		return works(ctx, st, fs.Args(), *limit, os.Stdout)
 	default:
-		return fmt.Errorf("unknown command %q (want run, decisions, profile, day, work, growth, review, learn or replay)", cmd)
+		return fmt.Errorf("unknown command %q (want new, run, decisions, profile, day, work, growth, review, learn or replay)", cmd)
 	}
 }
 
@@ -433,7 +460,8 @@ func newDay(cfg *config.Config) (mind.Day, error) {
 			return day, err
 		}
 	}
-	day.MaxActivities, day.BudgetUSD = dl.Activities, dl.BudgetUSD
+	p := pace(cfg)
+	day.MaxActivities, day.BudgetUSD, day.Pace = dl.Activities, dl.BudgetUSD*float64(p), p
 	return day, nil
 }
 
@@ -887,7 +915,7 @@ var abilityMakers = map[string]func(d abilityDeps, lib func() *library.Client, n
 
 func depsFor(cfg *config.Config, st *store.Store, log *slog.Logger) abilityDeps {
 	return abilityDeps{st: st, search: cfg.Search, s2: cfg.Reasoning, prices: cfg.Pricing,
-		web: web.Limits{Searches: cfg.DailyLife.Web.Searches, Pages: cfg.DailyLife.Web.Pages}, log: log}
+		web: web.Limits{Searches: cfg.DailyLife.Web.Searches * pace(cfg), Pages: cfg.DailyLife.Web.Pages * pace(cfg)}, log: log}
 }
 
 // newAbilities builds the journal and the abilities named in config.
@@ -935,3 +963,6 @@ func newAbilities(names []string, d abilityDeps) (*ability.Set, error) {
 	}
 	return ability.NewSet(abilities...), nil
 }
+
+// pace is how much faster than a person it works: 1 if unset.
+func pace(cfg *config.Config) int { return max(1, cfg.DailyLife.Pace) }

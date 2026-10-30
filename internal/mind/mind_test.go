@@ -747,6 +747,7 @@ type fakeSystem2 struct {
 	lessons    []system2.LessonLearned
 	feedback   []system2.Feedback
 	tastes     []system2.Taste
+	goals      []system2.GoalTaken
 	formats    map[string]string // reply text by Format.Name, for structured requests
 	requests   []system2.Request
 }
@@ -759,7 +760,7 @@ func (f *fakeSystem2) Reason(_ context.Context, req system2.Request) (system2.Re
 	if req.Format != nil {
 		return system2.Response{Provider: "fake2/1", Text: f.formats[req.Format.Name], CostUSD: 0.002}, nil
 	}
-	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, Promises: f.promises, Permissions: f.perms, Lessons: f.lessons, Feedback: f.feedback, Tastes: f.tastes, CostUSD: 0.001}, nil
+	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, Promises: f.promises, Permissions: f.perms, Lessons: f.lessons, Feedback: f.feedback, Tastes: f.tastes, Goals: f.goals, CostUSD: 0.001}, nil
 }
 
 var testSet = questions.Set{

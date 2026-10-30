@@ -7,13 +7,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
+	"github.com/openai/openai-go/v3/responses"
+
 	"minime/internal/pricing"
-	"minime/internal/providers/openaihttp"
+	"minime/internal/providers/openaiclient"
 )
 
 // OpenAI searches with the Responses API's built-in web search tool.
 type OpenAI struct {
-	api   *openaihttp.Client
+	api   openai.Client
 	model string
 	price pricing.Price
 }
@@ -21,7 +25,7 @@ type OpenAI struct {
 // NewOpenAI returns a searcher using model (e.g. the System 2 model) and the
 // OpenAI key; an empty baseURL means the public API.
 func NewOpenAI(apiKey, model, baseURL string, price pricing.Price) *OpenAI {
-	return &OpenAI{api: openaihttp.New(apiKey, baseURL, 90*time.Second), model: model, price: price}
+	return &OpenAI{api: openaiclient.New(apiKey, baseURL, 90*time.Second), model: model, price: price}
 }
 
 const searchInstructions = `You find the most useful pages on the web for someone learning, using web search.
@@ -32,44 +36,19 @@ Prefer pages that teach or show real examples (guides, articles, documentation, 
 // pages its search actually retrieved (the search's sources, or the answer's
 // citations) are kept, so no URL is made up.
 func (o *OpenAI) Search(ctx context.Context, query string, n int) (Found, error) {
-	var w struct {
-		Output []struct {
-			Type   string `json:"type"`
-			Action struct {
-				Sources []struct {
-					URL string `json:"url"`
-				} `json:"sources"`
-			} `json:"action"`
-			Content []struct {
-				Type        string `json:"type"`
-				Text        string `json:"text"`
-				Annotations []struct {
-					Type  string `json:"type"`
-					URL   string `json:"url"`
-					Title string `json:"title"`
-				} `json:"annotations"`
-			} `json:"content"`
-		} `json:"output"`
-		Usage struct {
-			InputTokens        int `json:"input_tokens"`
-			InputTokensDetails struct {
-				CachedTokens int `json:"cached_tokens"`
-			} `json:"input_tokens_details"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
+	w, err := o.api.Responses.New(ctx, responses.ResponseNewParams{
+		Model:        o.model,
+		Instructions: param.NewOpt(fmt.Sprintf(searchInstructions, n)),
+		Input:        responses.ResponseNewParamsInputUnion{OfString: param.NewOpt("Search the web for: " + query)},
+		Tools:        []responses.ToolUnionParam{{OfWebSearch: &responses.WebSearchToolParam{Type: responses.WebSearchToolTypeWebSearch}}},
+		Include:      []responses.ResponseIncludable{responses.ResponseIncludableWebSearchCallActionSources},
+		Store:        param.NewOpt(false),
+	})
+	if err != nil {
+		return Found{}, fmt.Errorf("openai web search: %w", err)
 	}
-	body := map[string]any{
-		"model":        o.model,
-		"instructions": fmt.Sprintf(searchInstructions, n),
-		"input":        "Search the web for: " + query,
-		"tools":        []map[string]any{{"type": "web_search"}},
-		"include":      []string{"web_search_call.action.sources"},
-	}
-	if err := o.api.Post(ctx, "/responses", body, &w); err != nil {
-		return Found{}, err
-	}
-	cost := o.price.Cost(pricing.Usage{InputTokens: w.Usage.InputTokens, CachedTokens: w.Usage.InputTokensDetails.CachedTokens,
-		OutputTokens: w.Usage.OutputTokens})
+	cost := o.price.Cost(pricing.Usage{InputTokens: int(w.Usage.InputTokens), CachedTokens: int(w.Usage.InputTokensDetails.CachedTokens),
+		OutputTokens: int(w.Usage.OutputTokens)})
 
 	cited := map[string]string{} // without tracking parameters → as found
 	var text strings.Builder

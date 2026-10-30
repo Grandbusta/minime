@@ -1,4 +1,4 @@
-// Package openai is the System 2 provider for OpenAI's Responses API (POST /v1/responses).
+// Package openai is the System 2 provider for OpenAI's Responses API.
 package openai
 
 import (
@@ -9,179 +9,144 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
+	"github.com/openai/openai-go/v3/responses"
+	"github.com/openai/openai-go/v3/shared"
+
 	"minime/internal/pricing"
-	"minime/internal/providers/openaihttp"
+	"minime/internal/providers/openaiclient"
 	"minime/internal/providers/system2"
 )
 
 const (
-	defaultMaxOutputTokens = 1000
+	// defaultMaxOutputTokens is the room it has to answer, reasoning included:
+	// a few times what its longest work needs (a promised plan, about 1,700).
+	// Only what it writes is billed; the cap stops a runaway answer.
+	defaultMaxOutputTokens = 8000
 	requestTimeout         = 120 * time.Second // reasoning can take a while
 )
 
 type Client struct {
-	api    *openaihttp.Client
+	api    openai.Client
 	model  string
 	price  pricing.Price // zero: cost is recorded as 0
 	effort string        // reasoning effort; "" leaves the model's default
 }
 
 func New(apiKey, model, baseURL string, price pricing.Price, effort string) *Client {
-	return &Client{api: openaihttp.New(apiKey, baseURL, requestTimeout), model: model, price: price, effort: effort}
+	return &Client{api: openaiclient.New(apiKey, baseURL, requestTimeout), model: model, price: price, effort: effort}
 }
 
-type wireRequest struct {
-	Model           string        `json:"model"`
-	Instructions    string        `json:"instructions,omitempty"`
-	Input           []wireMessage `json:"input"`
-	MaxOutputTokens int           `json:"max_output_tokens"`
-	Store           bool          `json:"store"` // false: OpenAI keeps no copy for later retrieval
-	Text            *wireText     `json:"text,omitempty"`
-	Reasoning       *struct {
-		Effort string `json:"effort"`
-	} `json:"reasoning,omitempty"`
-}
-
-type wireText struct {
-	Format wireFormat `json:"format"`
-}
-
-type wireFormat struct {
-	Type   string         `json:"type"` // json_schema
-	Name   string         `json:"name"`
-	Strict bool           `json:"strict"`
-	Schema map[string]any `json:"schema"`
-}
-
-// replyWithFacts is the Structured Outputs format used with CollectFacts:
-// strict mode guarantees the output matches this schema.
-var replyWithFacts = &wireText{Format: wireFormat{
-	Type: "json_schema", Name: "reply_with_facts", Strict: true,
-	Schema: map[string]any{
-		"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises", "permissions", "corrections", "misread", "feedback", "lessons", "tastes"},
-		"properties": map[string]any{
-			"reply":        map[string]any{"type": "string"},
-			"who_they_are": map[string]any{"type": "string"},
-			"reminders": map[string]any{"type": "array", "items": map[string]any{
-				"type": "object", "additionalProperties": false, "required": []string{"when", "what"},
-				"properties": map[string]any{
-					"when": map[string]any{"type": "string", "description": "local time, YYYY-MM-DDTHH:MM"},
-					"what": map[string]any{"type": "string"},
-				},
-			}},
-			"permissions": map[string]any{"type": "array", "items": map[string]any{
-				"type": "object", "additionalProperties": false, "required": []string{"class", "verdict"},
-				"properties": map[string]any{
-					"class":   map[string]any{"type": "string"},
-					"verdict": map[string]any{"type": "string", "enum": []string{"auto", "ask", "forbid"}},
-				},
-			}},
-			"corrections": map[string]any{"type": "array", "items": map[string]any{
-				"type": "object", "additionalProperties": false, "required": []string{"fact", "action", "text"},
-				"properties": map[string]any{
-					"fact":   map[string]any{"type": "string", "description": "the fact's ref from the note, e.g. f2"},
-					"action": map[string]any{"type": "string", "enum": []string{"replace", "forget"}},
-					"text":   map[string]any{"type": "string", "description": "the right fact, for replace; empty for forget"},
-				},
-			}},
-			"misread": map[string]any{"type": "string"},
-			"lessons": map[string]any{"type": "array", "items": map[string]any{
-				"type": "object", "additionalProperties": false, "required": []string{"skill", "lesson"},
-				"properties": map[string]any{
-					"skill":  map[string]any{"type": "string"},
-					"lesson": map[string]any{"type": "string"},
-				},
-			}},
-			"tastes": map[string]any{"type": "array", "items": map[string]any{
-				"type": "object", "additionalProperties": false, "required": []string{"kind", "likes", "taste"},
-				"properties": map[string]any{
-					"kind":  map[string]any{"type": "string"},
-					"likes": map[string]any{"type": "boolean"},
-					"taste": map[string]any{"type": "string"},
-				},
-			}},
-			"feedback": map[string]any{"type": "array", "items": map[string]any{
-				"type": "object", "additionalProperties": false, "required": []string{"skill", "level", "about"},
-				"properties": map[string]any{
-					"skill": map[string]any{"type": "string"},
-					"level": map[string]any{"type": "integer"},
-					"about": map[string]any{"type": "string"},
-				},
-			}},
-			"promises": map[string]any{"type": "array", "items": map[string]any{
-				"type": "object", "additionalProperties": false, "required": []string{"by", "what", "ability", "query"},
-				"properties": map[string]any{
-					"by":      map[string]any{"type": "string", "description": "local time, YYYY-MM-DDTHH:MM"},
-					"what":    map[string]any{"type": "string"},
-					"ability": map[string]any{"type": "string", "description": "an ability it needs, or empty"},
-					"query":   map[string]any{"type": "string", "description": "what the ability is to look for, or empty"},
-				},
-			}},
-			"remember": map[string]any{"type": "array", "items": map[string]any{
-				"type": "object", "additionalProperties": false, "required": []string{"about", "fact"},
-				"properties": map[string]any{
-					"about": map[string]any{"type": "string", "enum": []string{string(system2.AboutSelf), string(system2.AboutSpeaker)}},
-					"fact":  map[string]any{"type": "string"},
-				},
-			}},
-		},
+// replyWithFacts is the Structured Outputs schema used with CollectFacts:
+// strict mode guarantees the output matches it.
+var replyWithFacts = map[string]any{
+	"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises", "permissions", "corrections", "misread", "feedback", "lessons", "tastes", "goals"},
+	"properties": map[string]any{
+		"reply":        map[string]any{"type": "string"},
+		"who_they_are": map[string]any{"type": "string"},
+		"reminders": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"when", "what"},
+			"properties": map[string]any{
+				"when": map[string]any{"type": "string", "description": "local time, YYYY-MM-DDTHH:MM"},
+				"what": map[string]any{"type": "string"},
+			},
+		}},
+		"permissions": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"class", "verdict"},
+			"properties": map[string]any{
+				"class":   map[string]any{"type": "string"},
+				"verdict": map[string]any{"type": "string", "enum": []string{"auto", "ask", "forbid"}},
+			},
+		}},
+		"corrections": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"fact", "action", "text"},
+			"properties": map[string]any{
+				"fact":   map[string]any{"type": "string", "description": "the fact's ref from the note, e.g. f2"},
+				"action": map[string]any{"type": "string", "enum": []string{"replace", "forget"}},
+				"text":   map[string]any{"type": "string", "description": "the right fact, for replace; empty for forget"},
+			},
+		}},
+		"misread": map[string]any{"type": "string"},
+		"lessons": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"skill", "lesson"},
+			"properties": map[string]any{
+				"skill":  map[string]any{"type": "string"},
+				"lesson": map[string]any{"type": "string"},
+			},
+		}},
+		"goals": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"skill", "level", "goal", "done_when", "due", "dream_id", "new_dream"},
+			"properties": map[string]any{
+				"skill":     map[string]any{"type": "string"},
+				"level":     map[string]any{"type": "integer", "description": "a new skill's starting level, 1 to 10; 0 for one you have"},
+				"goal":      map[string]any{"type": "string"},
+				"done_when": map[string]any{"type": "string"},
+				"due":       map[string]any{"type": "string", "description": "YYYY-MM-DD"},
+				"dream_id":  map[string]any{"type": "string", "description": "the dream it serves, or empty for a new one"},
+				"new_dream": map[string]any{"type": "string", "description": "a new dream it serves, or empty"},
+			},
+		}},
+		"tastes": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"kind", "likes", "taste"},
+			"properties": map[string]any{
+				"kind":  map[string]any{"type": "string"},
+				"likes": map[string]any{"type": "boolean"},
+				"taste": map[string]any{"type": "string"},
+			},
+		}},
+		"feedback": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"skill", "level", "about"},
+			"properties": map[string]any{
+				"skill": map[string]any{"type": "string"},
+				"level": map[string]any{"type": "integer"},
+				"about": map[string]any{"type": "string"},
+			},
+		}},
+		"promises": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"by", "what", "ability", "query"},
+			"properties": map[string]any{
+				"by":      map[string]any{"type": "string", "description": "local time, YYYY-MM-DDTHH:MM"},
+				"what":    map[string]any{"type": "string"},
+				"ability": map[string]any{"type": "string", "description": "an ability it needs, or empty"},
+				"query":   map[string]any{"type": "string", "description": "what the ability is to look for, or empty"},
+			},
+		}},
+		"remember": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"about", "fact"},
+			"properties": map[string]any{
+				"about": map[string]any{"type": "string", "enum": []string{string(system2.AboutSelf), string(system2.AboutSpeaker)}},
+				"fact":  map[string]any{"type": "string"},
+			},
+		}},
 	},
-}}
-
-type wireMessage struct {
-	Role    string `json:"role"` // user | assistant | developer
-	Content string `json:"content"`
 }
 
-// wireInput lays the conversation out as chat turns, then the note (as
+// input lays the conversation out as chat turns, then the note (as
 // developer context), then the message to answer, if any.
-func wireInput(req system2.Request) []wireMessage {
-	var in []wireMessage
+func input(req system2.Request) responses.ResponseInputParam {
+	var in responses.ResponseInputParam
 	for _, t := range req.History {
-		role := "user"
+		role := responses.EasyInputMessageRoleUser
 		if t.Role == system2.RoleAgent {
-			role = "assistant"
+			role = responses.EasyInputMessageRoleAssistant
 		}
-		in = append(in, wireMessage{Role: role, Content: t.Text})
+		in = append(in, responses.ResponseInputItemParamOfMessage(t.Text, role))
 	}
 	if req.Note != "" {
-		in = append(in, wireMessage{Role: "developer", Content: req.Note})
+		in = append(in, responses.ResponseInputItemParamOfMessage(req.Note, responses.EasyInputMessageRoleDeveloper))
 	}
 	if req.Message == "" { // the agent speaks first: the note says why
 		return in
 	}
-	return append(in, wireMessage{Role: "user", Content: req.Message})
+	return append(in, responses.ResponseInputItemParamOfMessage(req.Message, responses.EasyInputMessageRoleUser))
 }
 
-type wireResponse struct {
-	Model  string `json:"model"`
-	Status string `json:"status"` // completed | incomplete | failed | ...
-	Error  *struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
-	IncompleteDetails *struct {
-		Reason string `json:"reason"`
-	} `json:"incomplete_details"`
-	Output []struct {
-		Type    string `json:"type"` // message | reasoning | ...
-		Content []struct {
-			Type    string `json:"type"` // output_text | refusal
-			Text    string `json:"text"`
-			Refusal string `json:"refusal"`
-		} `json:"content"`
-	} `json:"output"`
-	Usage struct {
-		InputTokens        int `json:"input_tokens"`
-		InputTokensDetails struct {
-			CachedTokens     int `json:"cached_tokens"`
-			CacheWriteTokens int `json:"cache_write_tokens"`
-		} `json:"input_tokens_details"`
-		OutputTokens        int `json:"output_tokens"`
-		OutputTokensDetails struct {
-			ReasoningTokens int `json:"reasoning_tokens"`
-		} `json:"output_tokens_details"`
-	} `json:"usage"`
+// jsonFormat asks for output matching schema, strictly.
+func jsonFormat(name string, schema map[string]any) responses.ResponseTextConfigParam {
+	return responses.ResponseTextConfigParam{Format: responses.ResponseFormatTextConfigUnionParam{
+		OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{Name: name, Schema: schema, Strict: param.NewOpt(true)}}}
 }
 
 func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Response, error) {
@@ -189,25 +154,41 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 	if max == 0 {
 		max = defaultMaxOutputTokens
 	}
-	body := wireRequest{Model: c.model, Instructions: req.Instructions, Input: wireInput(req), MaxOutputTokens: max}
+	params := responses.ResponseNewParams{Model: c.model, Input: responses.ResponseNewParamsInputUnion{OfInputItemList: input(req)},
+		MaxOutputTokens: param.NewOpt(int64(max)), Store: param.NewOpt(false)} // false: OpenAI keeps no copy for later retrieval
+	if req.Instructions != "" {
+		params.Instructions = param.NewOpt(req.Instructions)
+	}
 	switch {
 	case req.CollectFacts:
-		body.Text = replyWithFacts
+		params.Text = jsonFormat("reply_with_facts", replyWithFacts)
 	case req.Format != nil:
-		body.Text = &wireText{Format: wireFormat{Type: "json_schema", Name: req.Format.Name, Strict: true, Schema: req.Format.Schema}}
+		params.Text = jsonFormat(req.Format.Name, req.Format.Schema)
 	}
 	if c.effort != "" {
-		body.Reasoning = &struct {
-			Effort string `json:"effort"`
-		}{c.effort}
+		params.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffort(c.effort)}
 	}
-	var w wireResponse
-	err := c.api.Post(ctx, "/responses", body, &w)
-	if err != nil {
-		return system2.Response{}, err
-	}
-	if w.Error != nil {
-		return system2.Response{}, fmt.Errorf("openai responses: %s: %s", w.Error.Code, w.Error.Message)
+	// Cut off (it ran out of room): the text is unfinished, and structured
+	// output is broken JSON, so it's no answer. Out of room, it tries once
+	// more with twice as much.
+	structured := req.CollectFacts || req.Format != nil
+	var w *responses.Response
+	for attempt := 1; ; attempt++ {
+		var err error
+		if w, err = c.api.Responses.New(ctx, params); err != nil {
+			return system2.Response{}, fmt.Errorf("openai responses: %w", err)
+		}
+		if w.Error.Code != "" {
+			return system2.Response{}, fmt.Errorf("openai responses: %s: %s", w.Error.Code, w.Error.Message)
+		}
+		if w.Status != responses.ResponseStatusIncomplete || !structured {
+			break
+		}
+		if attempt == 1 && w.IncompleteDetails.Reason == "max_output_tokens" {
+			params.MaxOutputTokens = param.NewOpt(params.MaxOutputTokens.Value * 2)
+			continue
+		}
+		return system2.Response{}, fmt.Errorf("openai responses: %w (%s)", system2.ErrCutOff, w.IncompleteDetails.Reason)
 	}
 
 	var text, refusal strings.Builder
@@ -236,6 +217,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		feedback   []system2.Feedback
 		lessons    []system2.LessonLearned
 		tastes     []system2.Taste
+		goals      []system2.GoalTaken
 	)
 	switch {
 	case refusal.Len() > 0:
@@ -282,6 +264,15 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 				Likes bool   `json:"likes"`
 				Taste string `json:"taste"`
 			} `json:"tastes"`
+			Goals []struct {
+				Skill    string `json:"skill"`
+				Level    int    `json:"level"`
+				Goal     string `json:"goal"`
+				DoneWhen string `json:"done_when"`
+				Due      string `json:"due"`
+				DreamID  string `json:"dream_id"`
+				NewDream string `json:"new_dream"`
+			} `json:"goals"`
 		}
 		if err := json.Unmarshal([]byte(reply), &out); err != nil {
 			return system2.Response{}, fmt.Errorf("openai responses: reply is not the requested JSON: %w", err)
@@ -316,6 +307,12 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 				lessons = append(lessons, system2.LessonLearned{Skill: skill, Text: text})
 			}
 		}
+		for _, g := range out.Goals {
+			if skill, text := strings.TrimSpace(g.Skill), strings.TrimSpace(g.Goal); skill != "" && text != "" {
+				goals = append(goals, system2.GoalTaken{Skill: skill, Level: g.Level, Text: text, DoneWhen: strings.TrimSpace(g.DoneWhen),
+					Due: strings.TrimSpace(g.Due), DreamID: strings.TrimSpace(g.DreamID), NewDream: strings.TrimSpace(g.NewDream)})
+			}
+		}
 		for _, t := range out.Tastes {
 			if text := strings.TrimSpace(t.Taste); text != "" {
 				tastes = append(tastes, system2.Taste{Kind: strings.TrimSpace(t.Kind), Likes: t.Likes, Text: text})
@@ -334,9 +331,9 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		}
 	}
 	if reply == "" {
-		reason := w.Status
-		if w.IncompleteDetails != nil {
-			reason += " (" + w.IncompleteDetails.Reason + ")"
+		reason := string(w.Status)
+		if w.IncompleteDetails.Reason != "" {
+			reason += " (" + string(w.IncompleteDetails.Reason) + ")"
 		}
 		return system2.Response{}, errors.New("openai responses: no reply text, status " + reason)
 	}
@@ -355,10 +352,12 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		Feedback:    feedback,
 		Lessons:     lessons,
 		Tastes:      tastes,
-		Usage:       system2.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, ReasoningTokens: u.OutputTokensDetails.ReasoningTokens},
+		Goals:       goals,
+		Usage: system2.Usage{InputTokens: int(u.InputTokens), OutputTokens: int(u.OutputTokens),
+			ReasoningTokens: int(u.OutputTokensDetails.ReasoningTokens)},
 		CostUSD: c.price.Cost(pricing.Usage{
-			InputTokens: u.InputTokens, CachedTokens: u.InputTokensDetails.CachedTokens,
-			CacheWriteTokens: u.InputTokensDetails.CacheWriteTokens, OutputTokens: u.OutputTokens,
+			InputTokens: int(u.InputTokens), CachedTokens: int(u.InputTokensDetails.CachedTokens),
+			CacheWriteTokens: int(u.InputTokensDetails.CacheWriteTokens), OutputTokens: int(u.OutputTokens),
 		}),
 	}, nil
 }

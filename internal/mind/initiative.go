@@ -63,6 +63,10 @@ func (m *Mind) tick(ctx context.Context, now time.Time) {
 	m.doDueIntentions(ctx, now)
 	m.preparePromises(ctx, now)
 	m.weeklyReview(ctx, now)
+	if m.toPlan { // a goal taken on in a chat: its learning plan, now the reply is sent
+		m.toPlan = false
+		m.EnsurePlans(ctx, now)
+	}
 	if m.checkInTime(now) {
 		m.checkIn(ctx, now)
 	}
@@ -386,6 +390,7 @@ func (m *Mind) speakFirst(ctx context.Context, p perception.Percept, person memo
 		History:      turns(recent),
 		Note:         m.now(p.At) + "\n\n" + s.note + nameNote(recent, n.speaker),
 		CollectFacts: true, // the format the reply prompt describes; nothing new was said, so nothing is kept
+
 	})
 	got := failed
 	switch {

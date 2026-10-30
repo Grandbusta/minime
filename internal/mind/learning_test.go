@@ -2,6 +2,9 @@ package mind
 
 import (
 	"context"
+	"fmt"
+	"minime/internal/providers/system2"
+	"slices"
 	"strings"
 	"testing"
 
@@ -160,5 +163,86 @@ func TestThePlanSeesPagesItsSearchesFound(t *testing.T) {
 	m.Abilities = nil
 	if note := m.foundNote(context.Background()); note != "" {
 		t.Errorf("without read_page: %q", note)
+	}
+}
+
+func TestTakingOnAGoalTheOwnerAsksFor(t *testing.T) {
+	ctx := context.Background()
+	m, s, s2, _ := learningPlanMind()
+	m.Autonomy.Owner = owner
+	m.ReplyPrompt.Text += "{feedback_help}"
+	m.Life.Name = "Daniel"
+	music := memory.Dream{ID: ulid.Make(), Text: "Daniel wants to be a producer", Status: memory.DreamActive}
+	s.dreams = []memory.Dream{music}
+	s.people[owner] = memory.Person{Key: owner, Name: "Busta"}
+	s2.goals = []system2.GoalTaken{{Skill: "sales and marketing", Level: 1, Text: "Learn to sell a B2B app",
+		DoneWhen: "three written pitches to realistic B2B customers", Due: "2026-12-01", NewDream: "Daniel wants to build things people pay for."}}
+
+	p := percept("1", "So add sales and marketing to your goals and start planning around it")
+	p.Speaker, p.SpeakerName = owner, "Busta"
+	m.handle(ctx, p)
+
+	var g memory.Goal
+	for _, x := range s.goals {
+		if x.Text == "Learn to sell a B2B app" {
+			g = x
+		}
+	}
+	if g.Status != memory.GoalActive || g.Skill != "sales and marketing" || g.DoneWhen == "" || g.Due.IsZero() {
+		t.Fatalf("goal = %+v (all: %+v)", g, s.goals)
+	}
+	var sk memory.Skill
+	for _, x := range s.skills {
+		if x.Name == "sales and marketing" {
+			sk = x
+		}
+	}
+	if sk.Level != 1 || !slices.Contains(sk.ShownBy, "reading_notes") {
+		t.Errorf("skill = %+v", sk)
+	}
+	if len(s.dreams) != 2 || s.dreams[1].Source != memory.DreamFromOwner || g.DreamID != s.dreams[1].ID {
+		t.Errorf("dreams = %+v, goal's dream %s", s.dreams, g.DreamID)
+	}
+	if !strings.Contains(s2.requests[0].Instructions, "Goals they ask you to take on") || !strings.Contains(s2.requests[0].Instructions, music.ID.String()) {
+		t.Error("the reply wasn't told how to take on a goal")
+	}
+
+	// The learning plan comes on the next tick, once the reply is sent.
+	if len(s.plans) != 0 {
+		t.Fatal("drafted a plan before replying")
+	}
+	m.tick(ctx, at(30, 13, 0))
+	if len(s.plans) != 1 || s.plans[0].GoalID != g.ID {
+		t.Errorf("plans = %+v", s.plans)
+	}
+
+	// Someone else's goal for it isn't taken on.
+	before := len(s.goals)
+	m.handle(ctx, percept("2", "Learn juggling"))
+	if len(s.goals) != before {
+		t.Error("took on a goal someone who isn't the owner asked for")
+	}
+}
+
+func TestNoCapOnGoalsButNoDuplicates(t *testing.T) {
+	ctx := context.Background()
+	m, s, s2, _ := learningPlanMind()
+	m.Autonomy.Owner = owner
+	m.ReplyPrompt.Text += "{feedback_help}"
+	dream := memory.Dream{ID: ulid.Make(), Text: "a dream", Status: memory.DreamActive}
+	s.dreams = []memory.Dream{dream}
+	for i := range 3 {
+		s.goals = append(s.goals, memory.Goal{ID: ulid.Make(), DreamID: dream.ID, Text: fmt.Sprint("goal ", i), Status: memory.GoalActive})
+	}
+	s2.goals = []system2.GoalTaken{{Skill: "juggling", Level: 1, Text: "Juggle", DreamID: dream.ID.String()},
+		{Skill: "x", Text: "Goal 2"}} // already a goal
+	p := percept("1", "Add juggling to your goals")
+	p.Speaker = owner
+	m.handle(ctx, p)
+	if len(s.goals) != 4 || !slices.ContainsFunc(s.skills, func(x memory.Skill) bool { return x.Name == "juggling" }) {
+		t.Errorf("goals = %d, skills = %+v; want juggling as a fourth goal, and goal 2 not again", len(s.goals), s.skills)
+	}
+	if in := s2.requests[0].Instructions; !strings.Contains(in, "goal 2 (no skill)") || strings.Contains(in, "drop") {
+		t.Error("the reply wasn't told its goals, or was still told about a limit")
 	}
 }

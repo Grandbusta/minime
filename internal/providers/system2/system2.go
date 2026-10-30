@@ -2,7 +2,10 @@
 // reasoning models (OpenAI Responses, ...). Each provider lives in its own subpackage.
 package system2
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // Reasoner thinks a request through and writes a reply.
 type Reasoner interface {
@@ -14,7 +17,7 @@ type Request struct {
 	History         []Turn // the conversation so far, oldest first
 	Note            string // context about this turn from the rest of the mind
 	Message         string // the person's message to reply to; "" when the agent speaks first
-	MaxOutputTokens int    // 0: the provider's default
+	MaxOutputTokens int    // the most it may write, reasoning included; 0: the provider's default
 	// CollectFacts asks for the lasting facts to remember, each about the
 	// agent itself or the person speaking, alongside the reply
 	// (Response.Remember), plus any reminders it agreed to set (Response.Reminders)
@@ -81,12 +84,26 @@ type Feedback struct {
 }
 
 // LessonLearned is specific advice the speaker gave about doing a skill well.
+// ErrCutOff means the answer ran out of room before it was finished.
+var ErrCutOff = errors.New("the answer was cut off before it was finished")
+
 // Taste is something the speaker likes or doesn't in work like the agent's,
 // beyond how good it is.
 type Taste struct {
 	Kind  string // the kind of work it's about; "" any
 	Likes bool
 	Text  string // in general terms, e.g. "likes hooks built on one repeated word"
+}
+
+// GoalTaken is a goal the speaker asked it to take on, and it agreed to.
+type GoalTaken struct {
+	Skill    string // the skill it grows: one it has, or a new one
+	Level    int    // a new skill's starting level, 1 to 10; 0 for one it has
+	Text     string // the goal
+	DoneWhen string // a concrete test of done
+	Due      string // YYYY-MM-DD
+	DreamID  string // the dream it serves, by id; "" for a new one
+	NewDream string // a new dream it serves, third person with its name; "" for an existing one
 }
 
 type LessonLearned struct {
@@ -130,7 +147,9 @@ type Response struct {
 	// Lessons, with CollectFacts: specific advice the speaker gave about its work (only the owner's count).
 	Lessons []LessonLearned
 	// Tastes, with CollectFacts: what the speaker likes or doesn't in its work (only the owner's count).
-	Tastes  []Taste
+	Tastes []Taste
+	// Goals, with CollectFacts: goals the speaker asked it to take on (only the owner's count).
+	Goals   []GoalTaken
 	Usage   Usage
 	CostUSD float64 // 0 when no price is configured
 }

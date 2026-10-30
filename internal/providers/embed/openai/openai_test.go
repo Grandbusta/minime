@@ -19,6 +19,7 @@ func TestEmbed(t *testing.T) {
 		}
 		json.NewDecoder(r.Body).Decode(&got)
 		// Out of order, as the API may send them.
+		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"model":"text-embedding-3-small","data":[{"index":1,"embedding":[0,1]},{"index":0,"embedding":[1,0]}],
 			"usage":{"prompt_tokens":1000000}}`)
 	}))
@@ -38,6 +39,7 @@ func TestEmbed(t *testing.T) {
 
 func TestEmbedMissingVector(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"data":[{"index":0,"embedding":[1,0]}],"usage":{"prompt_tokens":3}}`)
 	}))
 	defer srv.Close()

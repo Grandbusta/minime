@@ -203,10 +203,11 @@ type Dream struct {
 }
 
 const (
-	DreamActive   = "active"
-	DreamDropped  = "dropped"
-	DreamFromLife = "life"
-	DreamFromSelf = "self"
+	DreamActive    = "active"
+	DreamDropped   = "dropped"
+	DreamFromLife  = "life"
+	DreamFromSelf  = "self"
+	DreamFromOwner = "owner" // its owner asked it to take on a goal no dream of its own covered
 )
 
 // Goal is a step toward a dream, checkable in weeks.

@@ -28,10 +28,14 @@ import (
 
 // Day is how the agent lives its own day.
 type Day struct {
-	PlanAt         time.Duration // when it plans its day, from midnight in its time zone
-	JournalAt      time.Duration // when it writes its journal
-	MaxActivities  int           // things it plans a day, besides the journal
-	BudgetUSD      float64       // most its own day may cost; past it, the rest waits for tomorrow
+	PlanAt        time.Duration // when it plans its day, from midnight in its time zone
+	JournalAt     time.Duration // when it writes its journal
+	MaxActivities int           // things it plans a round (a day at pace 1), besides the journal
+	BudgetUSD     float64       // most its own day may cost; past it, the rest waits for tomorrow
+	// Pace is how much faster than a person it works: its waking day (from
+	// PlanAt to JournalAt) runs in this many rounds, each planned when it
+	// starts. 0 or 1: one plan for the day.
+	Pace           int
 	PlanPrompt     Prompt        // how System 2 plans the day; zero: no day of its own
 	ActivityPrompt Prompt        // how System 2 does an activity
 	ReviewDay      time.Weekday  // its weekly review: the day
@@ -68,38 +72,65 @@ func (m *Mind) startOfDay(t time.Time) time.Time {
 	return time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, m.Zone)
 }
 
-// planDay plans today once, at PlanAt or the first tick after it, unless
-// today is already planned or it is too late for a day: past journal time.
+// planDay plans today, at PlanAt or the first tick after it: once at a
+// person's pace, or in rounds at a faster one (Day.Pace), each planned when
+// it starts. Nothing is planned past journal time, and a round already
+// planned (e.g. before a restart) isn't planned again.
 func (m *Mind) planDay(ctx context.Context, now time.Time) {
 	if !m.dayOn() {
 		return
 	}
 	midnight := m.startOfDay(now)
 	today := midnight.Format("2006-01-02")
-	if m.planned == today || now.Before(midnight.Add(m.Day.PlanAt)) {
+	if now.Before(midnight.Add(m.Day.PlanAt)) {
 		return
 	}
 	if !now.Before(midnight.Add(m.Day.JournalAt)) {
 		m.planned = today
 		return
 	}
-	existing, err := m.Store.IntentionsDue(ctx, midnight, midnight.AddDate(0, 0, 1))
-	if err != nil {
-		m.Log.Warn("checking today's plan failed", "err", err)
+	round := m.roundAt(now, midnight)
+	if m.planned == today && round <= m.round {
 		return
 	}
-	for _, i := range existing {
-		if i.Subject == memory.SubjectSelf && i.Kind == memory.IntentionActivity {
-			m.planned = today // already planned, e.g. before a restart
+	first := m.planned != today
+	if first { // the day's first plan: unless it planned today already (a restart)
+		existing, err := m.Store.IntentionsDue(ctx, midnight, midnight.AddDate(0, 0, 1))
+		if err != nil {
+			m.Log.Warn("checking today's plan failed", "err", err)
 			return
 		}
+		for _, i := range existing {
+			if i.Subject == memory.SubjectSelf && i.Kind == memory.IntentionActivity {
+				m.planned, m.round = today, round // already planned; rounds go on from the next one
+				return
+			}
+		}
 	}
-	m.planned = today
+	m.planned, m.round = today, max(round, m.round)
 	if m.overBudget(ctx, now) {
-		m.Log.Warn("over today's budget; no plan for today")
+		m.Log.Warn("over today's budget; no plan", "round", round)
 		return
 	}
-	m.writePlan(ctx, now, midnight)
+	m.writePlan(ctx, now, midnight, round, first)
+}
+
+// roundAt is the round of its day that now falls in: 0 at a person's pace.
+func (m *Mind) roundAt(now, midnight time.Time) int {
+	if m.Day.Pace <= 1 {
+		return 0
+	}
+	length := (m.Day.JournalAt - m.Day.PlanAt) / time.Duration(m.Day.Pace)
+	return min(int(now.Sub(midnight.Add(m.Day.PlanAt))/length), m.Day.Pace-1)
+}
+
+// roundEnd is when a round of its day ends: the next round, or journal time.
+func (m *Mind) roundEnd(round int, midnight time.Time) time.Time {
+	if m.Day.Pace <= 1 || round >= m.Day.Pace-1 {
+		return midnight.Add(m.Day.JournalAt)
+	}
+	length := (m.Day.JournalAt - m.Day.PlanAt) / time.Duration(m.Day.Pace)
+	return midnight.Add(m.Day.PlanAt + time.Duration(round+1)*length)
 }
 
 // planFormat is the plan's shape; ability is one of the abilities the planner
@@ -132,7 +163,10 @@ func planFormat(abilities []ability.Ability) *system2.Format {
 	}}
 }
 
-func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
+// writePlan plans a round of its day, from now until the round ends. The
+// day's first plan (first) also has the journal and its calls for its owner.
+func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time, round int, first bool) {
+	until := m.roundEnd(round, midnight)
 	start := time.Now()
 	d := &decision.Decision{ID: ulid.Make(), At: start.UTC(), Tier: decision.TierSystem2, SetID: m.Day.PlanPrompt.Ref,
 		Action: "plan_day", Gate: decision.GateAuto}
@@ -148,6 +182,21 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 	var note strings.Builder
 	note.WriteString(m.now(now))
 	fmt.Fprintf(&note, " You write your journal at %s.", midnight.Add(m.Day.JournalAt).Format("15:04"))
+	if m.Day.Pace > 1 {
+		fmt.Fprintf(&note, " You work fast, in rounds: this is round %d of %d today. Plan what you'll do from now until %s; "+
+			"the next round picks up from how these went.", round+1, m.Day.Pace, until.Format("15:04"))
+		if !first {
+			note.WriteString(" Leave calls empty: today's are made.")
+			if ws, err := m.Store.WorksBetween(ctx, midnight, now); err == nil && len(ws) > 0 {
+				note.WriteString("\n\nWhat you've made today so far:")
+				for _, w := range ws {
+					if w.Kind != "journal" {
+						fmt.Fprintf(&note, "\n- %s, %s: %s", w.CreatedAt.In(m.Zone).Format("15:04"), strings.ReplaceAll(w.Kind, "_", " "), w.Title)
+					}
+				}
+			}
+		}
+	}
 	if len(projects) == 0 {
 		note.WriteString("\n\nYou're not in the middle of anything yet.")
 	} else {
@@ -239,8 +288,8 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 			continue
 		}
 		due := midnight.Add(time.Duration(at.Hour())*time.Hour + time.Duration(at.Minute())*time.Minute)
-		if due.Before(now) || !due.Before(journalAt) {
-			continue // in the past, or after the journal: not today
+		if due.Before(now) || !due.Before(until) {
+			continue // in the past, or after this round (or the journal): not now
 		}
 		var project, goal ulid.ULID
 		if id := strings.TrimSpace(a.GoalID); goals[id] {
@@ -277,16 +326,19 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time) {
 			lines = append(lines, line)
 		}
 	}
-	if m.intend(ctx, memory.Intention{Text: journalText, Ability: journal.Name, DueAt: journalAt}, now) {
+	if first && m.intend(ctx, memory.Intention{Text: journalText, Ability: journal.Name, DueAt: journalAt}, now) {
 		lines = append(lines, journalAt.Format("15:04")+" "+journalText)
 	}
 	d.Reply = strings.Join(lines, "\n")
 	detail := fmt.Sprintf("planned %d things", len(lines))
+	if !first {
+		plan.Calls = nil // its calls are the first plan's
+	}
 	if n := m.logPlanCalls(ctx, plan.Calls, now); n > 0 {
 		detail += fmt.Sprintf("; %d calls for its owner", n)
 	}
 	m.finishLife(ctx, d, start, decision.OutcomeOK, detail)
-	m.Log.Info("planned the day", "things", len(lines), "cost_usd", resp.CostUSD)
+	m.Log.Info("planned the day", "round", round+1, "of", max(1, m.Day.Pace), "things", len(lines), "cost_usd", resp.CostUSD)
 }
 
 // linkGoal links a project to the goal it serves, if it serves none yet.

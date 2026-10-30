@@ -3,12 +3,13 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
-	"time"
 
 	"minime/internal/pricing"
 	"minime/internal/providers/system2"
@@ -16,11 +17,13 @@ import (
 
 func newTestClient(t *testing.T, price pricing.Price, h http.HandlerFunc) *Client {
 	t.Helper()
-	srv := httptest.NewServer(h)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After-Ms", "1") // the SDK's retries, without the wait
+		h(w, r)
+	}))
 	t.Cleanup(srv.Close)
-	c := New("sk-test", "gpt-test", srv.URL, price, "")
-	c.api.RetryWait = time.Millisecond
-	return c
+	return New("sk-test", "gpt-test", srv.URL, price, "")
 }
 
 func TestReasonSendsRequestAndJoinsText(t *testing.T) {
@@ -177,6 +180,7 @@ func TestCollectFactsBadJSONIsAnError(t *testing.T) {
 func TestReasoningEffortIsSentWhenSet(t *testing.T) {
 	var got []any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
 		got = append(got, body["reasoning"])
@@ -234,5 +238,55 @@ func TestResponseErrorObjectIsAnError(t *testing.T) {
 	})
 	if _, err := c.Reason(context.Background(), system2.Request{Message: "x"}); err == nil {
 		t.Fatal("expected an error")
+	}
+}
+
+// What a request looks like on the wire, to check what was sent.
+type wireMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type wireText struct {
+	Format struct {
+		Type   string         `json:"type"`
+		Name   string         `json:"name"`
+		Strict bool           `json:"strict"`
+		Schema map[string]any `json:"schema"`
+	} `json:"format"`
+}
+
+func TestACutOffAnswerIsTriedAgainWithMoreRoom(t *testing.T) {
+	var asked []int
+	c := newTestClient(t, pricing.Price{}, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MaxOutputTokens int `json:"max_output_tokens"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		asked = append(asked, body.MaxOutputTokens)
+		if len(asked) == 1 {
+			io.WriteString(w, `{"model":"m","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},
+				"output":[{"type":"message","content":[{"type":"output_text","text":"{\"title\":\"A pl"}]}]}`)
+			return
+		}
+		io.WriteString(w, `{"model":"m","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\"title\":\"A plan\"}"}]}]}`)
+	})
+	resp, err := c.Reason(context.Background(), system2.Request{Message: "x", MaxOutputTokens: 500,
+		Format: &system2.Format{Name: "work", Schema: map[string]any{"type": "object"}}})
+	if err != nil || resp.Text != `{"title":"A plan"}` || len(asked) != 2 || asked[0] != 500 || asked[1] != 1000 {
+		t.Errorf("resp = %q, %v; asked with %v", resp.Text, err, asked)
+	}
+}
+
+func TestACutOffAnswerIsAnError(t *testing.T) {
+	calls := 0
+	c := newTestClient(t, pricing.Price{}, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		io.WriteString(w, `{"model":"m","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},
+			"output":[{"type":"message","content":[{"type":"output_text","text":"{\"title\":\"A plan\",\"text\":\"Week one: lear"}]}]}`)
+	})
+	_, err := c.Reason(context.Background(), system2.Request{Message: "x", Format: &system2.Format{Name: "work", Schema: map[string]any{"type": "object"}}})
+	if !errors.Is(err, system2.ErrCutOff) || !strings.Contains(err.Error(), "max_output_tokens") || calls != 2 {
+		t.Errorf("err = %v after %d calls; want it cut off after trying twice", err, calls)
 	}
 }

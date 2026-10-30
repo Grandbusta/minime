@@ -4,15 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/openai/openai-go/v3"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"minime/internal/decision"
 	"minime/internal/pricing"
-	"minime/internal/providers/openaihttp"
 	"minime/internal/providers/system1"
 )
 
@@ -26,11 +25,13 @@ var questions = []system1.Question{
 
 func newTestClient(t *testing.T, h http.HandlerFunc) *Client {
 	t.Helper()
-	srv := httptest.NewServer(h)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After-Ms", "1") // the SDK's retries, without the wait
+		h(w, r)
+	}))
 	t.Cleanup(srv.Close)
-	c := New("sk-test", "", srv.URL, pricing.Price{Input: 0.10, Output: 0.50, CachedInput: 0.01, CacheWrite: 0.125})
-	c.api.RetryWait = time.Millisecond
-	return c
+	return New("sk-test", "", srv.URL, pricing.Price{Input: 0.10, Output: 0.50, CachedInput: 0.01, CacheWrite: 0.125})
 }
 
 const okResponse = `{
@@ -166,8 +167,8 @@ func TestClientErrorIsNotRetried(t *testing.T) {
 		io.WriteString(w, `{"error":{"message":"Incorrect API key provided","type":"invalid_request_error","code":"invalid_api_key"}}`)
 	})
 	_, err := c.Decide(context.Background(), system1.Request{State: "x", Questions: questions[1:2]})
-	var apiErr *openaihttp.APIError
-	if !errors.As(err, &apiErr) || apiErr.Status != 401 || apiErr.Code != "invalid_api_key" {
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 401 || apiErr.Code != "invalid_api_key" {
 		t.Fatalf("err = %v", err)
 	}
 	if calls != 1 {

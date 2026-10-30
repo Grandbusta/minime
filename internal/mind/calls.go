@@ -387,13 +387,9 @@ func (m *Mind) carryOutCall(ctx context.Context, c memory.Call, option int, now 
 		return "loading goals failed: " + err.Error()
 	}
 	var g *memory.Goal
-	active := 0
 	for i := range goals {
 		if goals[i].ID == c.Ref {
 			g = &goals[i]
-		}
-		if goals[i].Status == memory.GoalActive {
-			active++
 		}
 	}
 	if g == nil {
@@ -406,7 +402,7 @@ func (m *Mind) carryOutCall(ctx context.Context, c memory.Call, option int, now 
 			return "the goal was already settled"
 		}
 		g.Status = memory.GoalDropped
-		if option == 0 && active < maxActiveGoals {
+		if option == 0 {
 			g.Status = memory.GoalActive
 		}
 	case memory.CallDropGoal:

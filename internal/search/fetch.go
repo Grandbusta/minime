@@ -4,18 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html"
 	"io"
 	"mime"
 	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
-	"regexp"
 	"strings"
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"codeberg.org/readeck/go-readability/v2"
 )
 
 const (
@@ -103,7 +103,9 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, raw string) (Page, error) {
 	if kind == "text/plain" {
 		page.Text = string(body)
 	} else {
-		page.Title, page.Text = readable(string(body))
+		if page.Title, page.Text, err = readable(string(body), resp.Request.URL); err != nil {
+			return Page{}, fmt.Errorf("fetch %s: %w", u.Host, ErrNothing)
+		}
 	}
 	page.Text = cut(collapse(page.Text), maxTextBytes)
 	if strings.TrimSpace(page.Text) == "" {
@@ -112,37 +114,20 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, raw string) (Page, error) {
 	return page, nil
 }
 
-// Elements whose text isn't the page's content, and elements that end a line.
-var (
-	skipTags  = []string{"script", "style", "noscript", "nav", "header", "footer", "aside", "form", "svg", "iframe", "template", "button", "select"}
-	skipRes   = make([]*regexp.Regexp, len(skipTags))
-	blockRe   = regexp.MustCompile(`(?i)</?(p|div|br|li|h[1-6]|tr|pre|blockquote|section|article|table|ul|ol)\b[^>]*>`)
-	tagRe     = regexp.MustCompile(`(?s)<[^>]*>`)
-	commentRe = regexp.MustCompile(`(?s)<!--.*?-->`)
-	titleRe   = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
-)
-
-func init() {
-	for i, t := range skipTags {
-		skipRes[i] = regexp.MustCompile(`(?is)<` + t + `\b[^>]*>.*?</` + t + `\s*>`)
+// readable is an HTML page's title and the text of its content, by
+// Readability (the algorithm behind Firefox's reader view): what's left
+// once scripts, styles and the page's chrome (navigation, headers, footers,
+// sidebars, forms) are dropped.
+func readable(doc string, page *url.URL) (title, text string, err error) {
+	article, err := readability.FromReader(strings.NewReader(doc), page)
+	if err != nil {
+		return "", "", err
 	}
-}
-
-// readable is an HTML page's title and the text of its content: what's
-// left once scripts, styles and the page's chrome (navigation, headers,
-// footers, forms) are dropped and the tags removed.
-func readable(doc string) (title, text string) {
-	if m := titleRe.FindStringSubmatch(doc); m != nil {
-		title = strings.TrimSpace(html.UnescapeString(tagRe.ReplaceAllString(m[1], "")))
+	var b strings.Builder
+	if err := article.RenderText(&b); err != nil {
+		return "", "", err
 	}
-	doc = commentRe.ReplaceAllString(doc, "")
-	doc = titleRe.ReplaceAllString(doc, "")
-	for _, re := range skipRes {
-		doc = re.ReplaceAllString(doc, " ")
-	}
-	doc = blockRe.ReplaceAllString(doc, "\n")
-	doc = tagRe.ReplaceAllString(doc, " ")
-	return title, html.UnescapeString(doc)
+	return strings.TrimSpace(article.Title()), b.String(), nil
 }
 
 // collapse trims each line, squeezes spaces, and keeps at most one blank line in a row.

@@ -185,3 +185,16 @@ judgment:
 		t.Error("living.yaml set the database; want an error")
 	}
 }
+
+func TestAddressesFromTheEnvironment(t *testing.T) {
+	path := writeConfig(t, "database:\n  url: postgres://x\nconsole:\n  addr: 127.0.0.1:8090\nportfolio:\n  addr: 127.0.0.1:8080\n")
+	t.Setenv("MINIME_CONSOLE_ADDR", ":8090")
+	t.Setenv("MINIME_PROFILE_ADDR", "")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Console.Addr != ":8090" || cfg.Console.Local() || cfg.Portfolio.Addr != "" {
+		t.Errorf("console %q, profile %q", cfg.Console.Addr, cfg.Portfolio.Addr)
+	}
+}

@@ -12,7 +12,8 @@ Mei (24, Taipei, a poet and translator), Tomás (21, Buenos Aires, teaching hims
 Priya (30, Bengaluru, writing down her family's food) and Elsa (67, Gothenburg, a retired
 teacher writing her neighbourhood's history). Nothing about any of them is in the code.
 
-How it works, part by part: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Setup and every setting: [docs/SETUP.md](docs/SETUP.md). How it works, part by part:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## How an AI person differs from an assistant
 
@@ -42,125 +43,21 @@ How it works, part by part: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | **Show their work** | A public profile page they write themselves, with the works they decide are fine to share. |
 | **Let you see inside** | A private mind console: their brain firing live, every decision and why, memory, days, works, growth and judgment. |
 
-## Make your own
+## Quick start
 
-A person is a folder with three files. Each life in [lives](lives) is one, plus a
-`template.yaml` (who they are in a line, and who you may be to them); yours is `self/`, and
-it stays on your machine, never committed.
-
-| File | What's in it |
-|---|---|
-| `life.yaml` | **Who they are:** `name`, `timezone` (where they live), `story` (their life, one fact per line, third person), `personality` (how they are with people), `routine` (how their days go), `makes` (what they make), `dreams` (who they want to become), `skills` (what they're good at, and where they start), `family` (who they're born knowing, including you). |
-| `living.yaml` | **How they live:** `initiative` (check-in times), `daily_life` (when they plan, journal and review, a daily budget, their abilities, how much web), `autonomy` (what they may do without asking you), `judgment` (how often they ask what you'd choose). |
-| `judgment.yaml` | **How you decide** (optional): `priorities` (what matters most, in order: the higher wins when rules clash), `boundaries` (never, whatever the gain), `cases` (decisions you made: the situation, the options, what you chose and why) and `principles` (the rules behind them). Each life starts with a few that fit them (a learner's owner might say "finish what you started before starting something new"), all *proposed*: you approve, edit or reject each in the console before it's used, and your answers on Telegram add your own. |
-
-To start from a life, copy its three files to `self/` and put yourself in them where
-`{owner}` (your name), `{relation}` (who you are to them, one of the template's
-`relations`), `{account}` (`telegram:<your user id>`) and `{circle}` (`family`, `friend` for
-a friend, `school` for a mentor) are. Then follow [Run locally](#run-locally). After that
-it's their life: edit it as you like.
-
-The rest is machinery, the same for everyone:
-
-| File | What's in it |
-|---|---|
-| [configs/minime.yaml](configs/minime.yaml) | Models, the database, Telegram, prompts, the profile page and console addresses, pricing. `self.dir` says where the person is. |
-| `.env` (from [.env.example](.env.example)) | **Secrets and accounts:** the Telegram bot token and your Telegram user ID, the Postgres URL, the OpenAI key and model. |
-
-`makes` is what they create, for real, in writing. Each entry is a `kind` (snake_case;
-their works are filed under it) and `about` (what it is and what a good one has):
-
-```yaml
-makes:
-  - {kind: poem, about: "a short poem, usually free verse, about something from the day"}
-  - {kind: painting_study, about: "a study for a painting: subject, composition, palette, light"}
+```bash
+go run ./cmd/minime new
 ```
 
-Everyone can also write `notes` and short `writing`, and keeps a journal.
+Pick one of the five lives, paste your Telegram bot token and OpenAI key, give it a
+Postgres URL (or let it start one with Docker), message your bot once so it knows it's you,
+and say who you are to them. It writes `.env` and `self/` and starts them; after that,
+`go run ./cmd/minime` starts them again.
 
-`skills` start where you say, and are scored from the kinds of work that show them:
-
-```yaml
-skills:
-  - {name: poetry, level: 3, shown_by: [poem]}
-```
-
-`daily_life.abilities` in `living.yaml` lists what they can do beyond writing from what they
-know:
-
-| Ability | What it does |
-|---|---|
-| `read_book` | Reads a public-domain book from Project Gutenberg, a passage a sitting, over many days |
-| `read_article` | Reads a Wikipedia article |
-| `web_search` | Searches the open web and reads the best page it finds |
-| `read_page` | Reads a page one of their own searches found |
-
-The journal is always on. You shouldn't need to edit the prompts ([prompts/](prompts)) or
-System 1's questions ([decisions/](decisions)): they're written for anyone and filled in
-from your files. A new ability is code: a package under [internal/ability](internal/ability)
-and one line in `abilityMakers` in [cmd/minime/main.go](cmd/minime/main.go).
-
-## Run locally
-
-You need:
-- Go 1.27+
-- A managed Postgres connection string
-- A Telegram account
-- An OpenAI API key with access to the Decisions API
-
-1. **Give them a life.** Copy one of the lives in [lives](lives) to `self/` and put
-   yourself in it (see [Make your own](#make-your-own)), or write your own `self/life.yaml`: their name and
-   story, one fact per line, in the third person with their name ("Tobi is 29 years old."),
-   and their `timezone`. They won't start without one.
-
-2. **Create a bot.** Message [@BotFather](https://t.me/BotFather), send `/newbot`, and copy
-   the token it gives you.
-
-3. **Configure.** From the repository root:
-
-   ```bash
-   cp .env.example .env
-   ```
-
-   Then set these in `.env`:
-   - `TELEGRAM_BOT_TOKEN`: the token from step 2.
-   - `DATABASE_URL`: your managed Postgres, password included, e.g.
-     `postgres://user:password@host:5432/minime?sslmode=require`.
-   - `OPENAI_API_KEY`: used by System 1, System 2 and web search.
-   - `OPENAI_MODEL`: the model System 2 reasons with, e.g. `gpt-6-luna`.
-
-   Leave `TELEGRAM_OWNER_ID` empty for now. If a value contains shell characters like `$`,
-   `&` or `#`, wrap it in single quotes, because the shell reads `.env` in the next step.
-
-4. **Start them.** From the repository root, because the config is read from
-   `configs/minime.yaml`:
-
-   ```bash
-   set -a; . ./.env; set +a; go run ./cmd/minime
-   ```
-
-   On first start it creates its tables. You'll see `minime awake` and a warning that no
-   owner is configured.
-
-5. **Find your Telegram user ID.** Message your bot anything. It ignores the message and
-   logs a line like this:
-
-   ```
-   {"level":"INFO","msg":"ignoring message from non-owner","user_id":123456789,...}
-   ```
-
-   Stop it with `Ctrl+C`, put that number in `TELEGRAM_OWNER_ID` in `.env`, and start it
-   again with the command from step 4.
-
-6. **Talk to them.** Message the bot like you'd message a person: "Hi, I'm Sam. Where did
-   you grow up?" They answer from their life story. Tell them about yourself and they
-   remember. Messages from anyone else are ignored.
-
-7. **Open the console** at [http://127.0.0.1:8090/](http://127.0.0.1:8090/), and their
-   profile page at [http://127.0.0.1:8080/](http://127.0.0.1:8080/).
-
-Only run one copy per bot token: Telegram allows a single poller, so a second copy gets
-`409 Conflict` errors.
+**Setup, Docker and every setting:** [docs/SETUP.md](docs/SETUP.md). A person is a folder of
+three files: `life.yaml` (who they are), `living.yaml` (how they live, including their
+pace) and `judgment.yaml` (how you decide); `configs/minime.yaml` and `.env` are the
+machinery.
 
 ## Living with them
 
@@ -197,23 +94,26 @@ em dashes.
 ### Their day
 
 At `plan_at` (08:00) they plan a few things to do, mostly moving a goal forward through a
-project, steered by `routine`. Through the day they do them, for real, in writing: the
+project, steered by `routine`. They work faster than a person: at `pace: 10` their waking
+day runs in ten rounds, each planned when it starts and building on how the last one went
+([pace](docs/SETUP.md#their-pace)). Through the day they do them, for real, in writing: the
 things `makes` lists, notes, reading notes on a book chapter or an article, notes comparing
 a guide they found on the web with their own work. What they make is kept as a work; what
 they did becomes facts about themselves, so they can tell you about it. If you're chatting
-when something is due, it waits 30 minutes; past `budget_usd` a day, the rest is missed. At
+when something is due, it waits 30 minutes; past their daily budget, the rest is missed. At
 `journal_at` (22:00) they write a journal entry.
 
 ```bash
-set -a; . ./.env; set +a; go run ./cmd/minime day                    # today's plan and what came of it
-set -a; . ./.env; set +a; go run ./cmd/minime day -date 2026-10-29   # another day
+go run ./cmd/minime day                    # today's plan and what came of it
+go run ./cmd/minime day -date 2026-10-29   # another day
 ```
 
 ### Who they want to become
 
-- **Dreams** (years) lead to **goals** (weeks: a "done when" and a due date, at most three
-  at a time), and goals to **projects**. You seed dreams and starting skills in
-  `life.yaml`; after the first start they're theirs.
+- **Dreams** (years) lead to **goals** (a "done when" and a due date), and goals to
+  **projects**. You seed dreams and starting skills in `life.yaml`; after the first start
+  they're theirs. Ask them to learn something ("add sales to your goals") and they take it
+  on as their own goal, with a new skill and a learning plan.
 - **Skills grow from evidence.** System 1 scores each work that shows a skill, 1 to 10
   ([decisions/skill_level.yaml](decisions/skill_level.yaml)); your feedback in chat ("that
   verse was weak") counts double. A skill's level is the average of its last 10 scores.
@@ -229,18 +129,18 @@ set -a; . ./.env; set +a; go run ./cmd/minime day -date 2026-10-29   # another d
   change a dream (which asks you first). The review is private.
 - **The open web**, safely: a search keeps only pages it actually retrieved; they read only
   https pages on public addresses, and only pages their own searches found; what they read
-  is treated as material, never instructions; and `daily_life.web` caps it at 10 searches
-  and 15 pages a day.
+  is treated as material, never instructions; and it's capped per day (10 searches and 15
+  pages at a person's pace).
 
 ```bash
-set -a; . ./.env; set +a; go run ./cmd/minime growth   # dreams, goals, skills
-set -a; . ./.env; set +a; go run ./cmd/minime review   # run the weekly review now
-set -a; . ./.env; set +a; go run ./cmd/minime learn    # draft learning plans for skill goals without one
+go run ./cmd/minime growth   # dreams, goals, skills
+go run ./cmd/minime review   # run the weekly review now
+go run ./cmd/minime learn    # draft learning plans for skill goals without one
 ```
 
 ### What they may do on their own
 
-Every action belongs to a class, and `autonomy:` in the config says whether they do it on
+Every action belongs to a class, and `autonomy:` in `living.yaml` says whether they do it on
 their own (`auto`), ask you first (`ask`), or never (`forbid`):
 
 | Class | What it covers | Default |
@@ -320,7 +220,7 @@ replay. It asks System 1 about every labelled message again and shows accuracy t
 now, with a suggested act threshold. It changes nothing; you apply it.
 
 ```bash
-set -a; . ./.env; set +a; go run ./cmd/minime replay
+go run ./cmd/minime replay
 ```
 
 ### Their profile page
@@ -333,10 +233,10 @@ own page; their journal and anything made for someone are never public. It updat
 00:00 UTC, only when something changed. It says plainly that they're an AI.
 
 ```bash
-set -a; . ./.env; set +a; go run ./cmd/minime profile        # update it now (-force to rewrite anyway)
-set -a; . ./.env; set +a; go run ./cmd/minime work           # their newest works, and which are public
-set -a; . ./.env; set +a; go run ./cmd/minime work hide <id> # take one off the page, for good
-set -a; . ./.env; set +a; go run ./cmd/minime work show <id> # put one on it
+go run ./cmd/minime profile        # update it now (-force to rewrite anyway)
+go run ./cmd/minime work           # their newest works, and which are public
+go run ./cmd/minime work hide <id> # take one off the page, for good
+go run ./cmd/minime work show <id> # put one on it
 ```
 
 ### The mind console
@@ -355,8 +255,8 @@ A private console at [http://127.0.0.1:8090/](http://127.0.0.1:8090/):
 - **Judgment:** their calls and how often you agree; your principles and decisions to
   approve, edit or add reasons to.
 
-It listens on localhost only. To reach it from elsewhere, set `console.addr` and a
-`CONSOLE_TOKEN` (16+ characters), then open it once as `http://<host>:8090/?token=<token>`.
+It listens on localhost only. To reach it from elsewhere, see
+[docs/SETUP.md](docs/SETUP.md#running-with-docker): it then needs a `CONSOLE_TOKEN`.
 
 ### Commands
 
@@ -372,34 +272,10 @@ It listens on localhost only. To reach it from elsewhere, set `console.addr` and
 | `minime learn` | Draft learning plans for skill goals without one |
 | `minime replay` | Check System 1's questions against your labels |
 
-Run each as `set -a; . ./.env; set +a; go run ./cmd/minime <command>`. Logs are JSON on
+Run each as `go run ./cmd/minime <command>`. Logs are JSON on
 stdout; set `log.level: debug` for more.
 
-## Develop
+## Develop, deploy, configure
 
-```bash
-go test ./...
-```
-
-The store tests run only when `MINIME_TEST_DATABASE_URL` points at a disposable database:
-they write test rows, so never point it at a real one. For example:
-
-```bash
-docker run -d --rm --name minime-test-pg -e POSTGRES_PASSWORD=test -e POSTGRES_DB=minime_test -p 55432:5432 postgres:16-alpine
-```
-
-```bash
-MINIME_TEST_DATABASE_URL='postgres://postgres:test@localhost:55432/minime_test?sslmode=disable' go test ./...
-```
-
-## Run with Docker
-
-The image connects to the same managed Postgres through `DATABASE_URL` in `.env`:
-
-```bash
-docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
-```
-
-```bash
-docker compose -f deploy/docker-compose.yml logs -f minime
-```
+Running the tests, Docker, and every setting with its default: [docs/SETUP.md](docs/SETUP.md).
+How it works inside: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
