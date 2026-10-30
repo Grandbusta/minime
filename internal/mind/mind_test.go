@@ -22,6 +22,9 @@ import (
 	"github.com/Grandbusta/minime/internal/perception"
 	"github.com/Grandbusta/minime/internal/providers/system1"
 	"github.com/Grandbusta/minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/render"
+	"github.com/Grandbusta/minime/internal/render/midi"
+	"github.com/Grandbusta/minime/internal/render/pdf"
 	"github.com/Grandbusta/minime/internal/search"
 	"github.com/Grandbusta/minime/internal/self"
 )
@@ -707,8 +710,9 @@ func newMind(r Replier, s1 system1.DecisionModel, s2 system2.Reasoner) (*Mind, *
 	s := &fakeStore{seen: map[string]bool{}, people: map[string]memory.Person{}, asked: map[ulid.ULID]time.Time{},
 		projects: map[ulid.ULID]memory.Project{}}
 	return New(Config{
-		Life:  testLife,
-		Store: s, Replier: r, System1: s1, System2: s2, Incoming: testSet, FollowUp: testFollowUp, LifeArea: testLifeArea,
+		Life:    testLife,
+		Formats: render.NewSet(pdf.Format{}, midi.Format{}),
+		Store:   s, Replier: r, System1: s1, System2: s2, Incoming: testSet, FollowUp: testFollowUp, LifeArea: testLifeArea,
 		FactRelevance: testFactRelevance, RecallCandidates: 30, PersonCircle: testPersonCircle, OpenThreads: testOpenThreads,
 		ReplyPrompt: Prompt{Ref: "reply@test", Text: "You are {name}, talking with {speaker}. {who_they_are}\n{life_story}"},
 		Working:     WorkingMemory{Turns: 8, Window: 2 * time.Hour},

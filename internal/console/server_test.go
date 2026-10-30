@@ -17,6 +17,9 @@ import (
 
 	"github.com/Grandbusta/minime/internal/decision"
 	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/render"
+	"github.com/Grandbusta/minime/internal/render/midi"
+	"github.com/Grandbusta/minime/internal/render/pdf"
 	"github.com/Grandbusta/minime/internal/store"
 )
 
@@ -141,7 +144,7 @@ func entry(action string, at time.Time) store.LogEntry {
 
 func newServer(t *testing.T, token string) (*httptest.Server, *fakeStore) {
 	st := &fakeStore{}
-	s := &Server{Store: st, Token: token, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	s := &Server{Store: st, Formats: render.NewSet(pdf.Format{}, midi.Format{}), Token: token, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Info: Info{Name: "Tobi", Zone: time.UTC, Started: time.Now(), System1: "fake/1", System2: "fake/2"}}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)

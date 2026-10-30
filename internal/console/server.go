@@ -88,11 +88,12 @@ type Info struct {
 }
 
 type Server struct {
-	Info  Info
-	Store Store
-	Token string // required when set; empty only on localhost
-	Log   *slog.Logger
-	Poll  time.Duration
+	Info    Info
+	Store   Store
+	Formats *render.Set // what a work can be downloaded as
+	Token   string      // required when set; empty only on localhost
+	Log     *slog.Logger
+	Poll    time.Duration
 }
 
 func (s *Server) Handler() http.Handler {
@@ -106,8 +107,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/day", s.day)
 	mux.HandleFunc("GET /api/works", s.works)
 	mux.HandleFunc("GET /api/works/{id}", s.work)
-	mux.HandleFunc("GET /api/works/{id}/pdf", s.workFile(render.PDF))
-	mux.HandleFunc("GET /api/works/{id}/midi", s.workFile(render.MIDI))
+	for _, f := range s.Formats.All() {
+		mux.HandleFunc("GET /api/works/{id}/"+f.Name(), s.workFile(f.Name()))
+	}
 	mux.HandleFunc("GET /api/conversation", s.conversation)
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/approvals", s.approvals)
@@ -371,7 +373,7 @@ func (s *Server) day(w http.ResponseWriter, r *http.Request) {
 	for i, in := range intentions {
 		iv[i] = s.intention(in)
 	}
-	s.json(w, map[string]any{"date": from.Format("2006-01-02"), "intentions": iv, "works": workViews(works, false),
+	s.json(w, map[string]any{"date": from.Format("2006-01-02"), "intentions": iv, "works": s.workViews(works, false),
 		"projects": projectViews(projects)})
 }
 
@@ -380,7 +382,7 @@ func (s *Server) works(w http.ResponseWriter, r *http.Request) {
 	if s.failed(w, err) {
 		return
 	}
-	s.json(w, workViews(works, false))
+	s.json(w, s.workViews(works, false))
 }
 
 func (s *Server) work(w http.ResponseWriter, r *http.Request) {
@@ -397,7 +399,7 @@ func (s *Server) work(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.json(w, workViews([]memory.Work{work}, true)[0])
+	s.json(w, s.workViews([]memory.Work{work}, true)[0])
 }
 
 func (s *Server) workFile(format string) http.HandlerFunc {
@@ -415,8 +417,8 @@ func (s *Server) workFile(format string) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		f, err := render.Work(format, work, s.Info.Name)
-		if errors.Is(err, render.ErrNoScore) {
+		f, err := s.Formats.File(format, work, s.Info.Name)
+		if errors.Is(err, render.ErrNoData) {
 			http.NotFound(w, r)
 			return
 		}
@@ -954,11 +956,19 @@ func entryViews(entries []store.LogEntry) []entryView {
 	return out
 }
 
-func workViews(ws []memory.Work, withText bool) []map[string]any {
+func formatNames(fs []render.Format) []string {
+	names := make([]string, len(fs))
+	for i, f := range fs {
+		names[i] = f.Name()
+	}
+	return names
+}
+
+func (s *Server) workViews(ws []memory.Work, withText bool) []map[string]any {
 	out := make([]map[string]any, len(ws))
 	for i, w := range ws {
 		v := map[string]any{"id": w.ID.String(), "kind": w.Kind, "title": w.Title, "created_at": w.CreatedAt,
-			"words": wordCount(w.Text), "public": w.Public, "public_by": w.PublicBy, "has_score": len(w.Score) > 0}
+			"words": wordCount(w.Text), "public": w.Public, "public_by": w.PublicBy, "files": formatNames(s.Formats.For(w))}
 		if !w.ProjectID.IsZero() {
 			v["project_id"] = w.ProjectID.String()
 		}

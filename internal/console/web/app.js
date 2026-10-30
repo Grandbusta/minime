@@ -893,7 +893,7 @@ function renderWorks() {
 async function openWork(id) {
   const w = await api("/api/works/" + id), col = kindColor(w.kind);
   openDrawer(w.kind.replace("_", " ").toUpperCase(), `<h2 style="margin:0 0 4px;font:600 24px var(--sans)">${esc(w.title)}</h2>
-    <div style="font:11px var(--mono);color:var(--muted);margin-bottom:18px"><span style="color:${col}">●</span> ${fmtTime(w.created_at, true)} · ${w.words} words · ${publicTag(w)} · <a href="/api/works/${esc(w.id)}/pdf" style="color:inherit">pdf ↓</a>${w.has_score ? ` · <a href="/api/works/${esc(w.id)}/midi" style="color:inherit">midi ↓</a>` : ""}</div>
+    <div style="font:11px var(--mono);color:var(--muted);margin-bottom:18px"><span style="color:${col}">●</span> ${fmtTime(w.created_at, true)} · ${w.words} words · ${publicTag(w)} · ${(w.files || []).map((f) => `<a href="/api/works/${esc(w.id)}/${esc(f)}" style="color:inherit">${esc(f)} ↓</a>`).join(" · ")}</div>
     <div class="reader">${esc(w.text)}</div>
     <div class="taste-form" data-work="${esc(w.id)}">
       <div class="card-h">YOUR TASTE <span class="muted">· what you like or don't in work like this</span></div>

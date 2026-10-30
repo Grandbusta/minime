@@ -2,6 +2,7 @@ package mind
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -15,50 +16,80 @@ type Filer interface {
 	SendFile(ctx context.Context, p perception.Percept, name string, data []byte, caption string) error
 }
 
-// canSendAs is true for a PDF of any work, and MIDI if it makes music.
+// canSendAs is false for a format made from data no craft of its life carries.
 func (m *Mind) canSendAs(as string) bool {
-	return m.Filer != nil && (as == render.PDF || as == render.MIDI && len(m.scored()) > 0)
+	f, ok := m.Formats.Get(as)
+	return ok && m.Filer != nil && (f.Needs() == "" || len(m.Life.Carrying(f.Needs())) > 0)
 }
 
 func (m *Mind) filesHelp(n names) string {
-	if !m.canSendAs(render.PDF) {
+	var kinds []string
+	for _, f := range m.Formats.All() {
+		if !m.canSendAs(f.Name()) {
+			continue
+		}
+		k := fmt.Sprintf(`%s ("%s")`, f.Describe(), f.Name())
+		if f.Needs() != "" {
+			k += ", for your " + strings.Join(m.Life.Carrying(f.Needs()), ", ")
+		}
+		kinds = append(kinds, k)
+	}
+	if len(kinds) == 0 {
 		return `- You can't send files: leave "as" and send empty.`
 	}
-	formats := `as a PDF document ("pdf")`
-	if m.canSendAs(render.MIDI) {
-		formats += fmt.Sprintf(`, and your music (%s) as a MIDI file ("midi") that plays in any music app`, strings.Join(m.scored(), ", "))
-	}
-	return fmt.Sprintf(`- You can send things %[2]s. If %[1]s wants one of those files of something you already made (the note `+
-		`lists your works with refs like [w1]), send it now with your reply: its ref in send.work and the format in send.as. Your `+
+	return fmt.Sprintf(`- You can send things as files: %[2]s. If %[1]s wants one of those files of something you already made (the note `+
+		`lists your works with refs like [w1]), send it now with your reply: its ref in send.work and the file's name in send.as. Your `+
 		`reply goes with it as its caption, so say what it is, briefly. Promise it instead only if they want it at a later time, `+
 		`with its ref in the promise's "work".`+
-		"\n"+`- If %[1]s wants something new made as one of those files, or a PDF to print, attach or pass on, promise it with `+
-		`the format in "as". Otherwise leave "as" and send empty.`, n.speaker, formats)
+		"\n"+`- If %[1]s wants something new made as one of those files, promise it with the file's name in "as". `+
+		`Otherwise leave "as" and send empty.`, n.speaker, strings.Join(kinds, "; "))
 }
 
 func (m *Mind) fileNote(i memory.Intention) string {
-	switch i.Args["as"] {
-	case render.PDF:
-		return "\n\nIt goes to them as a PDF document, so write it as one: the title is printed above it, so don't repeat it; " +
-			"use Markdown headings, and lists or tables where they help; no chat talk around it."
-	case render.MIDI:
-		return fmt.Sprintf("\n\nIt goes to them as a MIDI file, so make it a %s and write its score in full.",
-			strings.Join(m.scored(), " or "))
+	f, ok := m.Formats.Get(i.Args["as"])
+	if !ok {
+		return ""
 	}
-	return ""
+	var how []string
+	if h := f.WriteHelp(); h != "" {
+		how = append(how, h)
+	}
+	if f.Needs() != "" {
+		how = append(how, fmt.Sprintf("make it a %s and write its %s in full", strings.Join(m.Life.Carrying(f.Needs()), " or "), f.Needs()))
+	}
+	note := "\n\nIt goes to them as " + f.Describe()
+	if len(how) > 0 {
+		note += ", so " + strings.Join(how, "; and ")
+	}
+	return note + "."
 }
 
-// makeFile is w as a file; nil if it can't send it as one, or it is music
-// not scored yet (scoreOldMusic scores it, never a reply).
+// makeFile is w as a file; nil if it can't send it as one, or w doesn't
+// carry what that file is made from yet (scoreOldMusic fills scores in,
+// never a reply).
 func (m *Mind) makeFile(as string, w memory.Work) (*render.File, error) {
-	if !m.canSendAs(as) || as == render.MIDI && (!m.isMusic(w.Kind) || len(w.Score) == 0) {
+	if !m.canSendAs(as) {
 		return nil, nil
 	}
-	f, err := render.Work(as, w, m.Life.Name)
+	f, err := m.Formats.File(as, w, m.Life.Name)
+	if errors.Is(err, render.ErrNoData) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
 	return &f, nil
+}
+
+// dataFile is w as the first format, in the Set's order, made from data it
+// carries (like a beat's MIDI, so it can be heard); nil if there is none.
+func (m *Mind) dataFile(w memory.Work) (*render.File, error) {
+	for _, f := range m.Formats.For(w) {
+		if f.Needs() != "" {
+			return m.makeFile(f.Name(), w)
+		}
+	}
+	return nil, nil
 }
 
 func (m *Mind) send(ctx context.Context, p perception.Percept, text string, f *render.File) error {
@@ -87,7 +118,7 @@ func (m *Mind) sendWith(p perception.Percept, s system2.Send, refs map[string]me
 		log.Error("making the file failed; the reply goes alone", "err", err)
 		return nil
 	case f == nil:
-		log.Warn("asked to send a work as a file it can't be yet (not music, or not scored); the reply goes alone", "kind", w.Kind)
+		log.Warn("asked to send a work as a file it can't be yet; the reply goes alone", "kind", w.Kind)
 		return nil
 	}
 	log.Info("sending a work with the reply", "title", w.Title, "file", f.Name)

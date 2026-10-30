@@ -51,6 +51,9 @@ import (
 	s1openai "github.com/Grandbusta/minime/internal/providers/system1/openai"
 	"github.com/Grandbusta/minime/internal/providers/system2"
 	s2openai "github.com/Grandbusta/minime/internal/providers/system2/openai"
+	"github.com/Grandbusta/minime/internal/render"
+	"github.com/Grandbusta/minime/internal/render/midi"
+	"github.com/Grandbusta/minime/internal/render/pdf"
 	"github.com/Grandbusta/minime/internal/replay"
 	"github.com/Grandbusta/minime/internal/search"
 	"github.com/Grandbusta/minime/internal/self"
@@ -340,6 +343,9 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		return err
 	}
 
+	// What it can send a work as, and the console download it as.
+	formats := render.NewSet(pdf.Format{}, midi.Format{})
+
 	m := mind.New(mind.Config{
 		Life:     life,
 		Judgment: judgment,
@@ -355,6 +361,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		Autonomy:   policy,
 		Asker:      tg,
 		Filer:      tg,
+		Formats:    formats,
 		Calls:      calls(cfg),
 		Embedder:   embedder,
 		Log:        log.With("component", "mind"),
@@ -375,7 +382,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	if cfg.Console.Addr != "" {
 		sets := []string{incoming.Ref(), followUp.Ref(), lifeArea.Ref(), personCircle.Ref(), factRelevance.Ref(),
 			openThreads.Ref(), replyPrompt.Ref, day.PlanPrompt.Ref, day.ActivityPrompt.Ref}
-		con := &console.Server{Store: st, Token: cfg.Console.Token, Log: log.With("component", "console"), Info: console.Info{
+		con := &console.Server{Store: st, Formats: formats, Token: cfg.Console.Token, Log: log.With("component", "console"), Info: console.Info{
 			Name: life.Name, Zone: zone, Started: started, Sets: sets,
 			System1: cfg.Decision.Provider.Provider + "/" + orDefault(cfg.Decision.Model, s1openai.DefaultModel),
 			System2: fmt.Sprintf("%s/%s (effort %s)", cfg.Reasoning.Provider.Provider, cfg.Reasoning.Model, orDefault(cfg.Reasoning.Effort, "default")),

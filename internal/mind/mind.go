@@ -191,7 +191,9 @@ type Config struct {
 	Asker Asker
 	// Filer nil: everything it sends is a message.
 	Filer Filer
-	Calls Calls
+	// Formats is the files it can send things as; nil: none.
+	Formats *render.Set
+	Calls   Calls
 	// Embedder nil: it takes the owner's newest decision of the right type instead.
 	Embedder embed.Embedder
 	Log      *slog.Logger

@@ -13,7 +13,6 @@ import (
 	"github.com/Grandbusta/minime/internal/memory"
 	"github.com/Grandbusta/minime/internal/perception"
 	"github.com/Grandbusta/minime/internal/providers/system2"
-	"github.com/Grandbusta/minime/internal/render"
 )
 
 // Lessons: specific advice about doing a skill well ("check the error after
@@ -132,7 +131,7 @@ func (m *Mind) askForReview(ctx context.Context, w memory.Work, question string,
 		"asks a teacher. It goes right after your message, word for word:\n\n%s\n\nWrite only the one or two short sentences you "+
 		"send with it: what it is, and your question: %s", n.speaker, titled(w), orDefault(question, "what would you do differently?"))
 	s := speech{action: "ask_review", note: note, attachment: titled(w), trim: firstParagraph}
-	if f, err := m.makeFile(render.MIDI, w); err != nil { // music, so they can hear it, not only read it
+	if f, err := m.dataFile(w); err != nil { // music, so they can hear it, not only read it
 		m.Log.Warn("making its MIDI failed; asking with the words alone", "work", w.Title, "err", err)
 	} else {
 		s.file = f

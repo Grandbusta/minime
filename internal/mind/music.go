@@ -17,7 +17,7 @@ import (
 )
 
 func (m *Mind) scored() []string {
-	m.scoredOnce.Do(func() { m.scoredKinds = m.Life.Scored() })
+	m.scoredOnce.Do(func() { m.scoredKinds = m.Life.Carrying(memory.DataScore) })
 	return m.scoredKinds
 }
 

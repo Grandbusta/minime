@@ -145,6 +145,20 @@ type Work struct {
 	MadeFor      string
 }
 
+// DataScore is the data a piece of music carries: its notes, in Score.
+const DataScore = "score"
+
+// Carries is whether w carries data of kind; every work carries its words ("").
+func (w Work) Carries(kind string) bool {
+	switch kind {
+	case "":
+		return true
+	case DataScore:
+		return len(w.Score) > 0
+	}
+	return false
+}
+
 type Approval struct {
 	ID        ulid.ULID
 	Class     string // the action class, e.g. "reach_out"

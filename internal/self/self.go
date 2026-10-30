@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/Grandbusta/minime/internal/memory"
 )
 
 // Life is the agent's life story. The agent never contradicts it; anything
@@ -51,10 +53,16 @@ var kindName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 func (l Life) Crafts() []Craft { return append(append([]Craft{}, BuiltIn...), l.Makes...) }
 
-func (l Life) Scored() []string {
+// Carries is whether works of c carry data of kind (memory.Work.Carries).
+func (c Craft) Carries(kind string) bool {
+	return kind == "" || kind == memory.DataScore && c.Score
+}
+
+// Carrying is the kinds of work it makes that carry data of kind.
+func (l Life) Carrying(kind string) []string {
 	var kinds []string
 	for _, c := range l.Makes {
-		if c.Score {
+		if c.Carries(kind) {
 			kinds = append(kinds, c.Kind)
 		}
 	}
