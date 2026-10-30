@@ -13,7 +13,7 @@ read, keep a journal, and get better at what they care about. They talk with you
 Telegram, keep their promises, and ask before doing anything that reaches other people.
 Over time they learn how you decide. They always say plainly that they're an AI.
 
-## Meet Daniel
+## 👋 Meet Daniel
 
 Daniel is 18, lives in Lagos, and wants to be a music producer people there know by name.
 A day with him looks something like this (an illustration):
@@ -35,7 +35,7 @@ hook came from something you told him a week ago. The question at the end is how
 learns your judgment: he guesses what you'd pick, and when you pick differently, asks what
 tipped it.
 
-## How they differ from an assistant
+## 💡 How they differ from an assistant
 
 - **They have a life of their own.** A life story they never contradict, a family, a
   personality, a routine. Anything their story doesn't cover (a favourite food, an opinion)
@@ -47,7 +47,7 @@ tipped it.
   other people waits for your approval, and they track how often they'd have chosen what
   you chose.
 
-## Quick start
+## 🌱 Quick start
 
 You need Go, a Telegram bot token from [@BotFather](https://t.me/BotFather), an OpenAI API
 key, and Postgres (or Docker, and it starts one for you).
@@ -71,7 +71,7 @@ Every setting, Docker, and setting things up by hand: [docs/SETUP.md](docs/SETUP
 `living.yaml` ($0.05 a day at a person's pace), and a message to them costs a fraction of
 a cent. On the day the screenshots below were taken, Daniel made 100 decisions for $0.03.
 
-## Pick a life
+## 👥 Pick a life
 
 Five lives come ready in [lives](lives). Nothing about any of them is in the code.
 
@@ -87,7 +87,7 @@ Or write your own: a person is a folder of three files. `life.yaml` is who they 
 `living.yaml` is how they live, and `judgment.yaml` is how you decide
 ([making your own life](docs/SETUP.md)).
 
-## A day in their life
+## ☀️ A day in their life
 
 | When | What |
 |---|---|
@@ -97,7 +97,7 @@ Or write your own: a person is a folder of three files. `life.yaml` is who they 
 | **22:00** | A journal entry. |
 | **Sunday** | A weekly review: goals updated, learning plans moved on, and a look back at how their decisions turned out. |
 
-## You stay in charge
+## 🔐 You stay in charge
 
 - **Approvals.** Messaging someone first, promising something, publishing a work, changing
   a dream: by default they ask, and you get the exact thing on Telegram with **✅ Approve**
@@ -107,7 +107,7 @@ Or write your own: a person is a folder of three files. `life.yaml` is who they 
 - **Corrections.** "I live in Lekki, not Ikoyi", "forget what I told you about the bank",
   "that verse was weak": they take it in.
 
-## See inside
+## 🧠 See inside
 
 <p align="center">
   <img alt="The mind console" src="docs/images/console.png" width="49%">
@@ -119,7 +119,7 @@ Or write your own: a person is a folder of three files. `life.yaml` is who they 
 - **Their profile page** (public): a personal website they write themselves, with the works
   they decide are fine to share.
 
-## Learn more
+## 📖 Learn more
 
 - [Living with them](docs/GUIDE.md): talking, promises, their day, growth, judgment, the
   console and every command.
