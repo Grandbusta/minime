@@ -356,6 +356,14 @@ func (s *Store) IntentionsDue(ctx context.Context, from, to time.Time) ([]memory
 		WHERE due_at >= $1 AND due_at < $2 ORDER BY due_at, id`, from, to)
 }
 
+func (s *Store) Intention(ctx context.Context, id ulid.ULID) (memory.Intention, bool, error) {
+	is, err := s.queryIntentions(ctx, `SELECT `+intentionColumns+` FROM intentions WHERE id = $1`, id.String())
+	if err != nil || len(is) == 0 {
+		return memory.Intention{}, false, err
+	}
+	return is[0], true, nil
+}
+
 // OpenIntentions returns the pending ones, earliest due first.
 func (s *Store) OpenIntentions(ctx context.Context, subject, kind string) ([]memory.Intention, error) {
 	return s.queryIntentions(ctx, `SELECT `+intentionColumns+` FROM intentions
@@ -628,7 +636,30 @@ func (s *Store) LatestWork(ctx context.Context, kind string) (memory.Work, bool,
 	return ws[0], true, nil
 }
 
+// WorksFor returns, newest first, the works it may bring up with person:
+// those made for itself or for them, not its journal or reviews.
+func (s *Store) WorksFor(ctx context.Context, person string, limit int) ([]memory.Work, error) {
+	return s.queryWorksWith(ctx, true, `SELECT `+workColumns+`, embedding, embedded_with,
+		coalesce((SELECT i.subject FROM intentions i WHERE i.id = w.intention_id), '') FROM works w
+		WHERE w.kind NOT IN ('journal', 'review') AND (w.intention_id IS NULL OR EXISTS (
+			SELECT 1 FROM intentions i WHERE i.id = w.intention_id AND i.subject IN ($1, $2)))
+		ORDER BY w.created_at DESC, w.id DESC LIMIT $3`, memory.SubjectSelf, person, limit)
+}
+
+func (s *Store) SaveWorkEmbedding(ctx context.Context, id ulid.ULID, v []float32, model string) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE works SET embedding = $2, embedded_with = $3 WHERE id = $1`, id.String(), v, model); err != nil {
+		return fmt.Errorf("save work embedding: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) queryWorks(ctx context.Context, sql string, args ...any) ([]memory.Work, error) {
+	return s.queryWorksWith(ctx, false, sql, args...)
+}
+
+// queryWorksWith scans workColumns, then embedding, embedded_with and who
+// it was made for if embedded.
+func (s *Store) queryWorksWith(ctx context.Context, embedded bool, sql string, args ...any) ([]memory.Work, error) {
 	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query works: %w", err)
@@ -641,7 +672,11 @@ func (s *Store) queryWorks(ctx context.Context, sql string, args ...any) ([]memo
 			id                     string
 			intentionID, projectID *string
 		)
-		if err := rows.Scan(&id, &intentionID, &projectID, &w.Kind, &w.Title, &w.Text, &w.CreatedAt, &w.Public, &w.PublicBy); err != nil {
+		dest := []any{&id, &intentionID, &projectID, &w.Kind, &w.Title, &w.Text, &w.CreatedAt, &w.Public, &w.PublicBy}
+		if embedded {
+			dest = append(dest, &w.Embedding, &w.EmbeddedWith, &w.MadeFor)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
 		if w.ID, err = ulid.Parse(id); err != nil {

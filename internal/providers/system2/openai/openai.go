@@ -40,7 +40,7 @@ func New(apiKey, model, baseURL string, price pricing.Price, effort string) *Cli
 // replyWithFacts is the Structured Outputs schema used with CollectFacts:
 // strict mode guarantees the output matches it.
 var replyWithFacts = map[string]any{
-	"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises", "permissions", "corrections", "misread", "feedback", "lessons", "tastes", "goals"},
+	"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises", "permissions", "corrections", "misread", "feedback", "lessons", "tastes", "goals", "send"},
 	"properties": map[string]any{
 		"reply":        map[string]any{"type": "string"},
 		"who_they_are": map[string]any{"type": "string"},
@@ -67,6 +67,12 @@ var replyWithFacts = map[string]any{
 			},
 		}},
 		"misread": map[string]any{"type": "string"},
+		"send": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"work", "as"},
+			"properties": map[string]any{
+				"work": map[string]any{"type": "string", "description": "the ref of a work you made, e.g. w2, or empty"},
+				"as":   map[string]any{"type": "string", "description": "the file to send it as, e.g. pdf, or empty"},
+			},
+		},
 		"lessons": map[string]any{"type": "array", "items": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"skill", "lesson"},
 			"properties": map[string]any{
@@ -104,12 +110,14 @@ var replyWithFacts = map[string]any{
 			},
 		}},
 		"promises": map[string]any{"type": "array", "items": map[string]any{
-			"type": "object", "additionalProperties": false, "required": []string{"by", "what", "ability", "query"},
+			"type": "object", "additionalProperties": false, "required": []string{"by", "what", "ability", "query", "as", "work"},
 			"properties": map[string]any{
 				"by":      map[string]any{"type": "string", "description": "local time, YYYY-MM-DDTHH:MM"},
 				"what":    map[string]any{"type": "string"},
 				"ability": map[string]any{"type": "string", "description": "an ability it needs, or empty"},
 				"query":   map[string]any{"type": "string", "description": "what the ability is to look for, or empty"},
+				"as":      map[string]any{"type": "string", "description": "the file to send it as, e.g. pdf, or empty for a message"},
+				"work":    map[string]any{"type": "string", "description": "the ref of a work you already made that this sends, e.g. w2, or empty"},
 			},
 		}},
 		"remember": map[string]any{"type": "array", "items": map[string]any{
@@ -211,6 +219,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		perms      []system2.Permission
 		fixes      []system2.Correction
 		misread    string
+		send       system2.Send
 		feedback   []system2.Feedback
 		lessons    []system2.LessonLearned
 		tastes     []system2.Taste
@@ -236,6 +245,8 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 				What    string `json:"what"`
 				Ability string `json:"ability"`
 				Query   string `json:"query"`
+				As      string `json:"as"`
+				Work    string `json:"work"`
 			} `json:"promises"`
 			Permissions []struct {
 				Class   string `json:"class"`
@@ -246,7 +257,11 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 				Action string `json:"action"`
 				Text   string `json:"text"`
 			} `json:"corrections"`
-			Misread  string `json:"misread"`
+			Misread string `json:"misread"`
+			Send    struct {
+				Work string `json:"work"`
+				As   string `json:"as"`
+			} `json:"send"`
 			Feedback []struct {
 				Skill string `json:"skill"`
 				Level int    `json:"level"`
@@ -299,6 +314,9 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 			}
 		}
 		misread = strings.TrimSpace(out.Misread)
+		if work := strings.Trim(strings.TrimSpace(out.Send.Work), "[]"); work != "" {
+			send = system2.Send{Work: work, As: strings.ToLower(strings.TrimSpace(out.Send.As))}
+		}
 		for _, l := range out.Lessons {
 			if skill, text := strings.TrimSpace(l.Skill), strings.TrimSpace(l.Lesson); skill != "" && text != "" {
 				lessons = append(lessons, system2.LessonLearned{Skill: skill, Text: text})
@@ -323,7 +341,8 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		for _, p := range out.Promises {
 			if by, what := strings.TrimSpace(p.By), strings.TrimSpace(p.What); by != "" && what != "" {
 				promises = append(promises, system2.Promise{By: by, What: what, Ability: strings.TrimSpace(p.Ability),
-					Query: strings.TrimSpace(p.Query)})
+					Query: strings.TrimSpace(p.Query), As: strings.ToLower(strings.TrimSpace(p.As)),
+					Work: strings.Trim(strings.TrimSpace(p.Work), "[]")})
 			}
 		}
 	}
@@ -350,6 +369,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		Lessons:     lessons,
 		Tastes:      tastes,
 		Goals:       goals,
+		Send:        send,
 		Usage: system2.Usage{InputTokens: int(u.InputTokens), OutputTokens: int(u.OutputTokens),
 			ReasoningTokens: int(u.OutputTokensDetails.ReasoningTokens)},
 		CostUSD: c.price.Cost(pricing.Usage{

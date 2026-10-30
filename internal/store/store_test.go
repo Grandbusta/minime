@@ -568,6 +568,12 @@ func TestSourcesAndReadingProgress(t *testing.T) {
 	if err != nil || len(is) != 1 || is[0].Ability != "read_article" || is[0].Args["query"] != "polyrhythm" {
 		t.Errorf("intention = %+v, %v", is, err)
 	}
+	if got, ok, err := s.Intention(ctx, i.ID); err != nil || !ok || got.Text != "learn" || got.Args["query"] != "polyrhythm" {
+		t.Errorf("by id = %+v, %v, %v", got, ok, err)
+	}
+	if _, ok, err := s.Intention(ctx, ulid.Make()); err != nil || ok {
+		t.Errorf("unknown id: %v, %v", ok, err)
+	}
 	if err := s.FinishIntention(ctx, i.ID, memory.IntentionDone, "", now); err != nil {
 		t.Fatal(err)
 	}
@@ -1338,5 +1344,52 @@ func TestWhose(t *testing.T) {
 	err = s.Claim(ctx, name+"-someone-else", time.Now())
 	if !errors.Is(err, ErrNotTheirs) || !strings.Contains(err.Error(), name+"'s") {
 		t.Errorf("someone else's claim = %v", err)
+	}
+}
+
+func TestWorksFor(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	at := time.Now().UTC().Truncate(time.Microsecond).AddDate(6, 0, 0) // newest of all tests' works
+	sam, ada := "test:sam-"+ulid.Make().String(), "test:ada-"+ulid.Make().String()
+	work := func(title, kind, subject string, n int) memory.Work {
+		w := memory.Work{ID: ulid.Make(), Kind: kind, Title: title, Text: "x", CreatedAt: at.Add(time.Duration(n) * time.Second)}
+		if subject != "" {
+			i := memory.Intention{ID: ulid.Make(), Subject: subject, Kind: memory.IntentionTask, Text: title, DueAt: at,
+				Status: memory.IntentionDone, CreatedAt: at}
+			if err := s.SaveIntention(ctx, i); err != nil {
+				t.Fatal(err)
+			}
+			w.IntentionID = i.ID
+		}
+		if err := s.SaveWork(ctx, w); err != nil {
+			t.Fatal(err)
+		}
+		return w
+	}
+	beat := work("beat", "beat_idea", memory.SubjectSelf, 1)
+	work("for sam", "writing", sam, 2)
+	work("for ada", "writing", ada, 3)
+	work("diary", "journal", "", 4)
+	work("notes", "notes", "", 5)
+	if err := s.SaveWorkEmbedding(ctx, beat.ID, []float32{1, 0.5}, "openai/x"); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := s.WorksFor(ctx, sam, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var titles []string
+	for _, w := range ws {
+		titles = append(titles, w.Title)
+	}
+	if strings.Join(titles, ",") != "notes,for sam,beat" {
+		t.Fatalf("works = %s", strings.Join(titles, ","))
+	}
+	if ws[0].MadeFor != "" || ws[1].MadeFor != sam || ws[2].MadeFor != memory.SubjectSelf {
+		t.Errorf("made for: %q, %q, %q", ws[0].MadeFor, ws[1].MadeFor, ws[2].MadeFor)
+	}
+	if b := ws[2]; len(b.Embedding) != 2 || b.Embedding[1] != 0.5 || b.EmbeddedWith != "openai/x" || ws[0].Embedding != nil {
+		t.Errorf("embeddings: %+v / %+v", b, ws[0])
 	}
 }

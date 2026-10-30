@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"slices"
@@ -25,6 +26,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/render/pdf"
 	"github.com/Grandbusta/minime/internal/store"
 )
 
@@ -104,6 +106,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/day", s.day)
 	mux.HandleFunc("GET /api/works", s.works)
 	mux.HandleFunc("GET /api/works/{id}", s.work)
+	mux.HandleFunc("GET /api/works/{id}/pdf", s.workPDF)
 	mux.HandleFunc("GET /api/conversation", s.conversation)
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/approvals", s.approvals)
@@ -394,6 +397,29 @@ func (s *Server) work(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.json(w, workViews([]memory.Work{work}, true)[0])
+}
+
+func (s *Server) workPDF(w http.ResponseWriter, r *http.Request) {
+	id, err := ulid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	work, ok, err := s.Store.Work(r.Context(), id)
+	if s.failed(w, err) {
+		return
+	}
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := pdf.Render(pdf.Doc{Title: work.Title, Author: s.Info.Name, Text: work.Text, At: work.CreatedAt})
+	if s.failed(w, err) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": work.Title + ".pdf"}))
+	w.Write(data)
 }
 
 // conversation is the thread with a person, or with no person, everyone's

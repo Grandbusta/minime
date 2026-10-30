@@ -466,6 +466,52 @@ func (s *fakeStore) OpenIntentions(_ context.Context, subject, kind string) ([]m
 	return out, nil
 }
 
+func (s *fakeStore) Work(_ context.Context, id ulid.ULID) (memory.Work, bool, error) {
+	for _, w := range s.works {
+		if w.ID == id {
+			return w, true, nil
+		}
+	}
+	return memory.Work{}, false, nil
+}
+
+func (s *fakeStore) WorksFor(_ context.Context, person string, limit int) ([]memory.Work, error) {
+	var out []memory.Work
+	for n := len(s.works) - 1; n >= 0 && len(out) < limit; n-- {
+		w := s.works[n]
+		if w.Kind == "journal" || w.Kind == "review" {
+			continue
+		}
+		if i, ok, _ := s.Intention(context.Background(), w.IntentionID); ok {
+			if i.Subject != memory.SubjectSelf && i.Subject != person {
+				continue
+			}
+			w.MadeFor = i.Subject
+		}
+		out = append(out, w)
+	}
+	slices.SortStableFunc(out, func(a, b memory.Work) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	return out, nil
+}
+
+func (s *fakeStore) SaveWorkEmbedding(_ context.Context, id ulid.ULID, v []float32, model string) error {
+	for n := range s.works {
+		if s.works[n].ID == id {
+			s.works[n].Embedding, s.works[n].EmbeddedWith = v, model
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) Intention(_ context.Context, id ulid.ULID) (memory.Intention, bool, error) {
+	for _, i := range s.intentions {
+		if i.ID == id {
+			return i, true, nil
+		}
+	}
+	return memory.Intention{}, false, nil
+}
+
 func (s *fakeStore) IntentionWork(_ context.Context, id ulid.ULID) (memory.Work, bool, error) {
 	for n := len(s.works) - 1; n >= 0; n-- {
 		if s.works[n].IntentionID == id {
@@ -755,6 +801,7 @@ type fakeSystem2 struct {
 	feedback   []system2.Feedback
 	tastes     []system2.Taste
 	goals      []system2.GoalTaken
+	send       system2.Send
 	formats    map[string]string // reply text by Format.Name, for structured requests
 	requests   []system2.Request
 }
@@ -767,7 +814,7 @@ func (f *fakeSystem2) Reason(_ context.Context, req system2.Request) (system2.Re
 	if req.Format != nil {
 		return system2.Response{Provider: "fake2/1", Text: f.formats[req.Format.Name], CostUSD: 0.002}, nil
 	}
-	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, Promises: f.promises, Permissions: f.perms, Lessons: f.lessons, Feedback: f.feedback, Tastes: f.tastes, Goals: f.goals, CostUSD: 0.001}, nil
+	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre, Reminders: f.reminders, Promises: f.promises, Permissions: f.perms, Lessons: f.lessons, Feedback: f.feedback, Tastes: f.tastes, Goals: f.goals, Send: f.send, CostUSD: 0.001}, nil
 }
 
 var testSet = questions.Set{

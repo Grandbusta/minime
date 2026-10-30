@@ -131,7 +131,7 @@ func (m *Mind) keepPromise(ctx context.Context, i memory.Intention, now time.Tim
 		return
 	}
 	person := m.person(ctx, i.Subject)
-	w, made, err := m.Store.IntentionWork(ctx, i.ID)
+	w, made, err := m.promisedWork(ctx, i)
 	if err != nil {
 		log.Error("loading the work failed", "err", err)
 		return
@@ -144,11 +144,21 @@ func (m *Mind) keepPromise(ctx context.Context, i memory.Intention, now time.Tim
 	promised := i.CreatedAt.In(m.Zone).Format("Monday 2 January at 15:04")
 	p := outgoing(conv, person, perception.KindDelivery, now)
 	n := m.namesFor(p)
-	note := fmt.Sprintf("You are messaging %s first: on %s you promised to make this for them: %s. You made it; this is "+
-		"it, and it goes right after your message, word for word:\n\n%s\n\nWrite only the one or two short sentences "+
+	s := speech{action: "deliver", attachment: titled(w), trim: firstParagraph, ref: i.ID}
+	goes := "it goes right after your message, word for word"
+	f, err := m.fileFor(i, w)
+	if err != nil {
+		log.Error("making the file failed; it goes as a message", "err", err)
+	}
+	if f != nil {
+		s.attachment, s.file = "", f
+		goes = "it goes with your message as a PDF, " + f.name
+	}
+	s.note = fmt.Sprintf("You are messaging %s first: on %s you promised to make this for them: %s. You made it; this is "+
+		"it, and %s:\n\n%s\n\nWrite only the one or two short sentences "+
 		"you send with it, the way a friend would (\"here's that verse I promised\"). Don't write anything of your own "+
-		"in its place, and don't repeat it.", n.speaker, promised, i.Text, titled(w))
-	got := m.speakFirst(ctx, p, person, nil, speech{action: "deliver", note: note, attachment: titled(w), trim: firstParagraph, ref: i.ID})
+		"in its place, and don't repeat it.", n.speaker, promised, i.Text, goes, titled(w))
+	got := m.speakFirst(ctx, p, person, nil, s)
 	m.settleSpoken(ctx, i, got, w.Title, now) // not sent: the work is kept, so the next tick sends it
 }
 
@@ -165,7 +175,7 @@ func (m *Mind) preparePromises(ctx context.Context, now time.Time) {
 		if now.Before(i.CreatedAt.Add(promiseSettle)) && now.Before(i.DueAt.Add(-promiseMakeAhead)) {
 			continue
 		}
-		if _, made, err := m.Store.IntentionWork(ctx, i.ID); err != nil || made {
+		if _, made, err := m.promisedWork(ctx, i); err != nil || made {
 			continue
 		}
 		conv, ok := m.conversationWith(ctx, i.Subject)
@@ -176,12 +186,29 @@ func (m *Mind) preparePromises(ctx context.Context, now time.Time) {
 	}
 }
 
+// promisedWork is what promise i sends: the work it already made that i
+// names, or else what it made for i, if anything yet.
+func (m *Mind) promisedWork(ctx context.Context, i memory.Intention) (memory.Work, bool, error) {
+	if id, err := ulid.Parse(i.Args["work"]); err == nil {
+		if w, ok, err := m.Store.Work(ctx, id); err != nil || ok {
+			return w, ok, err
+		}
+	}
+	return m.Store.IntentionWork(ctx, i.ID)
+}
+
 func (m *Mind) makePromise(ctx context.Context, i memory.Intention, conv memory.Conversation, person memory.Person,
 	now time.Time) (memory.Work, bool) {
 	who := orDefault(person.Name, fallbackName)
 	what := fmt.Sprintf("You promised %s, on %s, to make this for them by %s: %s. Make it now, in full; you'll send it to them then.",
 		who, i.CreatedAt.In(m.Zone).Format("Monday 2 January at 15:04"), i.DueAt.In(m.Zone).Format("Monday 15:04"), i.Text)
-	return m.makeWork(ctx, i, "task", what+m.promiseTalk(ctx, conv, i, who), now)
+	talk := m.promiseTalk(ctx, conv, i, who)
+	works, _, _ := m.worksNote(ctx, i.Subject, i.Text+talk)
+	if works != "" {
+		works += "\n\nIf what you promised is something you already made (above), send that: keep it as it is, only " +
+			"laid out for how it goes, and don't write a new one. Either way, add nothing about yourself or your work that isn't true."
+	}
+	return m.makeWork(ctx, i, "task", what+fileNote(i)+works+talk, now)
 }
 
 func (m *Mind) promiseTalk(ctx context.Context, conv memory.Conversation, i memory.Intention, who string) string {
@@ -311,6 +338,7 @@ type speech struct {
 	action     string
 	note       string
 	attachment string              // sent after what System 2 wrote, e.g. what it promised; "" if none
+	file       *file               // sent with what System 2 wrote, as its caption; nil if none
 	trim       func(string) string // shortens what System 2 wrote; nil: kept as is
 	ref        ulid.ULID
 	approved   bool // the owner already approved it: a follow-up to an approval
@@ -375,6 +403,10 @@ func (m *Mind) speakFirst(ctx context.Context, p perception.Percept, person memo
 		if s.attachment != "" {
 			d.Reply += "\n\n" + s.attachment
 		}
+		text := d.Reply
+		if s.file != nil {
+			d.Reply += attachedLine(s.file.name)
+		}
 		if verdict == action.Ask {
 			d.Gate = decision.GateAsked
 			what := fmt.Sprintf("message %s first (%s)", n.speaker, strings.ReplaceAll(p.Kind, "_", " "))
@@ -389,7 +421,7 @@ func (m *Mind) speakFirst(ctx context.Context, p perception.Percept, person memo
 			break
 		}
 		d.Outcome = &decision.Outcome{Status: decision.OutcomeOK, At: time.Now().UTC()}
-		if err := m.Replier.Reply(ctx, p, d.Reply); err != nil {
+		if err := m.send(ctx, p, text, s.file); err != nil {
 			log.Warn("sending failed", "err", err)
 			d.Outcome = &decision.Outcome{Status: decision.OutcomeFailed, Detail: err.Error(), At: time.Now().UTC()}
 		} else {

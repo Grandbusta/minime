@@ -50,6 +50,14 @@ type Promise struct {
 	What    string
 	Ability string // the ability it needs, e.g. "read_article"; "" if it only writes
 	Query   string
+	As      string // the file it sends it as, e.g. "pdf"; "" for a message
+	Work    string // the ref in the note of a work it already made that this sends, e.g. "w2"; "" to make one
+}
+
+// Send is a work it already made, sent with the reply as a file.
+type Send struct {
+	Work string // its ref in the note, e.g. "w2"; "" for none
+	As   string // e.g. "pdf"
 }
 
 type Permission struct {
@@ -123,6 +131,7 @@ type Response struct {
 	Lessons  []LessonLearned
 	Tastes   []Taste
 	Goals    []GoalTaken
+	Send     Send
 	Usage    Usage
 	CostUSD  float64 // 0 when no price is configured
 }

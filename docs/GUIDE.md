@@ -29,6 +29,13 @@ em dashes.
   "make it funny"), and send it on time with a few words of their own. They promise only
   what they can do in writing, at most three open promises per person, and nothing to
   strangers. A promise not kept within 24 hours is missed.
+- **PDFs:** ask for something they already made as a PDF ("send me that outreach as a
+  PDF") and it comes right away, with their reply as its caption. Something new ("a plan
+  I can print, tonight") is promised like anything else and sent as a PDF at its time.
+  Headings, lists and tables are laid out on A4. Every work in the console also has a
+  **pdf ↓** link.
+- **Their own work:** they see what they've made lately, and the piece you mean in full,
+  so they talk about it as it is and never make up its details.
 - **Check-ins:** at the `check_ins` times (11:00 and 18:00), they may ask about something
   you mentioned in the last 30 days that's still going on, like an interview. At most once
   a day, only after the conversation has been quiet for 4 hours, never about the same thing

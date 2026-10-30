@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -242,7 +243,15 @@ func (m *Mind) sendApproved(ctx context.Context, a memory.Approval, now time.Tim
 	}
 	d := decision.Decision{ID: ulid.Make(), At: now.UTC(), PerceptID: p.ID, Tier: decision.TierReflex,
 		SetID: "gate:" + a.Class, Action: "send", Reply: a.Text, Gate: decision.GateAsked}
-	err := m.Replier.Reply(ctx, p, a.Text)
+	f, err := m.approvedFile(ctx, a)
+	if err != nil {
+		return err
+	}
+	text := a.Text
+	if f != nil {
+		text = strings.TrimSuffix(text, attachedLine(f.name))
+	}
+	err = m.send(ctx, p, text, f)
 	d.Outcome = &decision.Outcome{Status: decision.OutcomeOK, Detail: "approved by the owner", At: time.Now().UTC()}
 	if err != nil {
 		d.Outcome = &decision.Outcome{Status: decision.OutcomeFailed, Detail: err.Error(), At: time.Now().UTC()}
@@ -252,6 +261,22 @@ func (m *Mind) sendApproved(ctx context.Context, a memory.Approval, now time.Tim
 		m.Log.Error("save decision", "err", serr)
 	}
 	return err
+}
+
+// approvedFile is the file an approved delivery goes with; nil if none.
+func (m *Mind) approvedFile(ctx context.Context, a memory.Approval) (*file, error) {
+	if a.Kind != perception.KindDelivery || a.Ref.IsZero() {
+		return nil, nil
+	}
+	i, ok, err := m.Store.Intention(ctx, a.Ref)
+	if err != nil || !ok || !m.canSendAs(i.Args["as"]) {
+		return nil, err
+	}
+	w, ok, err := m.Store.IntentionWork(ctx, i.ID)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return m.fileFor(i, w)
 }
 
 func (m *Mind) finishRef(ctx context.Context, id ulid.ULID, status, result string, now time.Time) {

@@ -147,7 +147,7 @@ When the owner sends "I have an interview on Friday, wish me luck", this is what
    |---|---|
    | Instructions | [prompts/reply.md](../prompts/reply.md) with the person's name, story, personality, who the speaker is to them and the people they know by circle, what they make, their abilities, and (for the owner) how permissions, feedback and corrections work |
    | History | the working memory, as turns |
-   | Note | the time; what System 1 read and how sure it was; recalled facts, each with a ref like `[f3]`; open promises to the speaker; what the autonomy gate says about promising and permissions |
+   | Note | the time; what System 1 read and how sure it was; recalled facts, each with a ref like `[f3]`; what it has made lately, and in full the works the talk seems to mean (found by embedding); open promises to the speaker; what the autonomy gate says about promising and permissions |
    | Message | the text |
 
    It returns the **reply** and, alongside it: facts to **remember** (about the speaker,

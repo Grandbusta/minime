@@ -137,6 +137,11 @@ type Work struct {
 	CreatedAt   time.Time
 	Public      *bool  // whether it may go on its public page; nil until decided
 	PublicBy    string // who decided: PublicBySystem1 or PublicByOwner; "" until decided
+	// Loaded only by WorksFor. Embedding is nil until embedded; MadeFor is
+	// whom it was made for (SubjectSelf for itself), "" if not for an intention.
+	Embedding    []float32
+	EmbeddedWith string
+	MadeFor      string
 }
 
 type Approval struct {

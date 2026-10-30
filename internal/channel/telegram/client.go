@@ -2,6 +2,7 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,7 +19,10 @@ import (
 	"github.com/Grandbusta/minime/internal/perception"
 )
 
-const maxMessageRunes = 4096
+const (
+	maxMessageRunes = 4096
+	maxCaptionRunes = 1024
+)
 
 type Channel struct {
 	bot    *bot.Bot
@@ -88,6 +92,24 @@ func (c *Channel) Reply(ctx context.Context, p perception.Percept, text string) 
 		}
 	}
 	return nil
+}
+
+// SendFile sends a file with caption; a caption too long for one goes first
+// as a message of its own.
+func (c *Channel) SendFile(ctx context.Context, p perception.Percept, name string, data []byte, caption string) error {
+	chat, err := chatID(p)
+	if err != nil {
+		return fmt.Errorf("telegram file: %w", err)
+	}
+	if utf8.RuneCountInString(caption) > maxCaptionRunes {
+		if err := c.Reply(ctx, p, caption); err != nil {
+			return err
+		}
+		caption = ""
+	}
+	_, err = c.bot.SendDocument(ctx, &bot.SendDocumentParams{ChatID: chat, Caption: caption,
+		Document: &models.InputFileUpload{Filename: name, Data: bytes.NewReader(data)}})
+	return err
 }
 
 // Ask sends text with Approve and Deny buttons for approval id, and returns

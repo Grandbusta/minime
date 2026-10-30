@@ -112,6 +112,10 @@ type Store interface {
 	CallsToLookBack(ctx context.Context, types []string, from, to time.Time, limit int) ([]memory.Call, error)
 	SetOutcome(ctx context.Context, id ulid.ULID, outcome, verdict, note, by string, at time.Time) (bool, error)
 	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
+	Work(ctx context.Context, id ulid.ULID) (memory.Work, bool, error)
+	Intention(ctx context.Context, id ulid.ULID) (memory.Intention, bool, error)
+	WorksFor(ctx context.Context, person string, limit int) ([]memory.Work, error)
+	SaveWorkEmbedding(ctx context.Context, id ulid.ULID, v []float32, model string) error
 	SaveProject(ctx context.Context, p memory.Project) error
 	Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error)
 	ActiveProjects(ctx context.Context, limit int) ([]memory.Project, error)
@@ -182,6 +186,8 @@ type Config struct {
 	Autonomy action.Policy
 	// Asker nil: requests to the owner wait unsent and expire.
 	Asker Asker
+	// Filer nil: everything it sends is a message.
+	Filer Filer
 	Calls Calls
 	// Embedder nil: it takes the owner's newest decision of the right type instead.
 	Embedder embed.Embedder
@@ -301,8 +307,9 @@ func (m *Mind) handle(ctx context.Context, p perception.Percept) {
 	root := newDecision(p, nil, start)
 	chain := []*decision.Decision{root} // root first; a System 2 hand-off is its child
 	var (
-		reply string
-		after []*decision.Decision // what the reply's answer changed: saved after it
+		reply    string
+		attached *file
+		after    []*decision.Decision // what the reply's answer changed: saved after it
 	)
 	if p.Text == "" {
 		root.Tier, root.SetID, root.Action = decision.TierReflex, nonTextSetID, "reply"
@@ -328,7 +335,7 @@ func (m *Mind) handle(ctx context.Context, p perception.Percept) {
 				chain = append(chain, recallDecision)
 			}
 			child := newDecision(p, &root.ID, time.Now())
-			reply, after = m.reason(ctx, p, person, root, child, recent, facts, why)
+			reply, attached, after = m.reason(ctx, p, person, root, child, recent, facts, why)
 			chain = append(chain, child)
 		}
 	}
@@ -336,8 +343,11 @@ func (m *Mind) handle(ctx context.Context, p perception.Percept) {
 	// The last decision in the chain is the one that acted, so it owns the outcome.
 	actor := chain[len(chain)-1]
 	actor.Reply = reply
+	if attached != nil {
+		actor.Reply += attachedLine(attached.name)
+	}
 	actor.Outcome = &decision.Outcome{Status: decision.OutcomeOK}
-	if err := m.Replier.Reply(ctx, p, reply); err != nil {
+	if err := m.send(ctx, p, reply, attached); err != nil {
 		log.Warn("reply failed", "err", err)
 		actor.Outcome = &decision.Outcome{Status: decision.OutcomeFailed, Detail: err.Error()}
 	}
@@ -602,24 +612,33 @@ func (m *Mind) checkFacts(ctx context.Context, p perception.Percept, d *decision
 }
 
 func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.Person, parent, d *decision.Decision,
-	recent []memory.Exchange, facts []memory.Fact, why string) (string, []*decision.Decision) {
+	recent []memory.Exchange, facts []memory.Fact, why string) (string, *file, []*decision.Decision) {
 	d.Tier, d.SetID, d.Action = decision.TierSystem2, m.ReplyPrompt.Ref, "reply"
 	n := m.namesFor(p)
 	note, refs := m.system2Note(parent, why, facts, n)
+	var (
+		works     string
+		workRefs  map[string]memory.Work
+		embedCost float64
+	)
+	if canPromise(p, person) {
+		works, workRefs, embedCost = m.worksNote(ctx, p.Speaker, talkAbout(recent, p.Text))
+	}
 
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.instructions(ctx, person, n),
 		History:      turns(recent),
-		Note:         m.now(p.At) + "\n\n" + note + m.promisesNote(ctx, p, person, n) + m.permissionsNote(p) + nameNote(recent, n.speaker),
+		Note: m.now(p.At) + "\n\n" + note + works + m.promisesNote(ctx, p, person, n) + m.permissionsNote(p) +
+			nameNote(recent, n.speaker),
 		Message:      p.Text,
 		CollectFacts: true,
 	})
 	if err != nil {
 		m.Log.Error("system 2 failed", "percept", p.ID.String(), "err", err)
 		d.Action = "error"
-		return "Sorry, I couldn't think that through just now.", nil
+		return "Sorry, I couldn't think that through just now.", nil, nil
 	}
-	d.Provider, d.CostUSD = resp.Provider, resp.CostUSD
+	d.Provider, d.CostUSD = resp.Provider, resp.CostUSD+embedCost
 	m.Log.Debug("system 2 usage", "input_tokens", resp.Usage.InputTokens,
 		"output_tokens", resp.Usage.OutputTokens, "reasoning_tokens", resp.Usage.ReasoningTokens)
 
@@ -639,7 +658,7 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	}
 	d.CostUSD += m.learnRelation(ctx, p, person, resp.WhoTheyAre)
 	m.saveReminders(ctx, p, resp.Reminders)
-	m.savePromises(ctx, p, person, resp.Promises)
+	m.savePromises(ctx, p, person, resp.Promises, workRefs)
 	var more []*decision.Decision
 	more = append(more, m.correctFacts(ctx, p, d, refs, resp.Corrections, n)...)
 	more = append(more, m.changePermissions(ctx, p, d, resp.Permissions)...)
@@ -648,7 +667,7 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	more = append(more, m.takeLessons(ctx, p, d, resp.Lessons)...)
 	more = append(more, m.takeTastes(ctx, p, d, resp.Tastes)...)
 	more = append(more, m.takeGoals(ctx, p, d, resp.Goals)...)
-	return resp.Text, more
+	return resp.Text, m.sendWith(p, resp.Send, workRefs), more
 }
 
 // canPromise is false for strangers, whose requests could be anything.
@@ -684,8 +703,10 @@ func (m *Mind) promisesNote(ctx context.Context, p perception.Percept, person me
 
 // savePromises drops a promise in the past, with a bad time, past
 // maxOpenPromises or to a stranger; an ability it doesn't have is left out.
+// One to send a work it already made (by its ref in works) keeps the work's id.
 // When the gate says ask, the task waits for the owner's approval.
-func (m *Mind) savePromises(ctx context.Context, p perception.Percept, person memory.Person, ps []system2.Promise) {
+func (m *Mind) savePromises(ctx context.Context, p perception.Percept, person memory.Person, ps []system2.Promise,
+	works map[string]memory.Work) {
 	if len(ps) == 0 {
 		return
 	}
@@ -719,6 +740,18 @@ func (m *Mind) savePromises(ctx context.Context, p perception.Percept, person me
 				i.Args = map[string]string{"query": pr.Query}
 			}
 		}
+		setArg := func(k, v string) {
+			if i.Args == nil {
+				i.Args = map[string]string{}
+			}
+			i.Args[k] = v
+		}
+		if m.canSendAs(pr.As) {
+			setArg("as", pr.As)
+		}
+		if w, ok := works[pr.Work]; ok { // sent as it is, not made again
+			setArg("work", w.ID.String())
+		}
 		if verdict == action.Ask {
 			i.Status = memory.IntentionAwaiting
 		}
@@ -734,7 +767,7 @@ func (m *Mind) savePromises(ctx context.Context, p perception.Percept, person me
 			}
 			continue
 		}
-		log.Info("promised", "due", due.Format(time.RFC3339), "what", pr.What, "ability", i.Ability)
+		log.Info("promised", "due", due.Format(time.RFC3339), "what", pr.What, "ability", i.Ability, "as", i.Args["as"])
 	}
 }
 
@@ -767,9 +800,19 @@ func (m *Mind) instructions(ctx context.Context, person memory.Person, n names) 
 	}
 	return strings.NewReplacer("{name}", n.agent, "{speaker}", n.speaker, "{life_story}", story,
 		"{personality}", personality, "{who_they_are}", m.whoTheyAre(ctx, person, n),
-		"{makes}", m.makesList(), "{abilities}", m.abilitiesList(), "{intents}", strings.Join(m.intents(), ", "),
+		"{makes}", m.makesList(), "{abilities}", m.abilitiesList(), "{files}", m.filesHelp(n), "{intents}", strings.Join(m.intents(), ", "),
 		"{correct_self}", m.correctSelf(person), "{permissions_help}", m.permissionsHelp(person, n),
 		"{feedback_help}", m.feedbackHelp(ctx, person)+m.goalsHelp(ctx, person)).Replace(m.ReplyPrompt.Text)
+}
+
+// talkAbout is what a reply to message is about: it and the exchanges just
+// before, so "go ahead" carries what it agrees to.
+func talkAbout(recent []memory.Exchange, message string) string {
+	var parts []string
+	for _, e := range recent[max(0, len(recent)-talkTurns):] {
+		parts = append(parts, e.Message, e.Reply)
+	}
+	return strings.TrimSpace(strings.Join(append(parts, message), "\n"))
 }
 
 func turns(recent []memory.Exchange) []system2.Turn {

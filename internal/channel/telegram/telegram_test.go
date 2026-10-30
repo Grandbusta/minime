@@ -259,3 +259,23 @@ func TestCallButtons(t *testing.T) {
 		}
 	}
 }
+
+func TestSendFile(t *testing.T) {
+	api := &fakeAPI{}
+	c := newChannel(t, api.serve(t).URL, nil)
+	p := perception.Percept{Source: Source, Payload: json.RawMessage(`{"chat_id":7,"message_id":1,"user_id":42}`)}
+	if err := c.SendFile(context.Background(), p, "plan.pdf", []byte("%PDF-1.4 x"), "Here's the plan."); err != nil {
+		t.Fatal(err)
+	}
+	docs := api.sent("sendDocument")
+	if len(docs) != 1 || docs[0]["chat_id"] != "7" || docs[0]["caption"] != "Here's the plan." {
+		t.Errorf("sent %v", docs)
+	}
+	long := strings.Repeat("word ", 300)
+	if err := c.SendFile(context.Background(), p, "plan.pdf", []byte("%PDF-1.4 x"), long); err != nil {
+		t.Fatal(err)
+	}
+	if msgs, docs := api.sent("sendMessage"), api.sent("sendDocument"); len(msgs) != 1 || len(docs) != 2 || docs[1]["caption"] != "" {
+		t.Errorf("long caption: %d messages, docs %v", len(msgs), docs)
+	}
+}

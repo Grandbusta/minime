@@ -354,6 +354,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		StageCheck: stageCheck,
 		Autonomy:   policy,
 		Asker:      tg,
+		Filer:      tg,
 		Calls:      calls(cfg),
 		Embedder:   embedder,
 		Log:        log.With("component", "mind"),
