@@ -17,25 +17,18 @@ import (
 	"github.com/Grandbusta/minime/internal/providers/system2"
 )
 
-// Growth: who the agent wants to become (its dreams, and the goals that
-// serve them) and how good it is getting (its skills). Its creator seeds them
-// in its life story; after that they are its own. A skill's level comes from
-// evidence, never from what it claims: System 1 scores each work that shows
-// the skill (skill_level), and its owner's feedback counts double. Dreams and
-// goals change in its weekly review (review.go).
+// Growth: a skill's level comes from evidence, never from what the agent
+// claims: System 1 scores each work that shows the skill, and its owner's
+// feedback counts double.
 
 const (
-	// evidenceWindow is how many recent scores a skill's level averages.
 	evidenceWindow = 10
-	// ownerWeight is how much more the owner's feedback counts than a score.
-	ownerWeight = 2
-	// scoreChars is how much of a work System 1 reads to score it.
-	scoreChars = 4000
+	ownerWeight    = 2
+	scoreChars     = 4000
 )
 
-// bornWanting copies the dreams and skills in its life story into memory the
-// first time: dreams if it has none yet, and each skill it doesn't have. After
-// that memory wins: it grows.
+// bornWanting copies dreams only if it has none yet, and each skill it
+// doesn't have. After that memory wins.
 func (m *Mind) bornWanting(ctx context.Context) {
 	now := time.Now().UTC()
 	if len(m.Life.Dreams) > 0 {
@@ -63,9 +56,8 @@ func (m *Mind) bornWanting(ctx context.Context) {
 	}
 }
 
-// startingScore counts the level its life story starts a skill at as its
-// first score, once, so the first real score moves its level instead of
-// replacing it. It goes before any evidence the skill already has.
+// startingScore counts the life story's level as a first score, once, so
+// the first real score moves its level instead of replacing it.
 func (m *Mind) startingScore(ctx context.Context, skill string, level float64) {
 	ev, err := m.Store.RecentEvidence(ctx, skill, 1000)
 	if err != nil {
@@ -85,16 +77,13 @@ func (m *Mind) startingScore(ctx context.Context, skill string, level float64) {
 		m.Log.Warn("storing a starting score failed", "skill", skill, "err", err)
 		return
 	}
-	if len(ev) > 0 { // it already had scores: work its level out again with this one
+	if len(ev) > 0 {
 		if lvl, err := m.recomputeLevel(ctx, skill, time.Now().UTC()); err == nil {
 			m.Log.Info("counted a skill's starting level", "skill", skill, "level", lvl)
 		}
 	}
 }
 
-// scoreWork has System 1 score a work it just made as evidence of each skill
-// it shows (by its kind), and updates those skills' levels. parent is the
-// decision that made the work.
 func (m *Mind) scoreWork(ctx context.Context, w memory.Work, percept ulid.ULID, parent *ulid.ULID) {
 	if m.SkillLevel.ID == "" || len(m.SkillLevel.Questions) == 0 {
 		return
@@ -145,8 +134,6 @@ func (m *Mind) scoreWork(ctx context.Context, w memory.Work, percept ulid.ULID, 
 	}
 }
 
-// addEvidence saves a score of a skill and returns the skill's new level: the
-// weighted average of its recent scores, the owner's counting double.
 func (m *Mind) addEvidence(ctx context.Context, e memory.Evidence) (float64, error) {
 	e.ID, e.At = ulid.Make(), time.Now().UTC()
 	if err := m.Store.SaveEvidence(ctx, e); err != nil {
@@ -155,7 +142,6 @@ func (m *Mind) addEvidence(ctx context.Context, e memory.Evidence) (float64, err
 	return m.recomputeLevel(ctx, e.Skill, e.At)
 }
 
-// recomputeLevel works a skill's level out from its recent scores and saves it.
 func (m *Mind) recomputeLevel(ctx context.Context, skill string, at time.Time) (float64, error) {
 	recent, err := m.Store.RecentEvidence(ctx, skill, evidenceWindow)
 	if err != nil {
@@ -176,10 +162,9 @@ func (m *Mind) recomputeLevel(ctx context.Context, skill string, at time.Time) (
 	return level, m.Store.SetSkillLevel(ctx, skill, level, at)
 }
 
-// takeFeedback counts its owner's judgement of something it made toward the
-// skill it shows. Only the owner's counts, and only for a skill it has.
+// takeFeedback counts only the owner's feedback, and only for a skill it has.
 func (m *Mind) takeFeedback(ctx context.Context, p perception.Percept, reply *decision.Decision, fs []system2.Feedback) []*decision.Decision {
-	if len(fs) == 0 || p.Speaker == "" || p.Speaker != m.Autonomy.Owner {
+	if len(fs) == 0 || p.Speaker == "" || p.Speaker != m.policy().Owner {
 		return nil
 	}
 	skills, err := m.Store.Skills(ctx)
@@ -212,10 +197,8 @@ func (m *Mind) takeFeedback(ctx context.Context, p perception.Percept, reply *de
 	return out
 }
 
-// feedbackHelp tells System 2, talking with its owner, how to pass on what
-// they think of its work; "" for anyone else, or with no skills.
 func (m *Mind) feedbackHelp(ctx context.Context, person memory.Person) string {
-	if person.Key == "" || person.Key != m.Autonomy.Owner {
+	if person.Key == "" || person.Key != m.policy().Owner {
 		return ""
 	}
 	skills, err := m.Store.Skills(ctx)
@@ -239,7 +222,6 @@ func (m *Mind) feedbackHelp(ctx context.Context, person memory.Person) string {
 		"built on one repeated word\"). Their taste is theirs: keep it apart from how good the work was.\n"
 }
 
-// craftKinds are the kinds of work it makes.
 func (m *Mind) craftKinds() []string {
 	var kinds []string
 	for _, c := range m.Life.Crafts() {
@@ -248,8 +230,6 @@ func (m *Mind) craftKinds() []string {
 	return kinds
 }
 
-// growthNote is who it wants to become, for a plan or a review: its dreams,
-// its active goals and its skills.
 func (m *Mind) growthNote(ctx context.Context, now time.Time) string {
 	var b strings.Builder
 	if dreams, err := m.Store.Dreams(ctx, true); err == nil && len(dreams) > 0 {
@@ -283,10 +263,8 @@ func (m *Mind) growthNote(ctx context.Context, now time.Time) string {
 	return b.String()
 }
 
-// goalsHelp tells System 2 how to take on a goal its owner asks for: its
-// dreams and skills by name, and how many more goals it has room for.
 func (m *Mind) goalsHelp(ctx context.Context, person memory.Person) string {
-	if person.Key == "" || person.Key != m.Autonomy.Owner {
+	if person.Key == "" || person.Key != m.policy().Owner {
 		return ""
 	}
 	var b strings.Builder
@@ -322,11 +300,10 @@ func (m *Mind) goalsHelp(ctx context.Context, person memory.Person) string {
 	return b.String()
 }
 
-// takeGoals takes on goals its owner asked for: the skill (new ones start
-// where it honestly is), the dream it serves (a new one if none fits), and
-// the goal itself, set now. Its learning plan follows on the next tick.
+// takeGoals: a new skill starts where it honestly is, and the goal's
+// learning plan follows on the next tick.
 func (m *Mind) takeGoals(ctx context.Context, p perception.Percept, reply *decision.Decision, gs []system2.GoalTaken) []*decision.Decision {
-	if len(gs) == 0 || p.Speaker == "" || p.Speaker != m.Autonomy.Owner {
+	if len(gs) == 0 || p.Speaker == "" || p.Speaker != m.policy().Owner {
 		return nil
 	}
 	now := time.Now().UTC()
@@ -340,7 +317,6 @@ func (m *Mind) takeGoals(ctx context.Context, p perception.Percept, reply *decis
 	return out
 }
 
-// takeGoal takes on one goal, and returns what it did, for the log.
 func (m *Mind) takeGoal(ctx context.Context, gt system2.GoalTaken, now time.Time) string {
 	goals, err := m.Store.Goals(ctx, true)
 	if err != nil {
@@ -394,6 +370,6 @@ func (m *Mind) takeGoal(ctx context.Context, gt system2.GoalTaken, now time.Time
 	if err := m.Store.SaveGoal(ctx, g); err != nil {
 		return "saving the goal failed: " + err.Error()
 	}
-	m.toPlan = true
+	m.toPlan.Store(true)
 	return fmt.Sprintf("goal set (%s): %s", skill, g.Text)
 }

@@ -15,19 +15,16 @@ import (
 // labelled again on every start.
 const noArea = "other"
 
-// lifeLabels is how System 1 filed a text, the way a person files what they
-// hear: the life areas it is about and, for a message, whether it concerns
-// the agent's or the speaker's own life, or one of them in general ("Tell me
-// about yourself", "What do you know about me?").
+// lifeLabels: Personal is whether a message concerns the agent's or the
+// speaker's own life; Broad, one of them in general ("Tell me about yourself").
 type lifeLabels struct {
 	Areas    []string // most likely first; never contains noArea
 	Personal bool
 	Broad    bool
 }
 
-// labelText asks System 1 which life areas text is about. text must already
-// name people (see names); the set's {agent} and {speaker} are filled from n.
-// It needs a configured life_area set; check m.LifeArea.ID first.
+// labelText needs text that already names people (see names) and a
+// configured life_area set; check m.LifeArea.ID first.
 func (m *Mind) labelText(ctx context.Context, text string, n names) (lifeLabels, system1.Response, error) {
 	qs := slices.Clone(m.LifeArea.Questions)
 	for i := range qs {
@@ -49,7 +46,6 @@ func (m *Mind) labelText(ctx context.Context, text string, n names) (lifeLabels,
 	return l, resp, nil
 }
 
-// factAreas is what gets stored on a fact: its areas, or noArea if none.
 func factAreas(l lifeLabels) []string {
 	if len(l.Areas) == 0 {
 		return []string{noArea}
@@ -57,10 +53,8 @@ func factAreas(l lifeLabels) []string {
 	return slices.Clone(l.Areas)
 }
 
-// saveFact labels text with its life areas and stores it as a fact about
-// subject (memory.SubjectSelf or a person's key), heard in p. If labelling
-// fails the fact is still saved, unlabelled, and labelled on the next start.
-// It returns what labelling cost.
+// saveFact still saves the fact if labelling fails; it is labelled on the
+// next start. It returns what labelling cost.
 func (m *Mind) saveFact(ctx context.Context, p perception.Percept, subject, text string, n names) (float64, error) {
 	f := memory.Fact{ID: ulid.Make(), PerceptID: p.ID, Subject: subject, Text: text, At: p.At}
 	var cost float64
@@ -79,9 +73,8 @@ func (m *Mind) saveFact(ctx context.Context, p perception.Percept, subject, text
 	return cost, nil
 }
 
-// labelUnlabelledFacts files facts saved before life areas existed, or whose
-// labelling failed, so recall can find them by area. Speakers' names are not
-// known at start, so a person's facts are labelled with fallbackName.
+// labelUnlabelledFacts labels a person's facts with fallbackName, since
+// speakers' names are not known at start.
 func (m *Mind) labelUnlabelledFacts(ctx context.Context) {
 	if m.LifeArea.ID == "" {
 		return

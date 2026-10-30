@@ -1,8 +1,7 @@
-// Package web is the agent reading the open web: searching for pages, and
-// reading a page it found. Each search and page counts against a daily cap.
-// A page can only be read if it came from one of its own searches, so a link
-// on a page can never send it somewhere; and everything it reads is fenced
-// as material, never instructions.
+// Package web is the agent searching and reading the open web, within a
+// daily cap. A page can only be read if it came from one of its own
+// searches, so a link on a page can never send it somewhere; everything it
+// reads is fenced as untrusted material, never instructions.
 package web
 
 import (
@@ -21,35 +20,28 @@ const (
 	SearchName = "web_search"
 	PageName   = "read_page"
 
-	// NotesKind is the kind of work reading makes: its notes.
 	NotesKind = "reading_notes"
-	// passageSize is how much of a page it reads in one sitting.
+	// passageSize is how much of a page it reads in one sitting, in bytes.
 	passageSize = 12000
-	// results is how many pages a search lists.
-	results = 5
+	results     = 5
 )
 
-// Store keeps what it found and counts what it read.
 type Store interface {
 	// SaveFound remembers pages a search found, so it may read them later.
 	SaveFound(ctx context.Context, query string, rs []search.Result, at time.Time) error
-	// Found returns a page one of its searches found, and whether one did.
 	Found(ctx context.Context, url string) (search.Result, bool, error)
-	// LogWeb records a search or a page read; WebSince counts them since a time.
 	LogWeb(ctx context.Context, kind, what string, costUSD float64, at time.Time) error
 	WebSince(ctx context.Context, kind string, since time.Time) (int, error)
 }
 
-// Limits is how much of the web it may use in a day.
+// Limits are per day.
 type Limits struct {
-	Searches int // searches a day
-	Pages    int // pages read a day
+	Searches int
+	Pages    int
 }
 
-// ErrOverCap means it has used today's searches or pages.
 var ErrOverCap = errors.New("over today's limit")
 
-// Search searches the web and reads the best page it finds.
 type Search struct {
 	Searcher search.Searcher
 	Fetcher  search.Fetcher
@@ -88,7 +80,6 @@ func (s Search) Prepare(ctx context.Context, a ability.Act) (ability.Material, e
 			b.WriteString(": " + r.Snippet)
 		}
 	}
-	// Read the first page that can be read, within today's pages.
 	for _, r := range found.Results {
 		if under(ctx, s.Store, "page", s.Limits.Pages, a) != nil {
 			b.WriteString("\n\nYou've read all the pages you can today; you'll read one of these another day.")

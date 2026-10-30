@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// TestLives fills in every life in lives/ for every relation it allows, and
-// checks the result is a life that loads, where it lives, with its owner.
 func TestLives(t *testing.T) {
 	ts, err := Templates("../../lives")
 	if err != nil {
@@ -64,8 +62,7 @@ func TestLives(t *testing.T) {
 	}
 }
 
-// living checks a person's living.yaml is read over the config, with what
-// the agent needs to run.
+// living checks a person's living.yaml is read over the config.
 func living(t *testing.T, dir string, l Life) {
 	t.Helper()
 	cfgPath := filepath.Join(t.TempDir(), "minime.yaml")

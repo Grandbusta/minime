@@ -18,23 +18,14 @@ import (
 	"github.com/Grandbusta/minime/internal/perception"
 )
 
-// Calls: learning its owner's judgment on its own decisions. When it decides
-// something that is its owner's kind of call (what to focus on today,
-// starting something new, setting or dropping a goal), it names the options,
-// its pick, why, and how sure it is they'd agree. Some it asks on Telegram,
-// with a button per option and one for something else; the rest the owner
-// can grade in the console. A different pick gets a "what tipped it?", and
-// the owner's next message is their reason. Every answer becomes one of the
-// owner's decisions, approved (it's theirs), so their judgment grows; how
-// often they agree, by type, is how it will earn a type of decision.
+// Calls: learning its owner's judgment on its own decisions. Every answer the
+// owner gives becomes one of their decisions, approved, and how often they
+// agree, by type, is how it will earn a type of decision.
 //
-// After-calls (the day plan) it acts on and asks at most AsksPerDay of a
-// day, the ones it's least sure of. Before-calls (goals, in the weekly
-// review) wait for the answer; unanswered in time, it goes with its pick,
-// and that isn't counted. Approvals it asked count too: what it wanted is
-// its pick, and the owner's yes or no says whether they agree.
+// After-calls (the day plan) it acts on, asking at most AsksPerDay a day.
+// Before-calls (goals) wait for the answer; unanswered in time, it goes with
+// its pick, and that isn't counted. Approvals it asked count too.
 
-// Calls is how it learns its owner's judgment from its own decisions.
 type Calls struct {
 	On         bool
 	AsksPerDay int // after-calls asked on Telegram a day; the rest wait for the console
@@ -43,11 +34,8 @@ type Calls struct {
 	ReplyWindow time.Duration
 }
 
-// Chooser asks the owner which option they'd choose (telegram.Client).
 type Chooser interface {
-	// Choose sends text with a button for each of n options, pick starred,
-	// and one for something else, for call id, to the chat p is in, and
-	// returns where it was sent.
+	// Choose adds a button for something else, and returns where it was sent.
 	Choose(ctx context.Context, p perception.Percept, text, id string, n, pick int) (json.RawMessage, error)
 }
 
@@ -56,10 +44,8 @@ const (
 	maxOptions   = 4
 )
 
-// planCallTypes are the calls a day plan makes.
 var planCallTypes = []string{memory.CallFocus, memory.CallStart}
 
-// planCall is a call as System 2 gives it, in a day plan.
 type planCall struct {
 	Type       string   `json:"type"`
 	Situation  string   `json:"situation"`
@@ -71,7 +57,6 @@ type planCall struct {
 	Reversible bool     `json:"reversible"`
 }
 
-// callsSchema is the shape of a day plan's calls.
 var callsSchema = map[string]any{"type": "array", "items": map[string]any{
 	"type": "object", "additionalProperties": false,
 	"required": []string{"type", "situation", "options", "pick", "why", "confidence", "stakes", "reversible"},
@@ -88,7 +73,6 @@ var callsSchema = map[string]any{"type": "array", "items": map[string]any{
 	},
 }}
 
-// newCall makes a call from what System 2 gave, or false if it isn't one.
 func newCall(typ, mode, situation string, options []string, pick int, why string, confidence float64, now time.Time) (memory.Call, bool) {
 	var opts []string
 	for _, o := range options {
@@ -108,7 +92,6 @@ func newCall(typ, mode, situation string, options []string, pick int, why string
 		CreatedAt: now.UTC()}, true
 }
 
-// logPlanCalls keeps the calls its day plan made, to ask or be graded.
 func (m *Mind) logPlanCalls(ctx context.Context, calls []planCall, now time.Time) int {
 	if !m.Calls.On {
 		return 0
@@ -136,12 +119,11 @@ func (m *Mind) logPlanCalls(ctx context.Context, calls []planCall, now time.Time
 	return n
 }
 
-// sendCalls asks its owner what they'd choose: every before-call, and the
-// after-calls it made today, up to AsksPerDay: first what puts the most at
-// stake and it's least sure of.
+// sendCalls asks every before-call, and up to AsksPerDay after-calls: most at
+// stake and least sure first.
 func (m *Mind) sendCalls(ctx context.Context, now time.Time) {
 	chooser, ok := m.Asker.(Chooser)
-	if !m.Calls.On || !ok || m.Autonomy.Owner == "" {
+	if !m.Calls.On || !ok || m.policy().Owner == "" {
 		return
 	}
 	logged, err := m.Store.RecentCalls(ctx, memory.CallLogged, 50)
@@ -177,11 +159,11 @@ func (m *Mind) sendCalls(ctx context.Context, now time.Time) {
 	if len(ask) == 0 {
 		return
 	}
-	conv, ok := m.conversationWith(ctx, m.Autonomy.Owner)
+	conv, ok := m.conversationWith(ctx, m.policy().Owner)
 	if !ok {
 		return
 	}
-	p := outgoing(conv, m.person(ctx, m.Autonomy.Owner), perception.KindCall, now) // only says where; not kept
+	p := outgoing(conv, m.person(ctx, m.policy().Owner), perception.KindCall, now) // only says where; not kept
 	for i, c := range ask {
 		if i >= callsPerTick {
 			break
@@ -198,7 +180,6 @@ func (m *Mind) sendCalls(ctx context.Context, now time.Time) {
 	}
 }
 
-// callText is how it asks its owner what they'd choose, in its own voice.
 func (m *Mind) callText(c memory.Call, now time.Time) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSuffix(c.Situation, ".") + ".\n")
@@ -231,8 +212,8 @@ func (m *Mind) callText(c memory.Call, now time.Time) string {
 		b.WriteString(" " + at)
 	}
 	b.WriteString(" What would you do?")
-	if c.Mode == memory.CallBefore && m.Autonomy.AskExpires > 0 {
-		fmt.Fprintf(&b, "\n\n(If I don't hear back by %s, I'll go with mine.)", now.Add(m.Autonomy.AskExpires).In(m.Zone).Format("Mon 2 Jan 15:04"))
+	if c.Mode == memory.CallBefore && m.policy().AskExpires > 0 {
+		fmt.Fprintf(&b, "\n\n(If I don't hear back by %s, I'll go with mine.)", now.Add(m.policy().AskExpires).In(m.Zone).Format("Mon 2 Jan 15:04"))
 	}
 	return b.String()
 }
@@ -244,10 +225,9 @@ func lowerFirst(s string) string {
 	return strings.ToLower(s[:1]) + s[1:]
 }
 
-// pickAnswered acts on the owner's tap on one of a call's options.
 func (m *Mind) pickAnswered(ctx context.Context, p perception.Percept) {
 	log := m.Log.With("percept", p.ID.String())
-	if p.Speaker == "" || p.Speaker != m.Autonomy.Owner {
+	if p.Speaker == "" || p.Speaker != m.policy().Owner {
 		log.Warn("a call answered by someone who isn't the owner; ignored", "speaker", p.Speaker)
 		return
 	}
@@ -290,11 +270,10 @@ func (m *Mind) pickAnswered(ctx context.Context, p perception.Percept) {
 	m.callDecided(ctx, c, p.ID, now)
 }
 
-// ownerReplied takes the owner's message as what a call was waiting for:
-// their reason for a different pick, or their own answer. It returns
-// whether it did, having thanked them.
+// ownerReplied reports whether p was what a call was waiting for; if so it
+// has already thanked them.
 func (m *Mind) ownerReplied(ctx context.Context, p perception.Percept) bool {
-	if !m.Calls.On || p.Speaker == "" || p.Speaker != m.Autonomy.Owner || strings.TrimSpace(p.Text) == "" || p.Kind != "message" {
+	if !m.Calls.On || p.Speaker == "" || p.Speaker != m.policy().Owner || strings.TrimSpace(p.Text) == "" || p.Kind != "message" {
 		return false
 	}
 	c, ok, err := m.Store.WaitingCall(ctx, time.Now().Add(-m.Calls.ReplyWindow).UTC())
@@ -337,10 +316,10 @@ func (m *Mind) ownerReplied(ctx context.Context, p perception.Percept) bool {
 // expireCalls closes calls the owner didn't answer in time: a before-call
 // goes with its pick (not counted), an after-call waits for the console.
 func (m *Mind) expireCalls(ctx context.Context, now time.Time) {
-	if !m.Calls.On || m.Autonomy.AskExpires <= 0 {
+	if !m.Calls.On || m.policy().AskExpires <= 0 {
 		return
 	}
-	stale, err := m.Store.StaleCalls(ctx, now.Add(-m.Autonomy.AskExpires).UTC(), callsPerTick)
+	stale, err := m.Store.StaleCalls(ctx, now.Add(-m.policy().AskExpires).UTC(), callsPerTick)
 	if err != nil {
 		m.Log.Warn("loading expired calls failed", "err", err)
 		return
@@ -359,8 +338,6 @@ func (m *Mind) expireCalls(ctx context.Context, now time.Time) {
 	}
 }
 
-// callDecided carries out a before-call as the owner chose, and records
-// the decision.
 func (m *Mind) callDecided(ctx context.Context, c memory.Call, percept ulid.ULID, now time.Time) {
 	detail := "graded"
 	if c.Mode == memory.CallBefore {
@@ -378,9 +355,7 @@ func (m *Mind) callDecided(ctx context.Context, c memory.Call, percept ulid.ULID
 	m.Log.Info("the owner answered a call", "call", c.ID.String(), "type", c.Type, "agreed", c.OwnerPick == c.Pick, "detail", detail)
 }
 
-// carryOutCall does what a before-call's chosen option says. Option 0 is
-// always doing what it wanted (setting or dropping the goal); anything else
-// is not. It returns what it did, for the log.
+// carryOutCall: option 0 is always doing what it wanted; anything else is not.
 func (m *Mind) carryOutCall(ctx context.Context, c memory.Call, option int, now time.Time) string {
 	goals, err := m.Store.Goals(ctx, false)
 	if err != nil {
@@ -426,13 +401,12 @@ func (m *Mind) carryOutCall(ctx context.Context, c memory.Call, option int, now 
 		return "saving the goal failed: " + err.Error()
 	}
 	if g.Status == memory.GoalActive {
-		m.EnsurePlans(ctx, now) // a learning plan for a new skill goal
+		m.EnsurePlans(ctx, now)
 		return "set the goal: " + g.Text
 	}
 	return "goal " + g.Status + ": " + g.Text
 }
 
-// settleCall replaces the question the owner saw with how it ended.
 func (m *Mind) settleCall(ctx context.Context, c memory.Call, ending string) {
 	if m.Asker == nil || len(c.Message) == 0 {
 		return
@@ -442,8 +416,6 @@ func (m *Mind) settleCall(ctx context.Context, c memory.Call, ending string) {
 	}
 }
 
-// approvalCall counts an approval the owner answered as one of its calls:
-// what it wanted was its pick, and their yes or no says whether they agree.
 func (m *Mind) approvalCall(ctx context.Context, a memory.Approval, now time.Time) {
 	if !m.Calls.On || (a.Status != memory.ApprovalApproved && a.Status != memory.ApprovalDenied) {
 		return
@@ -465,8 +437,7 @@ func (m *Mind) approvalCall(ctx context.Context, a memory.Approval, now time.Tim
 	}
 }
 
-// goalCall asks the owner before setting or dropping a goal, in the weekly
-// review. It returns false if calls are off, so the review does it itself.
+// goalCall returns false if calls are off, so the review does it itself.
 func (m *Mind) goalCall(ctx context.Context, typ string, g memory.Goal, why string, confidence float64, now time.Time) bool {
 	if !m.Calls.On {
 		return false
@@ -498,8 +469,6 @@ func (m *Mind) goalCall(ctx context.Context, typ string, g memory.Goal, why stri
 	return true
 }
 
-// disagreementsNote is where its owner chose differently this week, for the
-// weekly review to draw principles from.
 func (m *Mind) disagreementsNote(ctx context.Context, now time.Time) (string, map[string]string) {
 	calls, err := m.Store.RecentCalls(ctx, memory.CallAnswered, 100)
 	if err != nil {
@@ -530,10 +499,9 @@ func (m *Mind) disagreementsNote(ctx context.Context, now time.Time) (string, ma
 	return fmt.Sprintf("\n\nWhere %s chose differently from you this week (by call id):%s", owner, b.String()), cases
 }
 
-// ownerName is what it calls its owner: their name, or "your owner".
 func (m *Mind) ownerName(ctx context.Context) string {
-	if m.Autonomy.Owner != "" {
-		if n := m.person(ctx, m.Autonomy.Owner).Name; n != "" {
+	if m.policy().Owner != "" {
+		if n := m.person(ctx, m.policy().Owner).Name; n != "" {
 			return n
 		}
 	}
@@ -541,9 +509,7 @@ func (m *Mind) ownerName(ctx context.Context) string {
 }
 
 const (
-	// lookBackAfter is how long after a call its review looks at how it turned out.
-	lookBackAfter = 2 * 24 * time.Hour
-	// lookBackPerReview is the most calls one review looks back on.
+	lookBackAfter     = 2 * 24 * time.Hour
 	lookBackPerReview = 10
 )
 
@@ -551,7 +517,6 @@ const (
 // approvals (what happened after those is the owner's doing).
 var lookBackTypes = []string{memory.CallFocus, memory.CallStart, memory.CallNewGoal, memory.CallDropGoal}
 
-// outcomesFormat is the shape of a review's look back at its calls.
 var outcomesFormat = map[string]any{"type": "array", "items": map[string]any{
 	"type": "object", "additionalProperties": false, "required": []string{"call_id", "outcome", "verdict", "note"},
 	"properties": map[string]any{
@@ -575,8 +540,6 @@ func done(c memory.Call) string {
 	return c.Options[c.Pick]
 }
 
-// lookBackNote is the calls its weekly review looks back on, by id: what it
-// decided, what it did, and what its owner would have chosen.
 func (m *Mind) lookBackNote(ctx context.Context, now time.Time) (string, []memory.Call) {
 	if !m.Calls.On {
 		return "", nil
@@ -603,8 +566,6 @@ func (m *Mind) lookBackNote(ctx context.Context, now time.Time) (string, []memor
 	return b.String(), calls
 }
 
-// lookBack records how the calls its review looked back on turned out. It
-// returns what it recorded, for the log.
 func (m *Mind) lookBack(ctx context.Context, calls []memory.Call, outcomes []callOutcome, now time.Time) []string {
 	byID := map[string]memory.Call{}
 	for _, c := range calls {
@@ -624,7 +585,6 @@ func (m *Mind) lookBack(ctx context.Context, calls []memory.Call, outcomes []cal
 	return changes
 }
 
-// callOutcome is how a call turned out, as its review judges it.
 type callOutcome struct {
 	CallID  string `json:"call_id"`
 	Outcome string `json:"outcome"`
@@ -632,9 +592,8 @@ type callOutcome struct {
 	Note    string `json:"note"`
 }
 
-// approvalStakes is what an approval puts at stake, by what it asks to do: a
-// message sent can't be unsent, a promise is hard to take back, a work can
-// come off the page, a dream can change again.
+// approvalStakes: a message sent can't be unsent, a promise is hard to take
+// back, a work can come off the page, a dream can change again.
 func approvalStakes(class action.Class) (string, bool) {
 	switch class {
 	case action.ReachOut:

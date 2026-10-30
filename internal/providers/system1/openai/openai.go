@@ -27,10 +27,10 @@ const (
 type Client struct {
 	api   openai.Client
 	model string
-	price pricing.Price // the model's input and cache rates; Decisions output is free
+	price pricing.Price
 }
 
-// New returns a client. Empty model and baseURL fall back to the defaults.
+// Empty model and baseURL fall back to the defaults.
 func New(apiKey, model, baseURL string, price pricing.Price) *Client {
 	if model == "" {
 		model = DefaultModel
@@ -50,7 +50,6 @@ func (c *Client) Decide(ctx context.Context, req system1.Request) (system1.Respo
 	return toResponse(req, resp, c.price)
 }
 
-// params is the request: the state as input, and the questions.
 func (c *Client) params(req system1.Request) (openai.DecisionNewParams, error) {
 	p := openai.DecisionNewParams{Model: c.model}
 	input, err := wireInput(req.State)
@@ -119,8 +118,6 @@ func wireInput(state any) (openai.DecisionNewParamsInputUnion, error) {
 		Content: openai.DecisionInputMessageContentUnionParam{OfParts: []openai.DecisionInputPartUnionParam{part}}}}}, nil
 }
 
-// toResponse turns the API's answers into System 1's, checking they answer
-// the questions asked, in order.
 func toResponse(req system1.Request, w *openai.Decision, price pricing.Price) (system1.Response, error) {
 	if len(w.Answers) != len(req.Questions) {
 		return system1.Response{}, fmt.Errorf("openai decisions: got %d answers for %d questions", len(w.Answers), len(req.Questions))
@@ -172,7 +169,6 @@ func toResponse(req system1.Request, w *openai.Decision, price pricing.Price) (s
 	return resp, nil
 }
 
-// rawValue turns a JSON string or boolean into its plain text form.
 func rawValue(raw string) string {
 	var s string
 	if err := json.Unmarshal([]byte(raw), &s); err == nil {

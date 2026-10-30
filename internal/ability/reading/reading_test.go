@@ -40,7 +40,7 @@ func (f *fakeLibrary) FindArticle(_ context.Context, q string) (library.Article,
 
 type fakeStore struct {
 	sources  map[ulid.ULID]memory.Source
-	projects []memory.Project // active ones following a source
+	projects []memory.Project
 }
 
 func (s *fakeStore) ReadingProject(_ context.Context, source ulid.ULID) (memory.Project, bool, error) {
@@ -77,7 +77,6 @@ func act(query string, p *memory.Project) ability.Act {
 }
 
 func TestReadingABookOverDays(t *testing.T) {
-	// Three paragraphs: two sittings.
 	para := strings.Repeat("word ", PassageSize/12) // ~5,000 bytes: two paragraphs fit in a sitting
 	lib := &fakeLibrary{text: para + "\n\n" + para + "\n\n" + strings.TrimSpace(para) + " The end."}
 	b := Book{Library: lib, Store: &fakeStore{sources: map[ulid.ULID]memory.Source{}}}
@@ -166,7 +165,7 @@ func TestStartingABookItsAlreadyReadingCarriesOn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.projects = []memory.Project{*first.Project} // it kept reading it
+	st.projects = []memory.Project{*first.Project}
 
 	again, err := b.Prepare(context.Background(), act("Pride and Prejudice Austen", nil))
 	if err != nil {

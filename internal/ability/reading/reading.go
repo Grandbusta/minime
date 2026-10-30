@@ -1,7 +1,6 @@
-// Package reading is the agent reading for real: public-domain books from
-// Project Gutenberg, a passage a sitting over many days, and Wikipedia
-// articles at once. Texts come from the library and are kept in the store, so
-// a book is downloaded once.
+// Package reading is the agent reading books a passage a sitting over many
+// days, and Wikipedia articles at once. Texts are kept in the store, so a
+// book is downloaded once.
 package reading
 
 import (
@@ -20,31 +19,25 @@ const (
 	BookName    = "read_book"
 	ArticleName = "read_article"
 
-	// NotesKind is the kind of work reading makes: its reading notes.
 	NotesKind = "reading_notes"
 
 	PassageSize = 12000 // bytes of a book read in one sitting, about 3,000 tokens
-	ArticleSize = 20000 // the most of an article read at once
+	ArticleSize = 20000
 )
 
-// Library finds and fetches what the agent reads (library.Client).
 type Library interface {
 	FindBook(ctx context.Context, query string) (library.Book, error)
 	BookText(ctx context.Context, b library.Book) (string, error)
 	FindArticle(ctx context.Context, query string) (library.Article, error)
 }
 
-// Store keeps what it fetched.
 type Store interface {
 	// SaveSource stores a source and returns its ID: the existing one if its URL was fetched before.
 	SaveSource(ctx context.Context, src memory.Source) (ulid.ULID, error)
 	SourceText(ctx context.Context, id ulid.ULID) (string, error)
-	// ReadingProject returns the active project that follows a source, if any.
 	ReadingProject(ctx context.Context, source ulid.ULID) (memory.Project, bool, error)
 }
 
-// Book reads a book: it starts one the plan names, or carries on the book a
-// project follows.
 type Book struct {
 	Library Library
 	Store   Store
@@ -58,7 +51,6 @@ func (Book) Describe() string {
 
 func (Book) Risk() ability.Risk { return ability.ReadsWeb }
 
-// Continues: a project that follows a book is read on.
 func (Book) Continues(p memory.Project) bool { return !p.SourceID.IsZero() }
 
 // Prepare gives today's passage of the book, and the project with its place
@@ -132,7 +124,6 @@ func (b Book) Prepare(ctx context.Context, a ability.Act) (ability.Material, err
 	}, nil
 }
 
-// Article looks a topic up on Wikipedia and reads the article at once.
 type Article struct {
 	Library Library
 	Store   Store
@@ -163,7 +154,6 @@ func (r Article) Prepare(ctx context.Context, a ability.Act) (ability.Material, 
 	}, nil
 }
 
-// percentThrough is how far pos is into a text total bytes long.
 func percentThrough(pos, total int) int {
 	if total <= 0 {
 		return 0

@@ -28,7 +28,6 @@ func TestBornWanting(t *testing.T) {
 	if len(s.dreams) != 1 || s.dreams[0].Source != memory.DreamFromLife || len(s.skills) != 1 || s.skills[0].Level != 3 {
 		t.Fatalf("dreams %+v, skills %+v", s.dreams, s.skills)
 	}
-	// After that, memory wins: a dropped dream and a grown skill stay as they are.
 	s.dreams[0].Status, s.skills[0].Level = memory.DreamDropped, 5.2
 	m.Life.Skills = append(m.Life.Skills, self.Skill{Name: "Yoruba", Level: 2})
 	m.bornWanting(context.Background())
@@ -135,7 +134,6 @@ func TestWeeklyReview(t *testing.T) {
 		t.Errorf("review = %+v", w)
 	}
 
-	// Once a week, even across a restart.
 	m.tick(context.Background(), at(25, 20, 1))
 	again, _, _, _ := reviewMind(review)
 	again.Store = s
@@ -144,7 +142,6 @@ func TestWeeklyReview(t *testing.T) {
 		t.Errorf("reviewed twice: %d", len(s2.requests))
 	}
 
-	// The owner approves the new dream.
 	m.handle(context.Background(), tap(owner, asker.ids[0], true))
 	if len(s.dreams) != 2 || s.dreams[1].Text != "Tobi wants to write about Nigerian history" || s.dreams[1].Source != memory.DreamFromSelf {
 		t.Errorf("dreams = %+v", s.dreams)
@@ -192,7 +189,7 @@ func TestTheStartingLevelIsAFirstScore(t *testing.T) {
 	}
 	reply := &decision.Decision{ID: ulid.Make()}
 	m.takeFeedback(context.Background(), from(owner), reply, []system2.Feedback{{Skill: "lyric writing", Level: 3}})
-	if lvl := s.skills[0].Level; lvl != 3.3 { // (4 + 3×2) / 3: the first real score moves it, it doesn't replace it
+	if lvl := s.skills[0].Level; lvl != 3.3 { // (4 + 3×2) / 3
 		t.Errorf("level = %.2f, want 3.3", lvl)
 	}
 	m.bornWanting(context.Background()) // counted once

@@ -11,17 +11,13 @@ import (
 	"github.com/Grandbusta/minime/internal/memory"
 )
 
-// Queries for the owner's console: everything about the agent, read-only.
-
-// LogEntry is a decision with what it was about.
 type LogEntry struct {
 	decision.Decision
 	Source, Kind, Text, Speaker string // the percept's; "" for a decision of the agent's own
 }
 
-// DecisionLog returns up to limit decisions after the given time, with
-// their percepts: oldest first when following the log live, newest first
-// for a page of history.
+// DecisionLog returns decisions after the given time: oldest first when
+// following the log live, newest first for a page of history.
 func (s *Store) DecisionLog(ctx context.Context, after time.Time, limit int, newestFirst bool) ([]LogEntry, error) {
 	order := "ASC"
 	if newestFirst {
@@ -59,7 +55,6 @@ func (s *Store) queryLog(ctx context.Context, sql string, args ...any) ([]LogEnt
 	return out, rows.Err()
 }
 
-// Vitals is how the agent's day is going: decisions, cost and speed since a time.
 type Vitals struct {
 	Decisions   int
 	ByTier      map[string]int
@@ -96,14 +91,13 @@ func (s *Store) Vitals(ctx context.Context, since time.Time) (Vitals, error) {
 	return v, rows.Err()
 }
 
-// DayCost is what one day cost, in the given time zone.
 type DayCost struct {
 	Day     string // YYYY-MM-DD
 	CostUSD float64
 	Count   int
 }
 
-// CostByDay returns the cost of each day since the given time, in zone, oldest first.
+// CostByDay returns each day since the given time, in zone, oldest first.
 func (s *Store) CostByDay(ctx context.Context, since time.Time, zone *time.Location) ([]DayCost, error) {
 	rows, err := s.pool.Query(ctx, `SELECT to_char(at AT TIME ZONE $2, 'YYYY-MM-DD') AS day,
 		coalesce(sum(cost_usd), 0)::float8, count(*) FROM decisions WHERE at >= $1 GROUP BY day ORDER BY day`,
@@ -123,11 +117,10 @@ func (s *Store) CostByDay(ctx context.Context, since time.Time, zone *time.Locat
 	return out, rows.Err()
 }
 
-// FactView is a fact with what the console shows about it.
 type FactView struct {
 	memory.Fact
-	Public  *bool      // whether it may go on the profile; nil: not decided (or not its own)
-	AskedAt *time.Time // when it checked in about it; nil: never
+	Public  *bool // whether it may go on the profile; nil: not decided (or not its own)
+	AskedAt *time.Time
 }
 
 // AllFacts returns up to limit facts, newest first.
@@ -173,7 +166,6 @@ func (s *Store) RecentWorks(ctx context.Context, limit int) ([]memory.Work, erro
 	return s.queryWorks(ctx, `SELECT `+workColumns+` FROM works ORDER BY created_at DESC, id DESC LIMIT $1`, limit)
 }
 
-// Counts is how much the agent remembers.
 type Counts struct {
 	Facts, SelfFacts, People, Intentions, Projects, Works, Percepts, Decisions int
 }
@@ -191,7 +183,6 @@ func (s *Store) Counts(ctx context.Context) (Counts, error) {
 	return c, nil
 }
 
-// Work returns the work with id, and whether there is one.
 func (s *Store) Work(ctx context.Context, id ulid.ULID) (memory.Work, bool, error) {
 	ws, err := s.queryWorks(ctx, `SELECT `+workColumns+` FROM works WHERE id = $1`, id.String())
 	if err != nil || len(ws) == 0 {

@@ -16,7 +16,6 @@ const learningJSON = `{"title":"Lagos Rain, verse 2","kind":"lyrics","text":"Rai
 	"project_notes":"","project_done":false,"remember":[],
 	"lessons":["Start the hook on the downbeat"," ","Two","Three"],"ask_for_review":true,"review_question":"Is the hook too wordy?"}`
 
-// learningMind is an activity mind whose owner it can ask for review.
 func learningMind() (*Mind, *fakeStore, *fakeSystem2, *fakeReplier, memory.Intention) {
 	m, s, s2, _, i := activityMind()
 	r := &fakeReplier{}
@@ -50,7 +49,6 @@ func TestItLearnsFromItsOwnWorkAndAsksForReview(t *testing.T) {
 		t.Errorf("intention = %+v", got)
 	}
 
-	// The next practice has its lessons in front of it, and it doesn't ask again the same day.
 	next := memory.Intention{ID: ulid.Make(), Subject: memory.SubjectSelf, Kind: memory.IntentionActivity, Text: "Write verse 3",
 		DueAt: at(29, 15, 0), Status: memory.IntentionPending}
 	s.intentions = append(s.intentions, next)
@@ -90,7 +88,6 @@ func TestTheOwnersReviewBecomesLessonsOnThatWork(t *testing.T) {
 		t.Errorf("evidence = %+v; want the feedback tied to the work it asked about", s.evidence)
 	}
 
-	// Someone else's advice isn't a lesson.
 	q := percept("2", "Make it longer")
 	m.handle(context.Background(), q)
 	if len(s.lessons) != 1 {
@@ -131,7 +128,6 @@ func TestTheOwnersTaste(t *testing.T) {
 		s.tastes[0].Source != memory.TasteFromTelegram || s.tastes[1].Kind != "" || s.tastes[1].Likes {
 		t.Fatalf("tastes = %+v", s.tastes)
 	}
-	// Someone else's taste isn't the owner's.
 	m.handle(context.Background(), percept("2", "I like long intros"))
 	if len(s.tastes) != 2 {
 		t.Error("took someone else's taste")

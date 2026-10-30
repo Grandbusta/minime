@@ -17,22 +17,19 @@ import (
 	"github.com/Grandbusta/minime/internal/providers/system2"
 )
 
-// Corrections: what a person tells the agent it got wrong. System 2 returns
-// them with its reply: a fact that is wrong (replaced) or to forget, a change
-// to what it may do on its own (the owner only), or that it misread their
-// last message (the owner only: labelled, for replay). Each is recorded as a
-// decision after the reply, so the log shows what changed and why.
+// Corrections: what a person tells the agent it got wrong, returned by
+// System 2 with its reply. Each is recorded as a decision after the reply.
 
-// correctFacts replaces or forgets the facts the speaker said are wrong. A
-// person may correct what the agent knows about them; the owner may also
-// correct what it knows about itself. Facts are referred to by their ref in
-// the note (f1, f2, ...), so only facts it was shown can be corrected.
+// correctFacts: a person may correct what the agent knows about them; the
+// owner may also correct what it knows about itself. Facts are referred to by
+// their ref in the note (f1, f2, ...), so only facts it was shown can be
+// corrected.
 func (m *Mind) correctFacts(ctx context.Context, p perception.Percept, reply *decision.Decision,
 	refs map[string]memory.Fact, cs []system2.Correction, n names) []*decision.Decision {
 	var out []*decision.Decision
 	for _, c := range cs {
 		f, ok := refs[c.Fact]
-		allowed := ok && (f.Subject == p.Speaker || (f.Subject == memory.SubjectSelf && p.Speaker == m.Autonomy.Owner && p.Speaker != ""))
+		allowed := ok && (f.Subject == p.Speaker || (f.Subject == memory.SubjectSelf && p.Speaker == m.policy().Owner && p.Speaker != ""))
 		if !allowed {
 			m.Log.Warn("dropped a correction", "percept", p.ID.String(), "fact", c.Fact, "known", ok)
 			continue
@@ -62,14 +59,12 @@ func (m *Mind) correctFacts(ctx context.Context, p perception.Percept, reply *de
 	return out
 }
 
-// changePermissions applies the owner's changes to what the agent may do on
-// its own, for the classes that can change by chat, and keeps each one.
 func (m *Mind) changePermissions(ctx context.Context, p perception.Percept, reply *decision.Decision,
 	ps []system2.Permission) []*decision.Decision {
 	if len(ps) == 0 {
 		return nil
 	}
-	if p.Speaker == "" || p.Speaker != m.Autonomy.Owner {
+	if p.Speaker == "" || p.Speaker != m.policy().Owner {
 		m.Log.Warn("dropped permission changes from someone who isn't the owner", "speaker", p.Speaker)
 		return nil
 	}
@@ -80,7 +75,7 @@ func (m *Mind) changePermissions(ctx context.Context, p perception.Percept, repl
 			m.Log.Warn("dropped a permission change", "class", class, "verdict", verdict)
 			continue
 		}
-		before := m.Autonomy.Check(class, "")
+		before := m.policy().Check(class, "")
 		if before == verdict {
 			continue
 		}
@@ -88,7 +83,7 @@ func (m *Mind) changePermissions(ctx context.Context, p perception.Percept, repl
 			m.Log.Error("save autonomy rule", "err", err)
 			continue
 		}
-		m.Autonomy = m.Autonomy.With(map[action.Class]action.Verdict{class: verdict})
+		m.setPolicy(m.policy().With(map[action.Class]action.Verdict{class: verdict}))
 		d := m.child(p, reply, "permission")
 		d.Outcome.Detail = fmt.Sprintf("%s: %s → %s", class, before, verdict)
 		m.Log.Info("permission changed by the owner", "class", class, "from", before, "to", verdict)
@@ -97,10 +92,8 @@ func (m *Mind) changePermissions(ctx context.Context, p perception.Percept, repl
 	return out
 }
 
-// labelMisread labels the agent's read of the owner's previous message with
-// what they say it was really doing, for replay.
 func (m *Mind) labelMisread(ctx context.Context, p perception.Percept, reply *decision.Decision, choice string) []*decision.Decision {
-	if choice == "" || p.Speaker != m.Autonomy.Owner || p.Speaker == "" || m.Incoming.ID == "" || !slices.Contains(m.intents(), choice) {
+	if choice == "" || p.Speaker != m.policy().Owner || p.Speaker == "" || m.Incoming.ID == "" || !slices.Contains(m.intents(), choice) {
 		return nil
 	}
 	read, ok, err := m.Store.LastRead(ctx, m.Incoming.ID, p.Source, p.Thread, p.At)
@@ -119,7 +112,6 @@ func (m *Mind) labelMisread(ctx context.Context, p perception.Percept, reply *de
 	return []*decision.Decision{d}
 }
 
-// intents are the choices of the incoming message's primary question.
 func (m *Mind) intents() []string {
 	var out []string
 	for _, q := range m.Incoming.Questions {
@@ -132,24 +124,20 @@ func (m *Mind) intents() []string {
 	return out
 }
 
-// child is a decision the agent made because of what reply's System 2 call
-// returned: a correction, applied in plain code.
 func (m *Mind) child(p perception.Percept, reply *decision.Decision, act string) *decision.Decision {
 	now := time.Now().UTC()
 	return &decision.Decision{ID: ulid.Make(), ParentID: &reply.ID, At: now, PerceptID: p.ID, Tier: decision.TierReflex,
 		SetID: "correction", Action: act, Gate: decision.GateAuto, Outcome: &decision.Outcome{Status: decision.OutcomeOK, At: now}}
 }
 
-// permissionsNote tells System 2, talking with its owner, what it may do
-// on its own now, and how the owner can change it.
 func (m *Mind) permissionsNote(p perception.Percept) string {
-	if p.Speaker == "" || p.Speaker != m.Autonomy.Owner || m.Autonomy.Classes == nil {
+	if p.Speaker == "" || p.Speaker != m.policy().Owner || m.policy().Classes == nil {
 		return ""
 	}
 	var lines []string
-	for c := range m.Autonomy.Classes {
+	for c := range m.policy().Classes {
 		if action.ByChat(c) {
-			lines = append(lines, fmt.Sprintf("%s: %s", c, m.Autonomy.Check(c, "")))
+			lines = append(lines, fmt.Sprintf("%s: %s", c, m.policy().Check(c, "")))
 		}
 	}
 	sort.Strings(lines)
@@ -160,7 +148,7 @@ func (m *Mind) permissionsNote(p perception.Percept) string {
 // loadPermissions applies the owner's changes made by chat over the config's
 // policy, so they last across restarts.
 func (m *Mind) loadPermissions(ctx context.Context) {
-	if m.Autonomy.Classes == nil {
+	if m.policy().Classes == nil {
 		return
 	}
 	rules, err := m.Store.AutonomyRules(ctx)
@@ -169,24 +157,20 @@ func (m *Mind) loadPermissions(ctx context.Context) {
 		return
 	}
 	if len(rules) > 0 {
-		m.Autonomy = m.Autonomy.WithChatRules(rules)
+		m.setPolicy(m.policy().WithChatRules(rules))
 		m.Log.Info("the owner's permission changes apply", "changes", len(rules))
 	}
 }
 
-// correctSelf is what the reply prompt adds when the owner may correct what
-// the agent knows about itself.
 func (m *Mind) correctSelf(person memory.Person) string {
-	if person.Key == "" || person.Key != m.Autonomy.Owner {
+	if person.Key == "" || person.Key != m.policy().Owner {
 		return ""
 	}
 	return ", or about yourself"
 }
 
-// permissionsHelp tells System 2, talking with its owner, how they can change
-// what it may do on its own; "" for anyone else.
 func (m *Mind) permissionsHelp(person memory.Person, n names) string {
-	if person.Key == "" || person.Key != m.Autonomy.Owner || m.Autonomy.Classes == nil {
+	if person.Key == "" || person.Key != m.policy().Owner || m.policy().Classes == nil {
 		return ""
 	}
 	return "\nWhat you may do on your own:\n" +

@@ -12,30 +12,24 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Template is a life someone can start from, written for any owner: a
-// folder laid out like the person's own (Files), with {owner}, {relation},
-// {account} and {circle} in them, filled in for whoever starts it.
-// template.yaml says what it is and who they may be to it.
+// Template is a folder laid out like a person's own, with {owner},
+// {relation}, {account} and {circle} filled in for whoever starts it.
 type Template struct {
-	Key       string   `yaml:"-"`         // its directory's name, e.g. "daniel"
-	Dir       string   `yaml:"-"`         // where it is
-	Name      string   `yaml:"name"`      // the life's name, e.g. "Daniel"
-	About     string   `yaml:"about"`     // one line: who they are, e.g. "18, Lagos, makes music"
-	Relations []string `yaml:"relations"` // who the owner may be to them, e.g. father, mentor
+	Key       string   `yaml:"-"` // its directory's name
+	Dir       string   `yaml:"-"`
+	Name      string   `yaml:"name"`
+	About     string   `yaml:"about"`
+	Relations []string `yaml:"relations"`
 }
 
-// Files are what a person is, in their folder: their life, how they live,
-// and their owner's judgment.
 var Files = []string{"life.yaml", "living.yaml", "judgment.yaml"}
 
-// Owner is the person starting a life from a template.
 type Owner struct {
-	Name     string // what the life calls them, e.g. "Busta"
-	Relation string // who they are to the life, one of the template's Relations
-	Account  string // how they talk to it, e.g. "telegram:123"; empty until known
+	Name     string
+	Relation string // one of the template's Relations
+	Account  string
 }
 
-// Templates returns the templates in dir (one directory each), by key.
 func Templates(dir string) ([]Template, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -55,7 +49,6 @@ func Templates(dir string) ([]Template, error) {
 	return out, nil
 }
 
-// LoadTemplate reads the template in dir.
 func LoadTemplate(dir string) (Template, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, "template.yaml"))
 	if err != nil {
@@ -80,9 +73,8 @@ func LoadTemplate(dir string) (Template, error) {
 	return t, nil
 }
 
-// Render is the person's folder for owner, by file name (Files): each with
-// the owner's name, relation, account and the circle that relation is from
-// filled in.
+// Render returns the folder's files by name, with the owner and the circle
+// their relation is from filled in.
 func (t Template) Render(o Owner) (map[string][]byte, error) {
 	o.Name, o.Relation, o.Account = strings.TrimSpace(o.Name), strings.TrimSpace(o.Relation), strings.TrimSpace(o.Account)
 	switch {

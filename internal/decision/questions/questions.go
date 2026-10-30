@@ -30,15 +30,13 @@ type Set struct {
 type Thresholds struct {
 	Act float64 `yaml:"act"`
 	Ask float64 `yaml:"ask"`
-	// Label: every option of a choice with at least this probability counts
-	// as a label, so one choice question can give several (e.g. home + family).
+	// Label: every option of a choice with at least this probability is a
+	// label, so one choice question can give several.
 	Label float64 `yaml:"label"`
 }
 
-// Ref is how decisions record which set (and version) decided, e.g. "incoming_message@1".
 func (s Set) Ref() string { return fmt.Sprintf("%s@%d", s.ID, s.Version) }
 
-// LoadDir loads every *.yaml file in dir, keyed by set ID.
 func LoadDir(dir string) (map[string]Set, error) {
 	paths, err := filepath.Glob(filepath.Join(dir, "*.yaml"))
 	if err != nil {

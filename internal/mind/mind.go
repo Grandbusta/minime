@@ -1,20 +1,10 @@
 // Package mind runs the cognitive cycle: take a percept, decide, act, record.
 //
-// The agent is a person with its own life (self.Life), talking with people
-// it knows. Every text message is read by System 1 (fast, typed answers),
-// and the router decides how sure that reading is. System 2 (slow reasoning)
-// replies as the agent itself whenever words are needed, System 1 is not
-// sure, or the person is answering something the agent just asked.
-//
-// Memory has two sides: facts about the agent itself (decided when they
-// first come up) and facts about each person. Pronouns are resolved to names
-// before System 1 reads anything, so "your church" and "my church" are
-// never confused.
-//
-// A clock ticks into the same loop (initiative.go), so the agent can speak
-// first: reminders people asked for, and checking in on what is going on in
-// their lives. It also lives a day of its own (life.go): it plans it, does
-// real things, and writes a journal at night.
+// System 1 (fast, typed answers) reads every text message and System 2 (slow
+// reasoning) replies as the agent itself. Pronouns are resolved to names
+// before System 1 reads anything, so "your church" and "my church" are never
+// confused. A second loop on the clock's ticks lets the agent speak first
+// (initiative.go) and live a day of its own (life.go).
 package mind
 
 import (
@@ -26,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -142,80 +133,68 @@ type WorkingMemory struct {
 	Window time.Duration
 }
 
-// Replier answers on the channel a percept came from.
 type Replier interface {
 	Reply(ctx context.Context, p perception.Percept, text string) error
 }
 
-// Prompt is System 2's instructions plus a reference that versions them,
-// e.g. "reply@1a2b3c4d", recorded on every System 2 decision.
+// Prompt's Ref versions Text and is recorded on every System 2 decision.
 type Prompt struct {
 	Ref  string
 	Text string
 }
 
 type Config struct {
-	Life self.Life // who the agent is
-	// Judgment is how its owner decides, seeded into memory for the owner to
-	// review; only what they approve is used. Zero value: none seeded.
+	Life self.Life
+	// Judgment is seeded for the owner to review; only what they approve is used.
 	Judgment self.Judgment
 	Percepts <-chan perception.Percept
 	Store    Store
 	Replier  Replier
 	System1  system1.DecisionModel
 	System2  system2.Reasoner
-	Incoming questions.Set // how System 1 reads an incoming message
-	FollowUp questions.Set // whether it answers the agent's last reply; zero value: never checked
-	// LifeArea files messages and facts by part of life (area, personal,
-	// broad); zero value: nothing is labelled and every reply searches memory.
-	LifeArea questions.Set
-	// PersonCircle files a person into a circle of the agent's life (family,
-	// school, ...) before their relation is stored; zero value: no circle.
+	Incoming questions.Set
+	FollowUp questions.Set // zero value: never checked
+	// LifeArea zero value: nothing is labelled and every reply searches memory.
+	LifeArea     questions.Set
 	PersonCircle questions.Set
-	// FactRelevance is a one-question template ({fact} marks where each fact
-	// goes) for picking which remembered facts System 2 sees; zero value: no recall.
+	// FactRelevance is a one-question template, asked once per fact ({fact});
+	// zero value: no recall.
 	FactRelevance questions.Set
-	// OpenThreads is a one-question template like FactRelevance, used instead
-	// of it for small talk: what's going on in the speaker's life worth asking
-	// about. Zero value: small talk recalls like any other message.
+	// OpenThreads replaces FactRelevance for small talk; zero value: small talk
+	// recalls like any other message.
 	OpenThreads      questions.Set
-	RecallCandidates int    // facts considered per reply: same life area first, then newest
-	ReplyPrompt      Prompt // how System 2 writes a reply
+	RecallCandidates int // facts considered per reply: same life area first, then newest
+	ReplyPrompt      Prompt
 	Working          WorkingMemory
 	// Ticks is the clock, about once a minute; nil: the agent never speaks first.
 	Ticks <-chan time.Time
-	// Zone is the agent's time zone: reminders and check-in times are in it. nil: UTC.
-	Zone     *time.Location
-	CheckIns CheckIns
-	Day      Day // its own day: plan, activities, journal
-	// Abilities are what it can do in its day beyond writing: read, write its
-	// journal (which its day needs). nil: none.
+	// Zone is for reminders and check-in times; nil: UTC.
+	Zone      *time.Location
+	CheckIns  CheckIns
+	Day       Day
 	Abilities *ability.Set
-	// SkillLevel scores a work as evidence of a skill (one score question);
-	// zero value: works aren't scored, and skills only move with feedback.
+	// SkillLevel zero value: works aren't scored, and skills only move with feedback.
 	SkillLevel questions.Set
 	// Autonomy is what it may do on its own; the zero value allows everything.
 	Autonomy action.Policy
-	// Asker asks the owner what Autonomy says to ask first, and (as a
-	// Chooser) what they'd choose on its calls; nil: requests wait unsent
-	// and expire.
+	// Asker nil: requests to the owner wait unsent and expire.
 	Asker Asker
-	// Calls is how it learns its owner's judgment from its own decisions;
-	// zero value: off.
 	Calls Calls
-	// Embedder finds its owner's decisions most like the one it faces; nil:
-	// it takes the newest of the right type instead.
+	// Embedder nil: it takes the owner's newest decision of the right type instead.
 	Embedder embed.Embedder
 	Log      *slog.Logger
 }
 
 type Mind struct {
 	Config
-	lastTick time.Time // when the clock last ticked; zero before the first tick
-	planned  string    // the local date ("2006-01-02") its day was last planned for
-	round    int       // the last round of that day it planned (0: the morning plan)
-	reviewed time.Time // the weekly review time it last considered
-	toPlan   bool      // a goal was taken on in a chat: draft its learning plan on the next tick
+	policyMu sync.RWMutex // guards Autonomy: the owner can change it in a chat while its day reads it
+	toPlan   atomic.Bool  // a goal was taken on in a chat: draft its learning plan on the next tick
+
+	// Only the life loop touches these.
+	lastTick time.Time
+	planned  string // the local date ("2006-01-02") its day was last planned for
+	round    int    // the last round of that day it planned (0: the morning plan)
+	reviewed time.Time
 }
 
 func New(c Config) *Mind {
@@ -225,25 +204,64 @@ func New(c Config) *Mind {
 	return &Mind{Config: c}
 }
 
+// Run runs two loops until ctx is done or the percepts end: one talks, the
+// other lives its day on the clock's ticks, so a slow plan, activity or
+// review never keeps a reply waiting.
 func (m *Mind) Run(ctx context.Context) error {
 	m.loadPermissions(ctx)
 	m.bornKnowing(ctx)
 	m.bornWanting(ctx)
 	m.seedJudgment(ctx)
 	m.labelUnlabelledFacts(ctx)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	lived := make(chan struct{})
+	go func() {
+		defer close(lived)
+		defer cancel()
+		m.live(ctx)
+	}()
+	m.talk(ctx)
+	cancel()
+	<-lived
+	return nil
+}
+
+func (m *Mind) talk(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return
 		case p, ok := <-m.Percepts:
 			if !ok {
-				return nil
+				return
 			}
 			m.handle(ctx, p)
+		}
+	}
+}
+
+func (m *Mind) live(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
 		case now := <-m.Ticks:
 			m.tick(ctx, now)
 		}
 	}
+}
+
+func (m *Mind) policy() action.Policy {
+	m.policyMu.RLock()
+	defer m.policyMu.RUnlock()
+	return m.Autonomy
+}
+
+func (m *Mind) setPolicy(p action.Policy) {
+	m.policyMu.Lock()
+	defer m.policyMu.Unlock()
+	m.Autonomy = p
 }
 
 func (m *Mind) handle(ctx context.Context, p perception.Percept) {
@@ -258,16 +276,16 @@ func (m *Mind) handle(ctx context.Context, p perception.Percept) {
 		return
 	}
 	if p.Kind == perception.KindApproval {
-		m.answer(ctx, p) // the owner answering a request, not a message
+		m.answer(ctx, p)
 		return
 	}
 	if p.Kind == perception.KindCall {
-		m.pickAnswered(ctx, p) // the owner choosing on one of its calls
+		m.pickAnswered(ctx, p)
 		return
 	}
 
-	// Who is speaking: remembered from before, or met now. Their name comes
-	// from memory once known, so a changed account name does not change them.
+	// The name comes from memory once known, so a changed account name does
+	// not change them.
 	person := m.meet(ctx, p)
 	if person.Name != "" {
 		p.SpeakerName = person.Name
@@ -284,7 +302,6 @@ func (m *Mind) handle(ctx context.Context, p perception.Percept) {
 		after []*decision.Decision // what the reply's answer changed: saved after it
 	)
 	if p.Text == "" {
-		// Reflex: nothing to read, so nothing to think about.
 		root.Tier, root.SetID, root.Action = decision.TierReflex, nonTextSetID, "reply"
 		reply = "I can only read text for now."
 	} else {
@@ -329,7 +346,7 @@ func (m *Mind) handle(ctx context.Context, p perception.Percept) {
 		root.Latency = now.Sub(start)
 	}
 	for _, d := range chain {
-		if d.Outcome == nil { // an in-between step that did not set its own
+		if d.Outcome == nil {
 			d.Outcome = &decision.Outcome{Status: decision.OutcomeOK, At: now.UTC()}
 		}
 	}
@@ -349,8 +366,6 @@ func newDecision(p perception.Percept, parent *ulid.ULID, at time.Time) *decisio
 	return &decision.Decision{ID: ulid.Make(), ParentID: parent, At: at.UTC(), PerceptID: p.ID, Gate: decision.GateAuto}
 }
 
-// recall brings the conversation so far into working memory. Without it, a
-// follow-up like "I am in Ikoyi" makes no sense.
 func (m *Mind) recall(ctx context.Context, p perception.Percept) []memory.Exchange {
 	if m.Working.Turns <= 0 || p.Thread == "" {
 		return nil
@@ -364,19 +379,16 @@ func (m *Mind) recall(ctx context.Context, p perception.Percept) []memory.Exchan
 	return exchanges
 }
 
-// decideIncoming asks System 1 about a text message and routes on its
-// answers. It fills in d and returns either a reply, or (when System 2
-// should answer) the reason for handing over, plus how the message was
-// filed by life area (nil if it was not).
+// decideIncoming fills in d and returns either a reply or, when System 2
+// should answer, the reason for handing over. labels is nil if the message
+// was not filed by life area.
 func (m *Mind) decideIncoming(ctx context.Context, p perception.Percept, d *decision.Decision,
 	recent []memory.Exchange) (reply, toSystem2 string, labels *lifeLabels) {
 	d.Tier, d.SetID = decision.TierSystem1, m.Incoming.Ref()
 	n := m.namesFor(p)
 
-	// Besides the intent read, up to two more System 1 calls run at the same
-	// time, each with its own state, since extra state upsets the intent read:
-	// is the person answering what the agent just said, and which part of
-	// whose life is the message about?
+	// The follow-up and life-area checks run alongside the intent read, each
+	// with its own state, since extra state upsets the intent read.
 	var (
 		follow, life       system1.Response
 		followErr, lifeErr error
@@ -427,7 +439,7 @@ func (m *Mind) decideIncoming(ctx context.Context, p perception.Percept, d *deci
 		} else {
 			maps.Copy(d.Answers, follow.Answers)
 			d.CostUSD += follow.CostUSD
-			continues = holds(m.FollowUp, follow.Answers)
+			continues = isYes(m.FollowUp, follow.Answers, m.FollowUp.Primary)
 		}
 	}
 	if checkLife {
@@ -440,16 +452,13 @@ func (m *Mind) decideIncoming(ctx context.Context, p perception.Percept, d *deci
 		}
 	}
 
-	// Every message gets a reply in the agent's own words, from System 2; what
-	// a person shares is remembered by System 2 too. The read decides what
-	// System 2 is told about the message, and is recorded as the action.
 	r := routeFor(m.Incoming, resp.Answers)
 	switch {
 	case continues:
 		d.Action = "continue"
 		return "", n.speaker + " is answering what you just asked", labels
 	case r.Kind == routeAct:
-		d.Action = r.Choice // share, ask_about_reader, ask_about_writer, ask_for_help, remind, small_talk, other
+		d.Action = r.Choice
 		return "", "it needs a reply", labels
 	case r.Kind == routeAsk:
 		d.Action = string(routeAsk)
@@ -460,14 +469,11 @@ func (m *Mind) decideIncoming(ctx context.Context, p perception.Percept, d *deci
 	}
 }
 
-// readAs reports whether System 1's intent read of d's message was choice.
 func (m *Mind) readAs(d *decision.Decision, choice string) bool {
 	a, ok := d.Answers[m.Incoming.Primary]
 	return ok && !a.Refused && a.Choice == choice
 }
 
-// lastReply is the agent's most recent reply in the conversation, if it was
-// the last thing said; "" otherwise.
 func lastReply(recent []memory.Exchange) string {
 	if len(recent) == 0 {
 		return ""
@@ -475,15 +481,13 @@ func lastReply(recent []memory.Exchange) string {
 	return recent[len(recent)-1].Reply
 }
 
-// recallFacts picks the remembered facts that would help reply to p. Only the
-// agent's own facts and those about the person speaking are candidates. It
-// uses how the message was filed by life area (labels; nil if it was not):
-//   - not about the agent's or the speaker's own life ("capital of France?"): memory is not searched;
+// recallFacts picks the facts that would help reply to p, by how the message
+// was filed by life area (labels; nil if it was not):
+//   - not about the agent's or the speaker's life ("capital of France?"): memory is not searched;
 //   - about one of them in general ("Tell me about yourself"): every candidate goes through;
-//   - otherwise System 1 answers one yes/no relevance question per candidate,
-//     all in one call, with facts from the message's life areas considered first.
+//   - otherwise System 1 checks each candidate, the message's life areas first.
 //
-// The step is recorded as a child decision of root; nil when there was nothing to do.
+// The returned decision is nil when there was nothing to do.
 func (m *Mind) recallFacts(ctx context.Context, p perception.Percept, root *decision.Decision,
 	labels *lifeLabels) ([]memory.Fact, *decision.Decision) {
 	if m.FactRelevance.ID == "" || m.RecallCandidates <= 0 {
@@ -512,7 +516,6 @@ func (m *Mind) recallFacts(ctx context.Context, p perception.Percept, root *deci
 	start := time.Now()
 	d := newDecision(p, &root.ID, start)
 	if labels != nil && labels.Broad {
-		// A rule on System 1's labels, not a model call: everything known is relevant.
 		d.Tier, d.SetID, d.Action = decision.TierReflex, "reflex.recall_all@1", "recall_all"
 		slices.Reverse(candidates) // oldest first, the order they were told
 		d.Outcome = &decision.Outcome{Status: decision.OutcomeOK,
@@ -527,9 +530,6 @@ func (m *Mind) recallFacts(ctx context.Context, p perception.Percept, root *deci
 // friend asks about last week's interview, not about a cold from June.
 const openThreadWindow = 30 * 24 * time.Hour
 
-// recallOpenThreads is recall for small talk: when someone just says hi, a
-// friend thinks of what's going on in their life. It checks the speaker's
-// facts from the last openThreadWindow with the open_threads question set.
 func (m *Mind) recallOpenThreads(ctx context.Context, p perception.Percept, root *decision.Decision) ([]memory.Fact, *decision.Decision) {
 	if m.OpenThreads.ID == "" || p.Speaker == "" || m.RecallCandidates <= 0 {
 		return nil, nil
@@ -553,17 +553,13 @@ func (m *Mind) recallOpenThreads(ctx context.Context, p perception.Percept, root
 	return m.checkFacts(ctx, p, d, m.OpenThreads, "recall_open", recent, false), d
 }
 
-// checkFacts has System 1 answer set's one-question template once per
-// candidate ({fact} becomes a path to it), all in one call, and returns the
-// facts that pass, oldest first. withMessage adds the message to the state.
-// The step is recorded on d.
+// checkFacts returns the candidates System 1 passes, oldest first, in one
+// call. The step is recorded on d.
 func (m *Mind) checkFacts(ctx context.Context, p perception.Percept, d *decision.Decision, set questions.Set,
 	action string, candidates []memory.Fact, withMessage bool) []memory.Fact {
 	start := time.Now()
 	d.Tier, d.SetID, d.Action = decision.TierSystem1, set.Ref(), action
 
-	// Message and facts name people, so "your church" and "my church" are
-	// never confused with each other.
 	n := m.namesFor(p)
 	template := set.Questions[0]
 	texts := make([]string, len(candidates))
@@ -571,7 +567,7 @@ func (m *Mind) checkFacts(ctx context.Context, p perception.Percept, d *decision
 	for i, f := range candidates {
 		texts[i] = n.fact(f)
 		q := template
-		q.Name = f.ID.String() // answers come back keyed by fact ID
+		q.Name = f.ID.String()
 		q.Instructions = n.fill(strings.ReplaceAll(template.Instructions, "{fact}", fmt.Sprintf("`facts[%d]`", i)))
 		qs[i] = q
 	}
@@ -595,14 +591,13 @@ func (m *Mind) checkFacts(ctx context.Context, p perception.Percept, d *decision
 			kept = append(kept, f)
 		}
 	}
-	slices.SortStableFunc(kept, func(a, b memory.Fact) int { return a.At.Compare(b.At) }) // oldest first
+	slices.SortStableFunc(kept, func(a, b memory.Fact) int { return a.At.Compare(b.At) })
 	d.Outcome = &decision.Outcome{Status: decision.OutcomeOK,
 		Detail: fmt.Sprintf("kept %d of %d facts", len(kept), len(candidates)), At: time.Now().UTC()}
 	d.Latency = time.Since(start)
 	return kept
 }
 
-// reason has System 2 reply as the agent itself, recording it as child decision d.
 func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.Person, parent, d *decision.Decision,
 	recent []memory.Exchange, facts []memory.Fact, why string) (string, []*decision.Decision) {
 	d.Tier, d.SetID, d.Action = decision.TierSystem2, m.ReplyPrompt.Ref, "reply"
@@ -625,14 +620,11 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	m.Log.Debug("system 2 usage", "input_tokens", resp.Usage.InputTokens,
 		"output_tokens", resp.Usage.OutputTokens, "reasoning_tokens", resp.Usage.ReasoningTokens)
 
-	// System 2 understood the conversation, so it may have heard a lasting fact
-	// about the speaker that System 1 could not, like "It is 2027" after a
-	// passport question, or decided something about itself.
 	for _, mem := range resp.Remember {
 		subject := memory.SubjectSelf
 		if mem.About == system2.AboutSpeaker {
 			if p.Speaker == "" {
-				continue // no one to file it under
+				continue
 			}
 			subject = p.Speaker
 		}
@@ -642,12 +634,9 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 			m.Log.Error("save fact from system 2", "percept", p.ID.String(), "err", err)
 		}
 	}
-	// It may also have learned who the speaker is to it ("I'm your cousin").
 	d.CostUSD += m.learnRelation(ctx, p, person, resp.WhoTheyAre)
 	m.saveReminders(ctx, p, resp.Reminders)
 	m.savePromises(ctx, p, person, resp.Promises)
-	// What the speaker corrected: facts, the agent's permissions, its read of
-	// their last message. Each is a decision of its own, after the reply.
 	var more []*decision.Decision
 	more = append(more, m.correctFacts(ctx, p, d, refs, resp.Corrections, n)...)
 	more = append(more, m.changePermissions(ctx, p, d, resp.Permissions)...)
@@ -659,25 +648,21 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	return resp.Text, more
 }
 
-// canPromise reports whether the agent may promise person things: not a
-// stranger, whose requests could be anything.
+// canPromise is false for strangers, whose requests could be anything.
 func canPromise(p perception.Percept, person memory.Person) bool {
 	return p.Speaker != "" && person.Circle != memory.CircleStranger
 }
 
-// promisesNote tells System 2 what it already promised the speaker and hasn't
-// sent yet, or that it can't promise them anything, or that it must check
-// with its owner first (the autonomy gate).
 func (m *Mind) promisesNote(ctx context.Context, p perception.Percept, person memory.Person, n names) string {
 	if !canPromise(p, person) {
 		return fmt.Sprintf("\n\nYou don't know %s well yet: don't promise to make them anything; leave promises empty.", n.speaker)
 	}
 	var gate string
-	switch m.Autonomy.Check(action.Commit, p.Speaker) {
+	switch m.policy().Check(action.Commit, p.Speaker) {
 	case action.Forbid:
 		return fmt.Sprintf("\n\nYou can't promise to make %s anything; leave promises empty.", n.speaker)
 	case action.Ask:
-		owner := orDefault(m.person(ctx, m.Autonomy.Owner).Name, "someone")
+		owner := orDefault(m.person(ctx, m.policy().Owner).Name, "someone")
 		gate = fmt.Sprintf("\n\nBefore you promise to make anything for %s, you check with %s. If %s asks and you'd like to, "+
 			"don't say yes yet: say you'll check and get back to them, and still put it in promises.", n.speaker, owner, n.speaker)
 	}
@@ -694,11 +679,9 @@ func (m *Mind) promisesNote(ctx context.Context, p perception.Percept, person me
 	return gate + b.String()
 }
 
-// savePromises keeps what System 2 promised to make for the speaker, as tasks
-// due when it said it would send them. One in the past, with a bad time, past
-// maxOpenPromises, or to a stranger is dropped; an ability it doesn't have is
-// left out. The autonomy gate may forbid promising (dropped) or say to ask
-// the owner first: the task then waits for their approval.
+// savePromises drops a promise in the past, with a bad time, past
+// maxOpenPromises or to a stranger; an ability it doesn't have is left out.
+// When the gate says ask, the task waits for the owner's approval.
 func (m *Mind) savePromises(ctx context.Context, p perception.Percept, person memory.Person, ps []system2.Promise) {
 	if len(ps) == 0 {
 		return
@@ -708,7 +691,7 @@ func (m *Mind) savePromises(ctx context.Context, p perception.Percept, person me
 		log.Warn("dropped promises to a stranger", "promises", len(ps))
 		return
 	}
-	verdict := m.Autonomy.Check(action.Commit, p.Speaker)
+	verdict := m.policy().Check(action.Commit, p.Speaker)
 	if verdict == action.Forbid {
 		log.Warn("dropped promises: not allowed", "promises", len(ps))
 		return
@@ -752,8 +735,6 @@ func (m *Mind) savePromises(ctx context.Context, p perception.Percept, person me
 	}
 }
 
-// saveReminders keeps the reminders System 2 agreed to set, in the agent's
-// time zone. One in the past or with a bad time is dropped.
 func (m *Mind) saveReminders(ctx context.Context, p perception.Percept, rs []system2.Reminder) {
 	for _, r := range rs {
 		due, err := time.ParseInLocation("2006-01-02T15:04", r.When, m.Zone)
@@ -771,14 +752,10 @@ func (m *Mind) saveReminders(ctx context.Context, p perception.Percept, rs []sys
 	}
 }
 
-// now tells System 2 the time, in the agent's time zone.
 func (m *Mind) now(t time.Time) string {
 	return fmt.Sprintf("It is now %s (%s time).", t.In(m.Zone).Format("Monday 2 January 2006, 15:04"), m.Zone)
 }
 
-// instructions renders the reply prompt for this conversation: who the agent
-// is, its life story, and who it is talking with, from memory, by account
-// rather than by name.
 func (m *Mind) instructions(ctx context.Context, person memory.Person, n names) string {
 	story := "- " + strings.Join(m.Life.Story, "\n- ")
 	personality := "- Be yourself."
@@ -792,7 +769,6 @@ func (m *Mind) instructions(ctx context.Context, person memory.Person, n names) 
 		"{feedback_help}", m.feedbackHelp(ctx, person)+m.goalsHelp(ctx, person)).Replace(m.ReplyPrompt.Text)
 }
 
-// turns lays recalled exchanges out as a conversation for System 2.
 func turns(recent []memory.Exchange) []system2.Turn {
 	var ts []system2.Turn
 	for _, e := range recent {
@@ -806,9 +782,6 @@ func turns(recent []memory.Exchange) []system2.Turn {
 	return ts
 }
 
-// system2Note tells System 2 why it is answering, what System 1 made of the
-// message, and what it remembers that could help, about itself and about the
-// speaker, with names in place of pronouns.
 func (m *Mind) system2Note(s1 *decision.Decision, why string, facts []memory.Fact, n names) (string, map[string]memory.Fact) {
 	refs := map[string]memory.Fact{}
 	var b strings.Builder
@@ -818,7 +791,7 @@ func (m *Mind) system2Note(s1 *decision.Decision, why string, facts []memory.Fac
 		if phrase, ok := intentPhrases[a.Choice]; ok {
 			read = n.speaker + " " + phrase
 		}
-		fmt.Fprintf(&b, " A quick first read, without the conversation, took it as %s (%s sure).", read, percent(a.Confidence))
+		fmt.Fprintf(&b, " A quick first read, without the conversation, took it as %s (%.0f%% sure).", read, a.Confidence*100)
 	}
 	var mine, theirs []memory.Fact
 	for _, f := range facts {
@@ -864,15 +837,8 @@ var intentPhrases = map[string]string{
 	"small_talk":           "making small talk",
 }
 
-func percent(f float64) string { return fmt.Sprintf("%.0f%%", f*100) }
-
-// namedLately is how many of its latest messages in a conversation count
-// when it checks whether it used someone's name.
 const namedLately = 4
 
-// nameNote tells System 2 not to use the speaker's name when it already did
-// in one of its latest messages, the way people rarely repeat a name in a
-// chat. Empty otherwise.
 func nameNote(recent []memory.Exchange, name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" || name == fallbackName {

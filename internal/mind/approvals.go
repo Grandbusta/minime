@@ -15,24 +15,16 @@ import (
 )
 
 // Approvals: what the autonomy gate makes the agent ask its owner first. An
-// approval is saved, then sent to the owner (now, or on the next tick if it
-// can't be yet) with Approve and Deny buttons. The owner's tap comes back as
-// a percept; unanswered, it is denied when it expires. Either way the agent
-// carries on: sends the message it wrote, keeps or drops a promise, publishes
-// a work or not.
+// approval unanswered is denied when it expires.
 
-// Asker asks the owner with Approve and Deny buttons (telegram.Client).
 type Asker interface {
-	// Ask sends text with buttons for approval id to the chat p is in, and
-	// returns where it was sent.
+	// Ask returns where it sent the request, for Settle.
 	Ask(ctx context.Context, p perception.Percept, text, id string) (json.RawMessage, error)
-	// Settle replaces a request sent by Ask with text, removing its buttons.
 	Settle(ctx context.Context, where json.RawMessage, text string) error
 }
 
 const approvalsPerTick = 10
 
-// ask saves an approval for the owner and asks them right away if it can.
 func (m *Mind) ask(ctx context.Context, a memory.Approval) error {
 	a.ID, a.Status, a.AskedAt = ulid.Make(), memory.ApprovalPending, time.Now().UTC()
 	if err := m.Store.SaveApproval(ctx, a); err != nil {
@@ -43,11 +35,8 @@ func (m *Mind) ask(ctx context.Context, a memory.Approval) error {
 	return nil
 }
 
-// sendApprovals asks the owner what they haven't been asked yet, in their
-// own conversation with the agent. Saved by anything (the profile writer
-// too), an approval is sent here.
 func (m *Mind) sendApprovals(ctx context.Context) {
-	if m.Asker == nil || m.Autonomy.Owner == "" {
+	if m.Asker == nil || m.policy().Owner == "" {
 		return
 	}
 	as, err := m.Store.UnsentApprovals(ctx, approvalsPerTick)
@@ -57,12 +46,12 @@ func (m *Mind) sendApprovals(ctx context.Context) {
 		}
 		return
 	}
-	conv, ok := m.conversationWith(ctx, m.Autonomy.Owner)
+	conv, ok := m.conversationWith(ctx, m.policy().Owner)
 	if !ok {
-		m.Log.Warn("can't ask the owner yet: they haven't messaged the agent", "owner", m.Autonomy.Owner, "waiting", len(as))
+		m.Log.Warn("can't ask the owner yet: they haven't messaged the agent", "owner", m.policy().Owner, "waiting", len(as))
 		return
 	}
-	owner := m.person(ctx, m.Autonomy.Owner)
+	owner := m.person(ctx, m.policy().Owner)
 	p := outgoing(conv, owner, perception.KindApproval, time.Now()) // only says where; not kept
 	for _, a := range as {
 		where, err := m.Asker.Ask(ctx, p, m.request(ctx, a), a.ID.String())
@@ -76,7 +65,6 @@ func (m *Mind) sendApprovals(ctx context.Context) {
 	}
 }
 
-// request is how the agent asks its owner, in its own voice.
 func (m *Mind) request(ctx context.Context, a memory.Approval) string {
 	who := orDefault(m.person(ctx, a.Person).Name, fallbackName)
 	var ask string
@@ -92,18 +80,18 @@ func (m *Mind) request(ctx context.Context, a memory.Approval) string {
 	default:
 		ask = "Can I " + a.What + "?"
 	}
-	if m.Autonomy.AskExpires > 0 {
+	if m.policy().AskExpires > 0 {
 		ask += fmt.Sprintf("\n\n(If I don't hear back by %s, I won't.)",
-			a.AskedAt.Add(m.Autonomy.AskExpires).In(m.Zone).Format("Mon 2 Jan 15:04"))
+			a.AskedAt.Add(m.policy().AskExpires).In(m.Zone).Format("Mon 2 Jan 15:04"))
 	}
 	return ask
 }
 
-// answer acts on the owner's tap on an approval's button. Only the owner's
-// answer counts, and only the first: an approval is decided once.
+// answer counts only the owner's tap, and only the first: an approval is
+// decided once.
 func (m *Mind) answer(ctx context.Context, p perception.Percept) {
 	log := m.Log.With("percept", p.ID.String())
-	if p.Speaker != m.Autonomy.Owner {
+	if p.Speaker != m.policy().Owner {
 		log.Warn("an approval answered by someone who isn't the owner; ignored", "speaker", p.Speaker)
 		return
 	}
@@ -129,12 +117,11 @@ func (m *Mind) answer(ctx context.Context, p perception.Percept) {
 	m.decide(ctx, a, status, p.ID)
 }
 
-// expireApprovals denies what the owner didn't answer in time.
 func (m *Mind) expireApprovals(ctx context.Context, now time.Time) {
-	if m.Autonomy.AskExpires <= 0 {
+	if m.policy().AskExpires <= 0 {
 		return
 	}
-	stale, err := m.Store.StaleApprovals(ctx, now.Add(-m.Autonomy.AskExpires), approvalsPerTick)
+	stale, err := m.Store.StaleApprovals(ctx, now.Add(-m.policy().AskExpires), approvalsPerTick)
 	if err != nil {
 		m.Log.Warn("loading expired approvals failed", "err", err)
 		return
@@ -144,8 +131,6 @@ func (m *Mind) expireApprovals(ctx context.Context, now time.Time) {
 	}
 }
 
-// decide settles an approval (approved, denied or expired), carries on
-// accordingly, updates the request the owner saw, and records the decision.
 func (m *Mind) decide(ctx context.Context, a memory.Approval, status string, percept ulid.ULID) {
 	now := time.Now()
 	ok, err := m.Store.DecideApproval(ctx, a.ID, status, now.UTC())
@@ -179,8 +164,6 @@ func (m *Mind) decide(ctx context.Context, a memory.Approval, status string, per
 	m.Log.Info("approval decided", "approval", a.ID.String(), "class", a.Class, "status", status, "detail", detail)
 }
 
-// carryOut does what an approval said: approved, what was asked; otherwise
-// not. It returns what it did, for the log.
 func (m *Mind) carryOut(ctx context.Context, a memory.Approval, now time.Time) string {
 	yes := a.Status == memory.ApprovalApproved
 	why := map[string]string{memory.ApprovalDenied: "the owner said no", memory.ApprovalExpired: "no answer from the owner"}[a.Status]
@@ -248,8 +231,6 @@ func (m *Mind) carryOut(ctx context.Context, a memory.Approval, now time.Time) s
 	return "nothing to do"
 }
 
-// sendApproved sends a message the owner approved, word for word, as the
-// agent speaking first in that person's conversation.
 func (m *Mind) sendApproved(ctx context.Context, a memory.Approval, now time.Time) error {
 	conv, ok := m.conversationWith(ctx, a.Person)
 	if !ok {
@@ -273,7 +254,6 @@ func (m *Mind) sendApproved(ctx context.Context, a memory.Approval, now time.Tim
 	return err
 }
 
-// finishRef finishes the intention an approval was about, if any.
 func (m *Mind) finishRef(ctx context.Context, id ulid.ULID, status, result string, now time.Time) {
 	if !id.IsZero() {
 		m.finish(ctx, memory.Intention{ID: id}, status, result, now)

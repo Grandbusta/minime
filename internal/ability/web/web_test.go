@@ -38,7 +38,7 @@ func (f *fakeFetcher) Fetch(_ context.Context, url string) (search.Page, error) 
 
 type fakeStore struct {
 	found map[string]search.Result
-	log   []string // kind:what
+	log   []string
 }
 
 func (s *fakeStore) SaveFound(_ context.Context, _ string, rs []search.Result, _ time.Time) error {
@@ -101,7 +101,6 @@ func TestCaps(t *testing.T) {
 	if !errors.Is(err, ErrOverCap) {
 		t.Errorf("third search: %v", err)
 	}
-	// A search under its cap, with no pages left today, lists what it found and reads nothing.
 	st = &fakeStore{found: map[string]search.Result{}}
 	f := &fakeFetcher{}
 	m, err := Search{Searcher: &fakeSearcher{results: []search.Result{{Title: "x", URL: "https://x.example/"}}}, Fetcher: f, Store: st,

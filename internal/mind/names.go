@@ -7,10 +7,8 @@ import (
 	"github.com/Grandbusta/minime/internal/perception"
 )
 
-// fallbackName is what the agent calls someone whose name it does not know.
 const fallbackName = "Friend"
 
-// names is who is in a conversation: the agent and the person it is talking with.
 type names struct{ agent, speaker string }
 
 func (m *Mind) namesFor(p perception.Percept) names {
@@ -21,7 +19,6 @@ func (m *Mind) namesFor(p perception.Percept) names {
 	return names{agent: m.Life.Name, speaker: speaker}
 }
 
-// message resolves a message in the speaker's voice: "my church" → "Sam's church".
 func (n names) message(text string) string { return resolvePronouns(text, n.speaker, n.agent) }
 
 // fact resolves a fact in its subject's voice, so a person's "I live with my
@@ -33,7 +30,6 @@ func (n names) fact(f memory.Fact) string {
 	return resolvePronouns(f.Text, n.speaker, n.agent)
 }
 
-// fill puts the names into a question's {agent} and {speaker} placeholders.
 func (n names) fill(s string) string {
 	return strings.NewReplacer("{agent}", n.agent, "{speaker}", n.speaker).Replace(s)
 }

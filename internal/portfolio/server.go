@@ -24,7 +24,6 @@ var pageHTML string
 
 var pageTemplate = template.Must(template.New("page").Parse(pageHTML))
 
-// Profiles is what the server reads the page from: the store.
 type Profiles interface {
 	Profile(ctx context.Context) (page []byte, inputs string, at time.Time, ok bool, err error)
 	PublicWorks(ctx context.Context, limit int) ([]memory.Work, error)
@@ -32,12 +31,11 @@ type Profiles interface {
 }
 
 const (
-	pageWorks    = 6   // public works listed on the page, newest
-	excerptLines = 4   // lines of a work shown on the page
-	excerptRunes = 260 // at most
+	pageWorks    = 6
+	excerptLines = 4
+	excerptRunes = 260
 )
 
-// view is what the template shows: the page, with its works, or one work.
 type view struct {
 	Name, Initial string
 	Page          *Page
@@ -59,7 +57,6 @@ func newWorkView(w memory.Work, withText bool) workView {
 	return v
 }
 
-// excerpt is the start of a work: its first few lines, cut at a word.
 func excerpt(text string) string {
 	var lines []string
 	for _, l := range strings.Split(strings.TrimSpace(text), "\n") {
@@ -81,9 +78,8 @@ func excerpt(text string) string {
 	return out
 }
 
-// Handler serves the page at / and each public work at /works/{id},
-// read-only, as the agent last wrote them. A work that isn't public is not
-// found, as if it didn't exist.
+// Handler serves the page at / and each public work at /works/{id}. A work
+// that isn't public is not found, as if it didn't exist.
 func Handler(name string, profiles Profiles, log *slog.Logger) http.Handler {
 	initial, _ := utf8.DecodeRuneInString(name)
 	base := view{Name: name, Initial: string(unicode.ToUpper(initial))}
@@ -131,8 +127,7 @@ func Handler(name string, profiles Profiles, log *slog.Logger) http.Handler {
 	return mux
 }
 
-// loadPage puts the page, as the agent last wrote it, into v. It reports
-// false, having answered with an error, if it couldn't.
+// loadPage reports false, having answered with an error, if it couldn't.
 func loadPage(w http.ResponseWriter, r *http.Request, profiles Profiles, v *view, log *slog.Logger) bool {
 	raw, _, at, ok, err := profiles.Profile(r.Context())
 	if err != nil {
@@ -168,7 +163,6 @@ func render(w http.ResponseWriter, v view, log *slog.Logger) {
 	w.Write(b.Bytes())
 }
 
-// Serve runs the page's web server on addr until ctx is done.
 func Serve(ctx context.Context, addr string, h http.Handler, log *slog.Logger) error {
 	srv := &http.Server{
 		Addr: addr, Handler: h,
@@ -194,7 +188,6 @@ func Serve(ctx context.Context, addr string, h http.Handler, log *slog.Logger) e
 	}
 }
 
-// displayAddr makes ":8080" clickable as "localhost:8080".
 func displayAddr(addr string) string {
 	if strings.HasPrefix(addr, ":") {
 		return "localhost" + addr

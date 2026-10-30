@@ -28,20 +28,20 @@ import (
 type fakeStore struct {
 	seen           map[string]bool
 	decisions      []decision.Decision
-	exchanges      []memory.Exchange // returned by RecentExchanges
+	exchanges      []memory.Exchange
 	recallErr      error
 	recalls        []recallArgs
 	facts          []memory.Fact // newest first
 	factErr        error
 	recallAreas    [][]string // areas each RecallCandidates call was given
-	recallSubjects [][]string // and subjects
+	recallSubjects [][]string
 	people         map[string]memory.Person
 	intentions     []memory.Intention
 	projects       map[ulid.ULID]memory.Project
 	works          []memory.Work
 	spent          float64 // what CostSince returns
 	convs          []memory.Conversation
-	percepts       []perception.Percept // saved, in order
+	percepts       []perception.Percept
 	asked          map[ulid.ULID]time.Time
 	approvals      []memory.Approval
 	rules          map[string]string // autonomy rules: class → verdict
@@ -633,9 +633,7 @@ func (r *fakeReplier) Reply(_ context.Context, _ perception.Percept, text string
 	return r.err
 }
 
-// fakeSystem1 answers the intent question with a fixed choice and confidence,
-// and the follow-up question with a fixed probability. The mind may call it
-// from two goroutines at once.
+// fakeSystem1 may be called from two goroutines at once.
 type fakeSystem1 struct {
 	choice      string
 	confidence  float64
@@ -643,7 +641,7 @@ type fakeSystem1 struct {
 	err         error
 	followProb  float64
 	followErr   error
-	relevant    map[string]bool // fact text → relevant, for recall checks
+	relevant    map[string]bool // fact text → relevant
 	recallErr   error
 	life        map[string]lifeAnswer // text → life-area answer; default: personal, no area
 	lifeErr     error
@@ -651,7 +649,7 @@ type fakeSystem1 struct {
 	requests    []system1.Request
 	followCalls []system1.Request
 	recallCalls []system1.Request
-	lifeCalls   []string // texts labelled
+	lifeCalls   []string
 	circleCalls []system1.Request
 	scores      map[string]float64 // work title → level index (0-9), for skill scoring
 	scoreCalls  []system1.Request
@@ -824,7 +822,6 @@ func newMind(r Replier, s1 system1.DecisionModel, s2 system2.Reasoner) (*Mind, *
 
 var now = time.Date(2026, 10, 27, 13, 16, 0, 0, time.UTC)
 
-// sam is the person every test percept comes from.
 const sam = "test:sam"
 
 func percept(externalID, text string) perception.Percept {
@@ -1099,7 +1096,7 @@ func TestFollowUp(t *testing.T) {
 		name        string
 		recent      []memory.Exchange
 		s1          *fakeSystem1
-		wantCalls   int // follow-up checks made
+		wantCalls   int
 		wantActions []string
 		wantSetID   string
 	}{
@@ -1160,8 +1157,7 @@ func TestFollowUp(t *testing.T) {
 }
 
 func TestSharingIsAnsweredAndRememberedBySystem2(t *testing.T) {
-	// No canned "Got it": the agent replies as itself, and System 2 decides
-	// what to remember, so nothing is saved verbatim by System 1.
+	// System 2 decides what to remember, so nothing is saved verbatim by System 1.
 	s2 := &fakeSystem2{remember: []system2.Memory{{About: system2.AboutSpeaker, Text: "Sam's passport expires in March 2027"}}}
 	r := &fakeReplier{}
 	m, s := newMind(r, &fakeSystem1{choice: "share", confidence: 0.95}, s2)
@@ -1203,7 +1199,6 @@ func TestSystem2SavesFactsAboutBothSides(t *testing.T) {
 }
 
 func TestRecallPassesRelevantFactsToSystem2(t *testing.T) {
-	// Facts and the message reach System 1 with names, not pronouns.
 	s1 := &fakeSystem1{choice: "question", confidence: 0.93, relevant: map[string]bool{"Sam's passport expires in March 2027": true}}
 	s2 := &fakeSystem2{}
 	r := &fakeReplier{}
@@ -1306,7 +1301,6 @@ func TestLifeAreas(t *testing.T) {
 	church := memory.Fact{ID: ulid.Make(), Subject: sam, Text: "I go to Grace Chapel", At: now.Add(-2 * time.Hour), Areas: []string{"religion"}}
 	parents := memory.Fact{ID: ulid.Make(), Subject: sam, Text: "I live with my parents", At: now.Add(-time.Hour), Areas: []string{"home", "family"}}
 	facts := []memory.Fact{parents, church} // newest first
-	// What System 1 sees, with names in place of pronouns.
 	const churchSeen, parentsSeen = "Sam go to Grace Chapel", "Sam live with Sam's parents"
 
 	t.Run("message areas are recorded and steer recall", func(t *testing.T) {

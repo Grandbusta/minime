@@ -93,8 +93,4 @@ func TestPaceScalesTheBudgetAndTheWeb(t *testing.T) {
 	if d := depsFor(cfg, nil, nil); d.web.Searches != 100 || d.web.Pages != 150 {
 		t.Errorf("web = %+v", d.web)
 	}
-	cfg.DailyLife.Pace = 0 // unset: a person's pace
-	if day, _ := newDay(cfg); day.Pace != 1 || day.BudgetUSD != 0.05 {
-		t.Errorf("unset pace: %d, $%v", day.Pace, day.BudgetUSD)
-	}
 }

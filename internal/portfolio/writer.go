@@ -1,16 +1,10 @@
-// Package portfolio is the agent's public profile page: what it writes about
-// itself for strangers, the way a person keeps a personal website.
+// Package portfolio is the agent's public profile page.
 //
-// The agent curates it like a person would. Only facts about itself can reach
-// the page, and System 1 first decides, fact by fact, whether each is the kind
-// of thing people happily share in public (public_profile question set).
-// System 2 then writes the page in the agent's own voice from its life story
-// and those facts, and writes it again only when they change.
-//
-// Its works (lyrics, beat ideas, notes) are shared the same way: System 1
-// decides, work by work, whether each may be public (public_work), and the
-// page shows the public ones as they are, with no rewrite. Its journal and
-// what it made for someone are never public.
+// Only facts about itself can reach the page, and System 1 first decides,
+// fact by fact, whether each may be public (public_profile). System 2 then
+// writes the page from its life story and those facts, again only when they
+// change. Works are decided the same way (public_work) and shown as they are.
+// Its journal and what it made for someone are never public.
 package portfolio
 
 import (
@@ -34,12 +28,11 @@ import (
 	"github.com/Grandbusta/minime/internal/self"
 )
 
-// Page is the profile as the agent wrote it, first person.
 type Page struct {
-	Tagline   string   `json:"tagline"`   // one line under its name
-	About     []string `json:"about"`     // paragraphs
-	Interests []string `json:"interests"` // a few words each
-	Now       []string `json:"now"`       // what it is up to lately; may be empty
+	Tagline   string   `json:"tagline"`
+	About     []string `json:"about"`
+	Interests []string `json:"interests"`
+	Now       []string `json:"now"` // may be empty
 }
 
 var pageFormat = &system2.Format{Name: "profile_page", Schema: map[string]any{
@@ -67,10 +60,10 @@ type Store interface {
 }
 
 const (
-	factsPerCheck = 100  // undecided facts System 1 checks in one call
-	pageFacts     = 30   // public facts the page is written from, newest
-	worksPerCheck = 20   // undecided works System 1 checks in one update
-	workChars     = 2000 // of a work's text System 1 reads
+	factsPerCheck = 100 // in one System 1 call
+	pageFacts     = 30
+	worksPerCheck = 20
+	workChars     = 2000
 )
 
 // Writer keeps the page up to date: once a day at UpdateAt (UTC), and on
@@ -80,18 +73,13 @@ type Writer struct {
 	Store   Store
 	System1 system1.DecisionModel
 	System2 system2.Reasoner
-	// Public is the public_profile set: a one-question template ({fact} marks
-	// where each fact goes). Zero value: no fact is ever public.
-	Public questions.Set
-	// PublicWork is the public_work set: a one-question template ({work}
-	// marks the work). Zero value: no work is ever public.
+	// Public and PublicWork zero: nothing is ever public.
+	Public     questions.Set
 	PublicWork questions.Set
-	// Autonomy says whether a work System 1 judged public goes on the page
-	// (publish): on its own, after the owner approves, or never. The zero
-	// value: on its own.
+	// Autonomy zero: a work System 1 judged public goes on the page on its own.
 	Autonomy action.Policy
-	Prompt   mind.Prompt   // how System 2 writes the page
-	UpdateAt time.Duration // time of day, from midnight UTC, e.g. 0 for 00:00
+	Prompt   mind.Prompt
+	UpdateAt time.Duration // since midnight UTC
 	Log      *slog.Logger
 }
 
@@ -99,7 +87,7 @@ func (w *Writer) Run(ctx context.Context) error {
 	if _, _, _, ok, err := w.Store.Profile(ctx); err != nil {
 		w.Log.Warn("checking for the profile page failed", "err", err)
 	} else if !ok {
-		w.refresh(ctx) // so there is a page before the first daily update
+		w.refresh(ctx)
 	}
 	for {
 		next := nextUpdate(time.Now(), w.UpdateAt)
@@ -115,7 +103,6 @@ func (w *Writer) Run(ctx context.Context) error {
 	}
 }
 
-// nextUpdate is the first time after now that is at the time of day at, in UTC.
 func nextUpdate(now time.Time, at time.Duration) time.Time {
 	now = now.UTC()
 	next := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Add(at)
@@ -131,8 +118,7 @@ func (w *Writer) refresh(ctx context.Context) {
 	}
 }
 
-// Update does what the daily update does, now: it decides which new facts
-// may be public, then rewrites the page if they changed, or always with
+// Update rewrites the page only if the public facts changed, or always with
 // force. It reports whether the page was rewritten.
 func (w *Writer) Update(ctx context.Context, force bool) (bool, error) {
 	if err := w.decidePublic(ctx); err != nil {
@@ -144,8 +130,7 @@ func (w *Writer) Update(ctx context.Context, force bool) (bool, error) {
 	return w.write(ctx, force)
 }
 
-// decidePublic has System 1 decide, for each of the agent's own facts not
-// decided yet, whether it may go on the page. A refusal counts as no.
+// decidePublic counts a refusal as no.
 func (w *Writer) decidePublic(ctx context.Context) error {
 	if w.Public.ID == "" {
 		return nil
@@ -191,11 +176,8 @@ func (w *Writer) decidePublic(ctx context.Context) error {
 	return nil
 }
 
-// decidePublicWorks has System 1 decide, for each of the agent's works not
-// decided yet (never its journal or what it made for someone), whether it may
-// go on the page. Each work is asked in its own call: asked together, a
-// harmless work next to a private one was dragged down with it. A refusal
-// counts as no; a work it couldn't ask about is asked again next time.
+// decidePublicWorks asks each work in its own call: asked together, a harmless
+// work next to a private one was dragged down with it. A refusal counts as no.
 func (w *Writer) decidePublicWorks(ctx context.Context) error {
 	if w.PublicWork.ID == "" {
 		return nil
@@ -212,7 +194,7 @@ func (w *Writer) decidePublicWorks(ctx context.Context) error {
 	public, waiting, asked := 0, 0, 0
 	policy := w.Autonomy
 	if rules, err := w.Store.AutonomyRules(ctx); err == nil {
-		policy = policy.WithChatRules(rules) // what the owner changed by chat
+		policy = policy.WithChatRules(rules)
 	} else {
 		w.Log.Warn("loading the owner's permission changes failed; using the config's", "err", err)
 	}
@@ -228,7 +210,7 @@ func (w *Writer) decidePublicWorks(ctx context.Context) error {
 		})
 		if err != nil {
 			failed = err
-			continue // asked again next time
+			continue
 		}
 		d.Provider, d.CostUSD = resp.Provider, d.CostUSD+resp.CostUSD
 		a, ok := resp.Answers[q.Name]
@@ -271,8 +253,6 @@ func (w *Writer) decidePublicWorks(ctx context.Context) error {
 	return failed
 }
 
-// askToPublish puts a work System 1 judged public on hold, and saves a
-// request for the owner, which the running agent sends them.
 func (w *Writer) askToPublish(ctx context.Context, work memory.Work) error {
 	if err := w.Store.AwaitWorkPublic(ctx, work.ID); err != nil {
 		return err
@@ -282,9 +262,6 @@ func (w *Writer) askToPublish(ctx context.Context, work memory.Work) error {
 		Status: memory.ApprovalPending, AskedAt: time.Now().UTC()})
 }
 
-// write has System 2 write the page from the life story and the public facts,
-// unless the page was already written from exactly these and force is false.
-// It reports whether it wrote the page.
 func (w *Writer) write(ctx context.Context, force bool) (bool, error) {
 	facts, err := w.Store.PublicFacts(ctx, pageFacts)
 	if err != nil {
@@ -338,8 +315,6 @@ func (w *Writer) write(ctx context.Context, force bool) (bool, error) {
 	return true, nil
 }
 
-// instructions renders the profile prompt: who the agent is, and what it is
-// happy to share.
 func (w *Writer) instructions(facts []memory.Fact) string {
 	list := func(lines []string, none string) string {
 		if len(lines) == 0 {
@@ -357,7 +332,6 @@ func (w *Writer) instructions(facts []memory.Fact) string {
 		"{facts}", list(shared, "- (nothing yet beyond your life story)")).Replace(w.Prompt.Text)
 }
 
-// tidy trims every field, drops empty lines and keeps the lists short.
 func (p Page) tidy() Page {
 	clean := func(lines []string, max int) []string {
 		var out []string
@@ -372,8 +346,6 @@ func (p Page) tidy() Page {
 		Interests: clean(p.Interests, 6), Now: clean(p.Now, 6)}
 }
 
-// newDecision starts a decision the agent makes on its own: it is about no
-// message, so it has no percept.
 func (w *Writer) newDecision(at time.Time, tier decision.Tier, setID, action string) *decision.Decision {
 	return &decision.Decision{ID: ulid.Make(), At: at.UTC(), Tier: tier, SetID: setID, Action: action, Gate: decision.GateAuto}
 }

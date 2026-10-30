@@ -12,15 +12,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
-	"github.com/Grandbusta/minime/internal/bus"
 	"github.com/Grandbusta/minime/internal/perception"
 )
 
 const testToken = "123:SECRET"
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+// owned is a channel with one owner, 42, that only reads updates.
+var owned = &Channel{owners: map[int64]bool{42: true}, log: quiet}
+
+func newChannel(t *testing.T, url string, out chan<- perception.Percept) *Channel {
+	c, err := New(testToken, []int64{42}, time.Second, out, quiet, bot.WithServerURL(url))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
 
 // fakeAPI is the Bot API: it records each call (method and form fields) and
 // answers with the result reply gives, or {} by default.
@@ -74,8 +85,8 @@ func (f *fakeAPI) sent(method string) []map[string]string {
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
 
-func TestSensorKeepsOnlyOwnerMessages(t *testing.T) {
-	s := NewSensor(nil, []int64{42}, 1, bus.New[perception.Percept](1), quiet)
+func TestChannelKeepsOnlyOwnerMessages(t *testing.T) {
+	s := owned
 
 	owner := &models.Update{ID: 1, Message: &models.Message{ID: 9, From: &models.User{ID: 42, FirstName: "Sam"}, Chat: models.Chat{ID: 7},
 		Date: 1700000000, Text: "hi"}}
@@ -101,7 +112,7 @@ func TestSensorKeepsOnlyOwnerMessages(t *testing.T) {
 	}
 }
 
-func TestSensorRunsOnTheBotAPI(t *testing.T) {
+func TestChannelRunsOnTheBotAPI(t *testing.T) {
 	api := &fakeAPI{}
 	served := false
 	api.reply = func(method string) (int, string) {
@@ -123,9 +134,8 @@ func TestSensorRunsOnTheBotAPI(t *testing.T) {
 		return http.StatusOK, `true`
 	}
 	srv := api.serve(t)
-	out := bus.New[perception.Percept](4)
-	got := out.Subscribe()
-	s := NewSensor(newClient(testToken, srv.URL), []int64{42}, 1, out, quiet)
+	got := make(chan perception.Percept, 4)
+	s := newChannel(t, srv.URL, got)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	go s.Run(ctx)
@@ -139,10 +149,10 @@ func TestSensorRunsOnTheBotAPI(t *testing.T) {
 	}
 }
 
-func TestSensorStopsOnABadToken(t *testing.T) {
+func TestChannelStopsOnABadToken(t *testing.T) {
 	api := &fakeAPI{reply: func(string) (int, string) { return http.StatusUnauthorized, "Unauthorized" }}
 	srv := api.serve(t)
-	s := NewSensor(newClient(testToken, srv.URL), []int64{42}, 1, bus.New[perception.Percept](1), quiet)
+	s := newChannel(t, srv.URL, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := s.Run(ctx); err == nil || !strings.Contains(err.Error(), "rejected the bot token") {
@@ -151,7 +161,7 @@ func TestSensorStopsOnABadToken(t *testing.T) {
 }
 
 func TestSplitLongMessages(t *testing.T) {
-	para := strings.Repeat("word ", 300) // 1,500 runes
+	para := strings.Repeat("word ", 300)
 	text := "Here it is.\n\n" + para + "\n\n" + para + "\n\n" + para + "end"
 	parts := split(text, 4096)
 	if len(parts) != 2 || strings.Join(strings.Fields(strings.Join(parts, " ")), " ") != strings.Join(strings.Fields(text), " ") {
@@ -178,8 +188,8 @@ func tap(from int64, data string) *models.Update {
 		Message: models.MaybeInaccessibleMessage{Message: &models.Message{ID: 5, Chat: models.Chat{ID: 7}}}, Data: data}}
 }
 
-func TestSensorTurnsButtonTapsIntoAnswers(t *testing.T) {
-	s := NewSensor(nil, []int64{42}, 1, bus.New[perception.Percept](1), quiet)
+func TestChannelTurnsButtonTapsIntoAnswers(t *testing.T) {
+	s := owned
 	p, ok := s.percept(tap(42, "gate:01ABC:y"))
 	if !ok || p.Kind != perception.KindApproval || p.Text != "" || p.Speaker != "telegram:42" || p.ExternalID != "callback:cb1" || p.Thread != "7" {
 		t.Fatalf("percept = %+v, %v", p, ok)
@@ -200,7 +210,7 @@ func TestSensorTurnsButtonTapsIntoAnswers(t *testing.T) {
 
 func TestAskAndSettle(t *testing.T) {
 	api := &fakeAPI{}
-	c := newClient(testToken, api.serve(t).URL)
+	c := newChannel(t, api.serve(t).URL, nil)
 	p := perception.Percept{Source: Source, Payload: json.RawMessage(`{"chat_id":7,"message_id":1,"user_id":42}`)}
 	where, err := c.Ask(context.Background(), p, "Can I?", "01ABC")
 	if err != nil || string(where) != `{"chat_id":7,"message_id":77}` {
@@ -221,7 +231,7 @@ func TestAskAndSettle(t *testing.T) {
 }
 
 func TestCallButtons(t *testing.T) {
-	s := NewSensor(nil, []int64{42}, 1, bus.New[perception.Percept](1), quiet)
+	s := owned
 	for data, want := range map[string]int{"call:01ABC:1": 1, "call:01ABC:x": -1} {
 		p, ok := s.percept(tap(42, data))
 		var pick perception.Pick
@@ -236,7 +246,7 @@ func TestCallButtons(t *testing.T) {
 	}
 
 	api := &fakeAPI{}
-	c := newClient(testToken, api.serve(t).URL)
+	c := newChannel(t, api.serve(t).URL, nil)
 	p := perception.Percept{Source: Source, Payload: json.RawMessage(`{"chat_id":7,"message_id":1,"user_id":42}`)}
 	where, err := c.Choose(context.Background(), p, "What would you do?", "01ABC", 3, 1)
 	if err != nil || string(where) != `{"chat_id":7,"message_id":77}` {

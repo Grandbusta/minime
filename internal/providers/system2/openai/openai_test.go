@@ -241,7 +241,6 @@ func TestResponseErrorObjectIsAnError(t *testing.T) {
 	}
 }
 
-// What a request looks like on the wire, to check what was sent.
 type wireMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`

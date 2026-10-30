@@ -1,6 +1,5 @@
 // Package embed turns text into vectors whose closeness is closeness of
 // meaning, so the agent can find the decisions most like the one it faces.
-// Providers are switchable, like System 1 and System 2.
 package embed
 
 import (
@@ -13,15 +12,13 @@ type Embedder interface {
 	Embed(ctx context.Context, texts []string) (Embedded, error)
 }
 
-// Embedded is what an Embed call returned.
 type Embedded struct {
 	Vectors [][]float32
-	Model   string  // e.g. "openai/text-embedding-3-small"
-	CostUSD float64 // what it cost; 0 if unpriced
+	Model   string
+	CostUSD float64 // 0 if unpriced
 }
 
-// Similarity is how close two vectors are in meaning: their cosine, from -1
-// to 1 (1 the same). 0 when they can't be compared.
+// Similarity is the vectors' cosine, from -1 to 1; 0 when they can't be compared.
 func Similarity(a, b []float32) float64 {
 	if len(a) == 0 || len(a) != len(b) {
 		return 0

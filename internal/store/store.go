@@ -31,7 +31,6 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
-// Open connects to Postgres and applies any pending migrations.
 func Open(ctx context.Context, url string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
@@ -67,8 +66,8 @@ func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 
 func (s *Store) Close() { s.pool.Close() }
 
-// SavePercept stores p and reports whether it was new; a percept already seen
-// from the same source (same ExternalID) is not stored again.
+// SavePercept reports whether p was new: one already seen from the same source
+// (same ExternalID) is not stored again.
 func (s *Store) SavePercept(ctx context.Context, p perception.Percept) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `
 		INSERT INTO percepts (id, source, external_id, thread, speaker, kind, text, payload, at)
@@ -113,7 +112,6 @@ func (s *Store) SaveDecision(ctx context.Context, d decision.Decision) error {
 	return nil
 }
 
-// RecentDecisions returns the newest n decisions, newest first.
 func (s *Store) RecentDecisions(ctx context.Context, n int) ([]decision.Decision, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+decisionColumns+` FROM decisions d ORDER BY d.at DESC LIMIT $1`, n)
 	if err != nil {
@@ -178,9 +176,8 @@ func scanDecision(row pgx.Row, extra ...any) (decision.Decision, error) {
 	return d, nil
 }
 
-// RecentExchanges returns up to limit messages in a conversation since
-// the given time, oldest first, each with the reply it got, plus what the
-// agent said first (reminders, check-ins). The percept being handled is left out.
+// RecentExchanges is oldest first, with what the agent said first (reminders,
+// check-ins). The percept being handled is left out.
 func (s *Store) RecentExchanges(ctx context.Context, source, thread string, since time.Time,
 	exclude ulid.ULID, limit int) ([]memory.Exchange, error) {
 	rows, err := s.pool.Query(ctx, `
@@ -212,7 +209,7 @@ func (s *Store) RecentExchanges(ctx context.Context, source, thread string, sinc
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	slices.Reverse(out) // oldest first, the order a conversation is read in
+	slices.Reverse(out)
 	return out, nil
 }
 
@@ -233,15 +230,15 @@ func (s *Store) RecentFacts(ctx context.Context, limit int) ([]memory.Fact, erro
 		ORDER BY at DESC, id DESC LIMIT $1`, limit)
 }
 
-// RecallCandidates returns up to limit facts about the given subjects: those
-// sharing an area with areas first, then the rest, newest first within each group.
+// RecallCandidates returns facts sharing an area with areas first, then the
+// rest, newest first within each group.
 func (s *Store) RecallCandidates(ctx context.Context, subjects, areas []string, limit int) ([]memory.Fact, error) {
 	return s.queryFacts(ctx, `SELECT `+factColumns+` FROM facts
 		WHERE subject = ANY($1)
 		ORDER BY (areas && $2) DESC, at DESC, id DESC LIMIT $3`, nonNil(subjects), nonNil(areas), limit)
 }
 
-// UnlabelledFacts returns up to limit facts that have no areas yet, oldest first.
+// UnlabelledFacts returns facts with no areas yet, oldest first.
 func (s *Store) UnlabelledFacts(ctx context.Context, limit int) ([]memory.Fact, error) {
 	return s.queryFacts(ctx, `SELECT `+factColumns+` FROM facts
 		WHERE areas = '{}' ORDER BY at, id LIMIT $1`, limit)
@@ -254,14 +251,12 @@ func (s *Store) SetFactAreas(ctx context.Context, id ulid.ULID, areas []string) 
 	return nil
 }
 
-// UndecidedPublicFacts returns up to limit facts about the agent itself whose
-// place on its public page is not decided yet, oldest first.
+// UndecidedPublicFacts are about the agent itself, oldest first.
 func (s *Store) UndecidedPublicFacts(ctx context.Context, limit int) ([]memory.Fact, error) {
 	return s.queryFacts(ctx, `SELECT `+factColumns+` FROM facts
 		WHERE subject = $1 AND public IS NULL ORDER BY at, id LIMIT $2`, memory.SubjectSelf, limit)
 }
 
-// SetFactPublic records whether the agent would put a fact on its public page.
 func (s *Store) SetFactPublic(ctx context.Context, id ulid.ULID, public bool) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE facts SET public = $2 WHERE id = $1`, id.String(), public); err != nil {
 		return fmt.Errorf("set fact public: %w", err)
@@ -269,9 +264,8 @@ func (s *Store) SetFactPublic(ctx context.Context, id ulid.ULID, public bool) er
 	return nil
 }
 
-// PublicFacts returns up to limit of the newest facts about the agent itself
-// that it would put on its public page, oldest first. Facts about people are
-// never among them.
+// PublicFacts returns the newest public facts, oldest first. Facts about
+// people are never among them.
 func (s *Store) PublicFacts(ctx context.Context, limit int) ([]memory.Fact, error) {
 	facts, err := s.queryFacts(ctx, `SELECT `+factColumns+` FROM facts
 		WHERE subject = $1 AND public ORDER BY at DESC, id DESC LIMIT $2`, memory.SubjectSelf, limit)
@@ -279,8 +273,8 @@ func (s *Store) PublicFacts(ctx context.Context, limit int) ([]memory.Fact, erro
 	return facts, err
 }
 
-// Profile returns the public profile page as the agent last wrote it (JSON),
-// what it was written from (a hash), and when; ok is false if it never has.
+// Profile returns the page as JSON and a hash of what it was written from; ok
+// is false if it never has been.
 func (s *Store) Profile(ctx context.Context) (page []byte, inputs string, at time.Time, ok bool, err error) {
 	err = s.pool.QueryRow(ctx, `SELECT page, inputs, written_at FROM profile WHERE id = 1`).Scan(&page, &inputs, &at)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -292,7 +286,6 @@ func (s *Store) Profile(ctx context.Context) (page []byte, inputs string, at tim
 	return page, inputs, at, true, nil
 }
 
-// SaveProfile replaces the public profile page.
 func (s *Store) SaveProfile(ctx context.Context, page []byte, inputs string, at time.Time) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO profile (id, page, inputs, written_at) VALUES (1, $1, $2, $3)
@@ -334,7 +327,6 @@ func (s *Store) queryFacts(ctx context.Context, sql string, args ...any) ([]memo
 const intentionColumns = `id, subject, kind, percept_id, project_id, text, ability, args, due_at, status,
 	coalesce(result, ''), created_at, done_at`
 
-// SaveIntention stores something the agent means to do later.
 func (s *Store) SaveIntention(ctx context.Context, i memory.Intention) error {
 	args, err := json.Marshal(orEmpty(i.Args))
 	if err != nil {
@@ -352,25 +344,24 @@ func (s *Store) SaveIntention(ctx context.Context, i memory.Intention) error {
 	return nil
 }
 
-// DueIntentions returns up to limit pending intentions due by now, earliest first.
+// DueIntentions returns pending intentions due by now, earliest first.
 func (s *Store) DueIntentions(ctx context.Context, now time.Time, limit int) ([]memory.Intention, error) {
 	return s.queryIntentions(ctx, `SELECT `+intentionColumns+` FROM intentions
 		WHERE status = $1 AND due_at <= $2 ORDER BY due_at, id LIMIT $3`, memory.IntentionPending, now, limit)
 }
 
-// IntentionsDue returns the intentions due in [from, to), whatever their status, earliest first.
+// IntentionsDue returns those due in [from, to), whatever their status, earliest first.
 func (s *Store) IntentionsDue(ctx context.Context, from, to time.Time) ([]memory.Intention, error) {
 	return s.queryIntentions(ctx, `SELECT `+intentionColumns+` FROM intentions
 		WHERE due_at >= $1 AND due_at < $2 ORDER BY due_at, id`, from, to)
 }
 
-// OpenIntentions returns the pending intentions of kind for subject, earliest due first.
+// OpenIntentions returns the pending ones, earliest due first.
 func (s *Store) OpenIntentions(ctx context.Context, subject, kind string) ([]memory.Intention, error) {
 	return s.queryIntentions(ctx, `SELECT `+intentionColumns+` FROM intentions
 		WHERE subject = $1 AND kind = $2 AND status = $3 ORDER BY due_at, id`, subject, kind, memory.IntentionPending)
 }
 
-// FinishIntention records how an intention ended (done, missed, cancelled) and what came of it.
 func (s *Store) FinishIntention(ctx context.Context, id ulid.ULID, status, result string, at time.Time) error {
 	_, err := s.pool.Exec(ctx, `UPDATE intentions SET status = $2, result = $3, done_at = $4 WHERE id = $1`,
 		id.String(), status, nullString(result), at)
@@ -387,7 +378,6 @@ func orEmpty(m map[string]string) map[string]string {
 	return m
 }
 
-// AwaitIntention puts a pending intention on hold until the owner approves it.
 func (s *Store) AwaitIntention(ctx context.Context, id ulid.ULID) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE intentions SET status = $2 WHERE id = $1 AND status = $3`,
 		id.String(), memory.IntentionAwaiting, memory.IntentionPending); err != nil {
@@ -406,7 +396,6 @@ func (s *Store) ResumeIntention(ctx context.Context, id ulid.ULID, notBefore tim
 	return nil
 }
 
-// PostponeIntention moves a pending intention to a later time.
 func (s *Store) PostponeIntention(ctx context.Context, id ulid.ULID, due time.Time) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE intentions SET due_at = $2 WHERE id = $1`, id.String(), due); err != nil {
 		return fmt.Errorf("postpone intention: %w", err)
@@ -456,11 +445,9 @@ func (s *Store) queryIntentions(ctx context.Context, sql string, args ...any) ([
 	return out, rows.Err()
 }
 
-// projectSelect reads projects with the book each one follows, if any.
 const projectSelect = `SELECT p.id, p.title, p.kind, p.status, p.notes, p.source_id, p.position, p.created_at, p.updated_at, p.goal_id,
 	s.kind, s.title, s.author, s.chars FROM projects p LEFT JOIN sources s ON s.id = p.source_id`
 
-// SaveProject stores a project, replacing what was known about it.
 func (s *Store) SaveProject(ctx context.Context, p memory.Project) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO projects (id, title, kind, status, notes, source_id, position, created_at, updated_at, goal_id)
@@ -475,7 +462,6 @@ func (s *Store) SaveProject(ctx context.Context, p memory.Project) error {
 	return nil
 }
 
-// Project returns the project with id, and whether there is one.
 func (s *Store) Project(ctx context.Context, id ulid.ULID) (memory.Project, bool, error) {
 	ps, err := s.queryProjects(ctx, projectSelect+` WHERE p.id = $1`, id.String())
 	if err != nil || len(ps) == 0 {
@@ -526,8 +512,7 @@ func (s *Store) queryProjects(ctx context.Context, sql string, args ...any) ([]m
 	return out, rows.Err()
 }
 
-// SaveSource stores a book or article it fetched and returns its ID: the one
-// already stored if the same URL was fetched before.
+// SaveSource returns the ID already stored if the same URL was fetched before.
 func (s *Store) SaveSource(ctx context.Context, src memory.Source) (ulid.ULID, error) {
 	var id string
 	err := s.pool.QueryRow(ctx, `
@@ -540,7 +525,6 @@ func (s *Store) SaveSource(ctx context.Context, src memory.Source) (ulid.ULID, e
 	return ulid.Parse(id)
 }
 
-// SourceText returns the text of a book or article it fetched.
 func (s *Store) SourceText(ctx context.Context, id ulid.ULID) (string, error) {
 	var text string
 	if err := s.pool.QueryRow(ctx, `SELECT text FROM sources WHERE id = $1`, id.String()).Scan(&text); err != nil {
@@ -556,7 +540,6 @@ const workColumns = `id, intention_id, project_id, kind, title, text, created_at
 const shareableWork = `w.kind NOT IN ('journal', 'review') AND (w.intention_id IS NULL OR EXISTS (
 	SELECT 1 FROM intentions i WHERE i.id = w.intention_id AND i.subject = '` + memory.SubjectSelf + `'))`
 
-// SaveWork stores something the agent made.
 func (s *Store) SaveWork(ctx context.Context, w memory.Work) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO works (id, intention_id, project_id, kind, title, text, created_at)
@@ -574,7 +557,7 @@ func (s *Store) WorksBetween(ctx context.Context, from, to time.Time) ([]memory.
 		WHERE created_at >= $1 AND created_at < $2 ORDER BY created_at, id`, from, to)
 }
 
-// ProjectWorks returns up to limit of the newest works in a project, oldest first.
+// ProjectWorks returns the newest works in a project, oldest first.
 func (s *Store) ProjectWorks(ctx context.Context, project ulid.ULID, limit int) ([]memory.Work, error) {
 	ws, err := s.queryWorks(ctx, `SELECT `+workColumns+` FROM works
 		WHERE project_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2`, project.String(), limit)
@@ -582,8 +565,8 @@ func (s *Store) ProjectWorks(ctx context.Context, project ulid.ULID, limit int) 
 	return ws, err
 }
 
-// UndecidedPublicWorks returns up to limit works that may be public but
-// haven't been decided on yet, oldest first.
+// UndecidedPublicWorks returns works that may be public but haven't been
+// decided on yet, oldest first.
 func (s *Store) UndecidedPublicWorks(ctx context.Context, limit int) ([]memory.Work, error) {
 	return s.queryWorks(ctx, `SELECT `+workColumns+` FROM works w
 		WHERE w.public IS NULL AND w.public_by IS NULL AND `+shareableWork+` ORDER BY w.created_at, w.id LIMIT $1`, limit)
@@ -599,10 +582,9 @@ func (s *Store) AwaitWorkPublic(ctx context.Context, id ulid.ULID) error {
 	return nil
 }
 
-// SetWorkPublic records whether a work may go on the public page, and who
-// decided. The daily check (PublicBySystem1) never overrides its owner, and
-// a work that may never be public can't be made public. It reports whether
-// the work was changed.
+// SetWorkPublic reports whether the work was changed. The daily check
+// (PublicBySystem1) never overrides its owner, and a work that may never be
+// public can't be made public.
 func (s *Store) SetWorkPublic(ctx context.Context, id ulid.ULID, public bool, by string) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `UPDATE works w SET public = $2, public_by = $3
 		WHERE w.id = $1 AND (NOT $2 OR `+shareableWork+`)
@@ -614,13 +596,11 @@ func (s *Store) SetWorkPublic(ctx context.Context, id ulid.ULID, public bool, by
 	return tag.RowsAffected() == 1, nil
 }
 
-// PublicWorks returns up to limit of the newest works that are public.
 func (s *Store) PublicWorks(ctx context.Context, limit int) ([]memory.Work, error) {
 	return s.queryWorks(ctx, `SELECT `+workColumns+` FROM works w
 		WHERE w.public AND `+shareableWork+` ORDER BY w.created_at DESC, w.id DESC LIMIT $1`, limit)
 }
 
-// PublicWork returns the work with id if it is public, and whether it is.
 func (s *Store) PublicWork(ctx context.Context, id ulid.ULID) (memory.Work, bool, error) {
 	ws, err := s.queryWorks(ctx, `SELECT `+workColumns+` FROM works w
 		WHERE w.id = $1 AND w.public AND `+shareableWork, id.String())
@@ -630,7 +610,6 @@ func (s *Store) PublicWork(ctx context.Context, id ulid.ULID) (memory.Work, bool
 	return ws[0], true, nil
 }
 
-// IntentionWork returns the work made for an intention, and whether there is one.
 func (s *Store) IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error) {
 	ws, err := s.queryWorks(ctx, `SELECT `+workColumns+` FROM works
 		WHERE intention_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, intention.String())
@@ -640,7 +619,6 @@ func (s *Store) IntentionWork(ctx context.Context, intention ulid.ULID) (memory.
 	return ws[0], true, nil
 }
 
-// LatestWork returns the newest work of kind, and whether there is one.
 func (s *Store) LatestWork(ctx context.Context, kind string) (memory.Work, bool, error) {
 	ws, err := s.queryWorks(ctx, `SELECT `+workColumns+` FROM works
 		WHERE kind = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, kind)
@@ -680,7 +658,6 @@ func (s *Store) queryWorks(ctx context.Context, sql string, args ...any) ([]memo
 	return out, rows.Err()
 }
 
-// CostSince returns what the decisions with these actions cost since the given time.
 func (s *Store) CostSince(ctx context.Context, since time.Time, actions []string) (float64, error) {
 	var cost float64
 	err := s.pool.QueryRow(ctx, `SELECT coalesce(sum(cost_usd), 0)::float8 FROM decisions
@@ -715,8 +692,8 @@ func (s *Store) Conversations(ctx context.Context) ([]memory.Conversation, error
 	return out, rows.Err()
 }
 
-// LastSpokeFirst returns when the agent last spoke first to person with a
-// percept of kind (a reminder or a check-in), and whether it ever did.
+// LastSpokeFirst is when the agent last spoke first to person with a percept
+// of kind (a reminder or a check-in), and whether it ever did.
 func (s *Store) LastSpokeFirst(ctx context.Context, person, kind string) (time.Time, bool, error) {
 	var at *time.Time
 	err := s.pool.QueryRow(ctx, `SELECT max(at) FROM percepts WHERE speaker = $1 AND kind = $2`, person, kind).Scan(&at)
@@ -729,14 +706,12 @@ func (s *Store) LastSpokeFirst(ctx context.Context, person, kind string) (time.T
 	return *at, true, nil
 }
 
-// UnaskedFacts returns up to limit facts about person since the given time
-// that the agent has not checked in about yet, newest first.
+// UnaskedFacts returns facts the agent has not checked in about yet, newest first.
 func (s *Store) UnaskedFacts(ctx context.Context, person string, since time.Time, limit int) ([]memory.Fact, error) {
 	return s.queryFacts(ctx, `SELECT `+factColumns+` FROM facts
 		WHERE subject = $1 AND at >= $2 AND asked_at IS NULL ORDER BY at DESC, id DESC LIMIT $3`, person, since, limit)
 }
 
-// MarkFactsAsked records that the agent checked in about these facts.
 func (s *Store) MarkFactsAsked(ctx context.Context, ids []ulid.ULID, at time.Time) error {
 	keys := make([]string, len(ids))
 	for i, id := range ids {
@@ -750,7 +725,6 @@ func (s *Store) MarkFactsAsked(ctx context.Context, ids []ulid.ULID, at time.Tim
 
 const personColumns = `key, name, relation, circle, source, first_seen, updated_at`
 
-// Person returns the person with key, and whether the agent knows them.
 func (s *Store) Person(ctx context.Context, key string) (memory.Person, bool, error) {
 	people, err := s.queryPeople(ctx, `SELECT `+personColumns+` FROM people WHERE key = $1`, key)
 	if err != nil || len(people) == 0 {
@@ -759,13 +733,12 @@ func (s *Store) Person(ctx context.Context, key string) (memory.Person, bool, er
 	return people[0], true, nil
 }
 
-// KnownPeople returns everyone whose relation to the agent is known, oldest acquaintance first.
+// KnownPeople returns everyone whose relation is known, oldest acquaintance first.
 func (s *Store) KnownPeople(ctx context.Context, limit int) ([]memory.Person, error) {
 	return s.queryPeople(ctx, `SELECT `+personColumns+` FROM people WHERE relation <> ''
 		ORDER BY first_seen, key LIMIT $1`, limit)
 }
 
-// SavePerson stores p, replacing what was known about them.
 func (s *Store) SavePerson(ctx context.Context, p memory.Person) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO people (key, name, relation, circle, source, first_seen, updated_at)
@@ -779,9 +752,8 @@ func (s *Store) SavePerson(ctx context.Context, p memory.Person) error {
 	return nil
 }
 
-// AddPersonIfNew stores p only if the agent does not know them yet, and
-// reports whether it did. Used for what the agent was born knowing: memory,
-// once formed, wins over the file it came from.
+// AddPersonIfNew is for what the agent was born knowing: memory, once formed,
+// wins over the file it came from.
 func (s *Store) AddPersonIfNew(ctx context.Context, p memory.Person) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `
 		INSERT INTO people (key, name, relation, circle, source, first_seen, updated_at)
@@ -818,7 +790,6 @@ func nonNil(s []string) []string {
 	return s
 }
 
-// nullULID maps the zero ULID to SQL NULL.
 func nullULID(id ulid.ULID) any {
 	if id == (ulid.ULID{}) {
 		return nil
@@ -826,7 +797,6 @@ func nullULID(id ulid.ULID) any {
 	return id.String()
 }
 
-// parseNullULID parses a nullable ULID column; NULL is the zero ULID.
 func parseNullULID(s *string) (ulid.ULID, error) {
 	if s == nil {
 		return ulid.ULID{}, nil
@@ -834,7 +804,6 @@ func parseNullULID(s *string) (ulid.ULID, error) {
 	return ulid.Parse(*s)
 }
 
-// nullTime maps the zero time to SQL NULL.
 func nullTime(t time.Time) any {
 	if t.IsZero() {
 		return nil
@@ -849,7 +818,6 @@ func nullString(s string) any {
 	return s
 }
 
-// nullJSON maps empty JSON to SQL NULL.
 func nullJSON(b []byte) any {
 	if len(b) == 0 {
 		return nil
@@ -859,7 +827,6 @@ func nullJSON(b []byte) any {
 
 const approvalColumns = `id, class, person, what, text, kind, ref, status, asked_at, sent_at, decided_at, message`
 
-// SaveApproval stores something the agent asks its owner before doing it.
 func (s *Store) SaveApproval(ctx context.Context, a memory.Approval) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO approvals (id, class, person, what, text, kind, ref, status, asked_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
@@ -870,7 +837,6 @@ func (s *Store) SaveApproval(ctx context.Context, a memory.Approval) error {
 	return nil
 }
 
-// Approval returns the approval with id, and whether there is one.
 func (s *Store) Approval(ctx context.Context, id ulid.ULID) (memory.Approval, bool, error) {
 	as, err := s.queryApprovals(ctx, `SELECT `+approvalColumns+` FROM approvals WHERE id = $1`, id.String())
 	if err != nil || len(as) == 0 {
@@ -885,7 +851,6 @@ func (s *Store) UnsentApprovals(ctx context.Context, limit int) ([]memory.Approv
 		WHERE status = $1 AND sent_at IS NULL ORDER BY asked_at, id LIMIT $2`, memory.ApprovalPending, limit)
 }
 
-// MarkApprovalSent records that the owner was asked, and where.
 func (s *Store) MarkApprovalSent(ctx context.Context, id ulid.ULID, message []byte, at time.Time) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE approvals SET sent_at = $2, message = $3 WHERE id = $1`,
 		id.String(), at, message); err != nil {
@@ -894,8 +859,7 @@ func (s *Store) MarkApprovalSent(ctx context.Context, id ulid.ULID, message []by
 	return nil
 }
 
-// DecideApproval settles a pending approval as approved, denied or expired.
-// It reports whether it was still pending: an approval is decided once.
+// DecideApproval reports whether it was still pending: an approval is decided once.
 func (s *Store) DecideApproval(ctx context.Context, id ulid.ULID, status string, at time.Time) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `UPDATE approvals SET status = $2, decided_at = $3 WHERE id = $1 AND status = $4`,
 		id.String(), status, at, memory.ApprovalPending)
@@ -911,8 +875,8 @@ func (s *Store) StaleApprovals(ctx context.Context, before time.Time, limit int)
 		WHERE status = $1 AND asked_at < $2 ORDER BY asked_at, id LIMIT $3`, memory.ApprovalPending, before, limit)
 }
 
-// RecentApprovals returns the pending approvals, oldest first, then up to
-// limit of the newest decided ones.
+// RecentApprovals returns the pending approvals, oldest first, then the newest
+// decided ones.
 func (s *Store) RecentApprovals(ctx context.Context, limit int) ([]memory.Approval, error) {
 	return s.queryApprovals(ctx, `(SELECT `+approvalColumns+` FROM approvals WHERE status = $1 ORDER BY asked_at, id)
 		UNION ALL (SELECT `+approvalColumns+` FROM approvals WHERE status <> $1 ORDER BY decided_at DESC, id DESC LIMIT $2)`,
@@ -962,7 +926,6 @@ func ulidOrEmpty(id ulid.ULID) string {
 	return id.String()
 }
 
-// SaveAutonomyRule records a change the owner made to the autonomy policy.
 func (s *Store) SaveAutonomyRule(ctx context.Context, class, verdict, by string, percept ulid.ULID, at time.Time) error {
 	if _, err := s.pool.Exec(ctx, `INSERT INTO autonomy_rules (id, class, verdict, set_by, percept_id, at) VALUES ($1, $2, $3, $4, $5, $6)`,
 		ulid.Make().String(), class, verdict, by, nullULID(percept), at); err != nil {
@@ -971,7 +934,7 @@ func (s *Store) SaveAutonomyRule(ctx context.Context, class, verdict, by string,
 	return nil
 }
 
-// AutonomyRules returns the owner's newest change per class: class → verdict.
+// AutonomyRules returns the owner's newest change per class.
 func (s *Store) AutonomyRules(ctx context.Context) (map[string]string, error) {
 	rows, err := s.pool.Query(ctx, `SELECT DISTINCT ON (class) class, verdict FROM autonomy_rules ORDER BY class, at DESC, id DESC`)
 	if err != nil {
@@ -989,7 +952,6 @@ func (s *Store) AutonomyRules(ctx context.Context) (map[string]string, error) {
 	return out, rows.Err()
 }
 
-// DeleteFact forgets a fact. It reports whether there was one.
 func (s *Store) DeleteFact(ctx context.Context, id ulid.ULID) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `DELETE FROM facts WHERE id = $1`, id.String())
 	if err != nil {
@@ -998,8 +960,7 @@ func (s *Store) DeleteFact(ctx context.Context, id ulid.ULID) (bool, error) {
 	return tag.RowsAffected() == 1, nil
 }
 
-// SaveLabel records what a System 1 answer should have been, replacing an
-// earlier label for the same decision and question.
+// SaveLabel replaces an earlier label for the same decision and question.
 func (s *Store) SaveLabel(ctx context.Context, l memory.Label) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO labels (decision_id, question, value, source, at) VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (decision_id, question) DO UPDATE SET value = EXCLUDED.value, source = EXCLUDED.source, at = EXCLUDED.at`,
@@ -1010,7 +971,6 @@ func (s *Store) SaveLabel(ctx context.Context, l memory.Label) error {
 	return nil
 }
 
-// Labels returns the labels on the given decisions.
 func (s *Store) Labels(ctx context.Context, decisions []ulid.ULID) ([]memory.Label, error) {
 	ids := make([]string, len(decisions))
 	for i, id := range decisions {
@@ -1038,9 +998,9 @@ func (s *Store) Labels(ctx context.Context, decisions []ulid.ULID) ([]memory.Lab
 	return out, rows.Err()
 }
 
-// LastRead returns the newest decision of question set setID (any version)
-// on a message in source's thread before before: the agent's read of the
-// message before the one it is answering.
+// LastRead returns the newest decision of setID (any version) on a message in
+// source's thread before before: the agent's read of the message before the one
+// it is answering.
 func (s *Store) LastRead(ctx context.Context, setID, source, thread string, before time.Time) (ulid.ULID, bool, error) {
 	var id string
 	err := s.pool.QueryRow(ctx, `SELECT d.id FROM decisions d JOIN percepts p ON p.id = d.percept_id
@@ -1056,17 +1016,16 @@ func (s *Store) LastRead(ctx context.Context, setID, source, thread string, befo
 	return d, err == nil, err
 }
 
-// Example is a labelled System 1 decision about a message, for replay.
 type Example struct {
 	DecisionID ulid.ULID
 	SetID      string // the set and version that decided, e.g. "incoming_message@1"
-	Text       string // the message it read
+	Text       string
 	Answer     decision.Answer
 	Label      string
 }
 
-// LabelledExamples returns up to limit of the newest decisions of setID (any
-// version) with a label on question, with the message each read.
+// LabelledExamples returns the newest decisions of setID (any version) with a
+// label on question.
 func (s *Store) LabelledExamples(ctx context.Context, setID, question string, limit int) ([]Example, error) {
 	rows, err := s.pool.Query(ctx, `SELECT d.id, split_part(d.set_id, ',', 1), p.text, d.answers -> $2, l.value
 		FROM labels l JOIN decisions d ON d.id = l.decision_id JOIN percepts p ON p.id = d.percept_id
@@ -1099,7 +1058,6 @@ func (s *Store) LabelledExamples(ctx context.Context, setID, question string, li
 	return out, rows.Err()
 }
 
-// SaveDream stores a dream, replacing what was known about it.
 func (s *Store) SaveDream(ctx context.Context, d memory.Dream) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO dreams (id, text, status, source, since, ended_at) VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (id) DO UPDATE SET text = EXCLUDED.text, status = EXCLUDED.status, ended_at = EXCLUDED.ended_at`,
@@ -1110,7 +1068,7 @@ func (s *Store) SaveDream(ctx context.Context, d memory.Dream) error {
 	return nil
 }
 
-// Dreams returns its dreams, oldest first: all of them, or only the active.
+// Dreams returns its dreams, oldest first.
 func (s *Store) Dreams(ctx context.Context, activeOnly bool) ([]memory.Dream, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, text, status, source, since, ended_at FROM dreams
 		WHERE NOT $1 OR status = $2 ORDER BY since, id`, activeOnly, memory.DreamActive)
@@ -1139,7 +1097,6 @@ func (s *Store) Dreams(ctx context.Context, activeOnly bool) ([]memory.Dream, er
 	return out, rows.Err()
 }
 
-// SaveGoal stores a goal, replacing what was known about it.
 func (s *Store) SaveGoal(ctx context.Context, g memory.Goal) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO goals (id, dream_id, text, done_when, due, status, progress, created_at, updated_at, skill)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -1152,7 +1109,7 @@ func (s *Store) SaveGoal(ctx context.Context, g memory.Goal) error {
 	return nil
 }
 
-// Goals returns its goals, oldest first: all of them, or only the active.
+// Goals returns its goals, oldest first.
 func (s *Store) Goals(ctx context.Context, activeOnly bool) ([]memory.Goal, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, dream_id, text, done_when, due, status, progress, created_at, updated_at, skill FROM goals
 		WHERE NOT $1 OR status = $2 ORDER BY created_at, id`, activeOnly, memory.GoalActive)
@@ -1180,7 +1137,7 @@ func (s *Store) Goals(ctx context.Context, activeOnly bool) ([]memory.Goal, erro
 	return out, rows.Err()
 }
 
-// AddSkill stores a skill it starts with, unless it already has it.
+// AddSkill does nothing if it already has the skill.
 func (s *Store) AddSkill(ctx context.Context, sk memory.Skill) error {
 	if _, err := s.pool.Exec(ctx, `INSERT INTO skills (name, level, shown_by, updated_at) VALUES ($1, $2, $3, $4)
 		ON CONFLICT (name) DO NOTHING`, sk.Name, sk.Level, nonNil(sk.ShownBy), sk.UpdatedAt); err != nil {
@@ -1207,7 +1164,6 @@ func (s *Store) Skills(ctx context.Context) ([]memory.Skill, error) {
 	return out, rows.Err()
 }
 
-// SetSkillLevel records a skill's level, worked out from its evidence.
 func (s *Store) SetSkillLevel(ctx context.Context, name string, level float64, at time.Time) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE skills SET level = $2, updated_at = $3 WHERE name = $1`, name, level, at); err != nil {
 		return fmt.Errorf("set skill level: %w", err)
@@ -1215,7 +1171,6 @@ func (s *Store) SetSkillLevel(ctx context.Context, name string, level float64, a
 	return nil
 }
 
-// SaveEvidence stores one score of a skill.
 func (s *Store) SaveEvidence(ctx context.Context, e memory.Evidence) error {
 	if _, err := s.pool.Exec(ctx, `INSERT INTO skill_evidence (id, skill, work_id, score, source, note, at) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		e.ID.String(), e.Skill, nullULID(e.WorkID), e.Score, e.Source, e.Note, e.At); err != nil {
@@ -1224,7 +1179,7 @@ func (s *Store) SaveEvidence(ctx context.Context, e memory.Evidence) error {
 	return nil
 }
 
-// RecentEvidence returns up to limit of a skill's newest scores, newest first.
+// RecentEvidence returns a skill's newest scores, newest first.
 func (s *Store) RecentEvidence(ctx context.Context, skill string, limit int) ([]memory.Evidence, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, skill, work_id, score, source, note, at FROM skill_evidence
 		WHERE skill = $1 ORDER BY at DESC, id DESC LIMIT $2`, skill, limit)
@@ -1253,7 +1208,6 @@ func (s *Store) RecentEvidence(ctx context.Context, skill string, limit int) ([]
 	return out, rows.Err()
 }
 
-// SaveLesson stores something it learned about a skill.
 func (s *Store) SaveLesson(ctx context.Context, l memory.Lesson) error {
 	if _, err := s.pool.Exec(ctx, `INSERT INTO lessons (id, skill, text, source, work_id, at) VALUES ($1, $2, $3, $4, $5, $6)`,
 		l.ID.String(), l.Skill, l.Text, l.Source, nullULID(l.WorkID), l.At); err != nil {
@@ -1262,8 +1216,7 @@ func (s *Store) SaveLesson(ctx context.Context, l memory.Lesson) error {
 	return nil
 }
 
-// Lessons returns up to limit of a skill's active lessons, newest first; all
-// skills' if skill is "".
+// Lessons returns active lessons, newest first; all skills' if skill is "".
 func (s *Store) Lessons(ctx context.Context, skill string, limit int) ([]memory.Lesson, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, skill, text, source, work_id, at FROM lessons
 		WHERE retired_at IS NULL AND ($1 = '' OR skill = $1) ORDER BY at DESC, id DESC LIMIT $2`, skill, limit)
@@ -1292,7 +1245,6 @@ func (s *Store) Lessons(ctx context.Context, skill string, limit int) ([]memory.
 	return out, rows.Err()
 }
 
-// RetireLesson takes a lesson out of its practice: it has absorbed it.
 func (s *Store) RetireLesson(ctx context.Context, id ulid.ULID, at time.Time) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE lessons SET retired_at = $2 WHERE id = $1 AND retired_at IS NULL`, id.String(), at); err != nil {
 		return fmt.Errorf("retire lesson: %w", err)
@@ -1300,7 +1252,6 @@ func (s *Store) RetireLesson(ctx context.Context, id ulid.ULID, at time.Time) er
 	return nil
 }
 
-// MarkReviewAsked records that it asked its owner to review a work.
 func (s *Store) MarkReviewAsked(ctx context.Context, work ulid.ULID, at time.Time) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE works SET review_asked_at = $2 WHERE id = $1`, work.String(), at); err != nil {
 		return fmt.Errorf("mark review asked: %w", err)
@@ -1308,8 +1259,6 @@ func (s *Store) MarkReviewAsked(ctx context.Context, work ulid.ULID, at time.Tim
 	return nil
 }
 
-// AskedForReview returns the newest work it asked its owner to review since
-// since, and whether there is one.
 func (s *Store) AskedForReview(ctx context.Context, since time.Time) (memory.Work, bool, error) {
 	ws, err := s.queryWorks(ctx, `SELECT `+workColumns+` FROM works WHERE review_asked_at >= $1
 		ORDER BY review_asked_at DESC, id DESC LIMIT 1`, since)
@@ -1319,7 +1268,6 @@ func (s *Store) AskedForReview(ctx context.Context, since time.Time) (memory.Wor
 	return ws[0], true, nil
 }
 
-// SavePlan stores a new learning plan with its stages.
 func (s *Store) SavePlan(ctx context.Context, p memory.LearningPlan) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -1339,8 +1287,7 @@ func (s *Store) SavePlan(ctx context.Context, p memory.LearningPlan) error {
 	return tx.Commit(ctx)
 }
 
-// Plans returns its learning plans with their stages, oldest first: all of
-// them, or only the active.
+// Plans returns its learning plans with their stages, oldest first.
 func (s *Store) Plans(ctx context.Context, activeOnly bool) ([]memory.LearningPlan, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, goal_id, skill, stage, status, created_at, updated_at FROM learning_plans
 		WHERE NOT $1 OR status = $2 ORDER BY created_at, id`, activeOnly, memory.PlanActive)
@@ -1411,7 +1358,6 @@ func (s *Store) AdvancePlan(ctx context.Context, plan ulid.ULID, at time.Time) e
 	return nil
 }
 
-// EndPlan marks a plan done or dropped, e.g. when its goal is.
 func (s *Store) EndPlan(ctx context.Context, plan ulid.ULID, status string, at time.Time) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE learning_plans SET status = $2, updated_at = $3 WHERE id = $1`, plan.String(), status, at); err != nil {
 		return fmt.Errorf("end plan: %w", err)
@@ -1419,7 +1365,6 @@ func (s *Store) EndPlan(ctx context.Context, plan ulid.ULID, status string, at t
 	return nil
 }
 
-// SaveResource stores something to study for a stage.
 func (s *Store) SaveResource(ctx context.Context, r memory.Resource) error {
 	if _, err := s.pool.Exec(ctx, `INSERT INTO resources (id, plan_id, stage, ability, query, why, status, added_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, r.ID.String(), r.PlanID.String(), r.Stage, r.Ability, r.Query, r.Why, r.Status, r.AddedAt); err != nil {
@@ -1464,7 +1409,6 @@ func (s *Store) Resources(ctx context.Context, plan ulid.ULID) ([]memory.Resourc
 	return out, rows.Err()
 }
 
-// FinishResource records that it studied a resource: what it was, and its notes.
 func (s *Store) FinishResource(ctx context.Context, id, work ulid.ULID, title string, at time.Time) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE resources SET status = $2, title = $3, work_id = $4, done_at = $5 WHERE id = $1`,
 		id.String(), memory.ResourceDone, title, nullULID(work), at); err != nil {
@@ -1473,8 +1417,7 @@ func (s *Store) FinishResource(ctx context.Context, id, work ulid.ULID, title st
 	return nil
 }
 
-// ReadingProject returns the active project that follows a source (a book
-// it's reading), and whether there is one.
+// ReadingProject returns the active project that follows a source.
 func (s *Store) ReadingProject(ctx context.Context, source ulid.ULID) (memory.Project, bool, error) {
 	ps, err := s.queryProjects(ctx, projectSelect+` WHERE p.source_id = $1 AND p.status = $2 ORDER BY p.updated_at DESC LIMIT 1`,
 		source.String(), memory.ProjectActive)
@@ -1484,7 +1427,6 @@ func (s *Store) ReadingProject(ctx context.Context, source ulid.ULID) (memory.Pr
 	return ps[0], true, nil
 }
 
-// SaveFound remembers pages a search found, so it may read them later.
 func (s *Store) SaveFound(ctx context.Context, query string, rs []search.Result, at time.Time) error {
 	for _, r := range rs {
 		if _, err := s.pool.Exec(ctx, `INSERT INTO web_found (url, title, snippet, query, found_at) VALUES ($1, $2, $3, $4, $5)
@@ -1495,7 +1437,6 @@ func (s *Store) SaveFound(ctx context.Context, query string, rs []search.Result,
 	return nil
 }
 
-// Found returns a page one of its searches found, and whether one did.
 func (s *Store) Found(ctx context.Context, url string) (search.Result, bool, error) {
 	var r search.Result
 	err := s.pool.QueryRow(ctx, `SELECT url, title, snippet FROM web_found WHERE url = $1`, strings.TrimSpace(url)).
@@ -1509,7 +1450,7 @@ func (s *Store) Found(ctx context.Context, url string) (search.Result, bool, err
 	return r, true, nil
 }
 
-// RecentFound returns up to limit of the newest pages its searches found.
+// RecentFound returns the newest pages its searches found, newest first.
 func (s *Store) RecentFound(ctx context.Context, limit int) ([]search.Result, error) {
 	rows, err := s.pool.Query(ctx, `SELECT url, title, snippet FROM web_found ORDER BY found_at DESC, url LIMIT $1`, limit)
 	if err != nil {
@@ -1527,7 +1468,6 @@ func (s *Store) RecentFound(ctx context.Context, limit int) ([]search.Result, er
 	return out, rows.Err()
 }
 
-// LogWeb records a search or a page read.
 func (s *Store) LogWeb(ctx context.Context, kind, what string, costUSD float64, at time.Time) error {
 	if _, err := s.pool.Exec(ctx, `INSERT INTO web_log (kind, what, cost_usd, at) VALUES ($1, $2, $3, $4)`, kind, what, costUSD, at); err != nil {
 		return fmt.Errorf("log web: %w", err)
@@ -1535,7 +1475,6 @@ func (s *Store) LogWeb(ctx context.Context, kind, what string, costUSD float64, 
 	return nil
 }
 
-// WebSince counts the searches or pages (kind) since a time.
 func (s *Store) WebSince(ctx context.Context, kind string, since time.Time) (int, error) {
 	var n int
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM web_log WHERE kind = $1 AND at >= $2`, kind, since).Scan(&n); err != nil {
@@ -1544,10 +1483,9 @@ func (s *Store) WebSince(ctx context.Context, kind string, since time.Time) (int
 	return n, nil
 }
 
-// SeedJudgment copies its owner's judgment file into memory, as proposed: each
-// case not seen before (by key), and each principle not seeded before (by its
-// seed text, so an edited or rejected one isn't seeded again), with the cases
-// behind it. It returns how many of each it added.
+// SeedJudgment adds its owner's judgment file as proposed: each case not seen
+// before (by key), and each principle not seeded before (by its seed text, so an
+// edited or rejected one isn't seeded again). It returns how many of each it added.
 func (s *Store) SeedJudgment(ctx context.Context, cases []memory.JudgmentCase, principles []memory.Principle) (int, int, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -1583,8 +1521,8 @@ func (s *Store) SeedJudgment(ctx context.Context, cases []memory.JudgmentCase, p
 	return nc, np, tx.Commit(ctx)
 }
 
-// Principles returns its owner's principles, oldest first, with the keys of
-// the cases behind them: all of them, or only those with status.
+// Principles returns priorities by rank, then the rest oldest first, with the
+// keys of the cases behind them; status "" is all.
 func (s *Store) Principles(ctx context.Context, status string) ([]memory.Principle, error) {
 	rows, err := s.pool.Query(ctx, `SELECT p.id, p.text, p.kind, p.rank, p.types, p.status, p.source, COALESCE(p.seed, ''), p.created_at, p.updated_at,
 			COALESCE(array_agg(c.key ORDER BY c.at, c.key) FILTER (WHERE c.key IS NOT NULL), '{}')
@@ -1612,8 +1550,7 @@ func (s *Store) Principles(ctx context.Context, status string) ([]memory.Princip
 	return out, rows.Err()
 }
 
-// JudgmentCases returns its owner's decisions, oldest first: all of them, or
-// only those with status, of any of types (all types if none).
+// JudgmentCases returns oldest first; status "" is all, and no types is all types.
 func (s *Store) JudgmentCases(ctx context.Context, status string, types []string) ([]memory.JudgmentCase, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, key, type, situation, options, choice, reason, status, source, outcome, at, updated_at,
 			embedding, embedded_with
@@ -1641,8 +1578,7 @@ func (s *Store) JudgmentCases(ctx context.Context, status string, types []string
 	return out, rows.Err()
 }
 
-// ReviewPrinciple records its owner's review of a principle: its status, and
-// its text when they edited it (empty keeps it). It returns whether there
+// ReviewPrinciple keeps the text when text is empty. It returns whether there
 // was such a principle.
 func (s *Store) ReviewPrinciple(ctx context.Context, id ulid.ULID, status, text string, at time.Time) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `UPDATE principles SET status = $2, text = COALESCE(NULLIF($3, ''), text), updated_at = $4
@@ -1653,9 +1589,8 @@ func (s *Store) ReviewPrinciple(ctx context.Context, id ulid.ULID, status, text 
 	return tag.RowsAffected() == 1, nil
 }
 
-// ReviewCase records its owner's review of one of their decisions: its
-// status, and their reason when they gave one (empty keeps it). It returns
-// whether there was such a case.
+// ReviewCase keeps the reason when reason is empty. It returns whether there
+// was such a case.
 func (s *Store) ReviewCase(ctx context.Context, id ulid.ULID, status, reason string, at time.Time) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `UPDATE judgment_cases SET status = $2, reason = COALESCE(NULLIF($3, ''), reason), updated_at = $4,
 			embedding = CASE WHEN $3 = '' OR $3 = reason THEN embedding END
@@ -1666,7 +1601,6 @@ func (s *Store) ReviewCase(ctx context.Context, id ulid.ULID, status, reason str
 	return tag.RowsAffected() == 1, nil
 }
 
-// SavePrinciple stores a new principle and links the cases behind it (by key).
 func (s *Store) SavePrinciple(ctx context.Context, p memory.Principle) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -1689,7 +1623,6 @@ const callColumns = `id, type, mode, situation, options, pick, why, confidence, 
 	owner_choice, owner_reason, agreed, answered_by, message, case_id, created_at, asked_at, answered_at, outcome, verdict, outcome_note,
 	outcome_by, outcome_at, stakes, reversible`
 
-// SaveCall stores a new call.
 func (s *Store) SaveCall(ctx context.Context, c memory.Call) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO judgment_calls (id, type, mode, situation, options, pick, why, confidence, ref, status,
 		created_at, stakes, reversible) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`, c.ID.String(), c.Type, c.Mode,
@@ -1743,7 +1676,6 @@ func scanCalls(rows pgx.Rows) ([]memory.Call, error) {
 	return out, rows.Err()
 }
 
-// Call returns a call, and whether there is one.
 func (s *Store) Call(ctx context.Context, id ulid.ULID) (memory.Call, bool, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+callColumns+` FROM judgment_calls WHERE id = $1`, id.String())
 	if err != nil {
@@ -1756,8 +1688,7 @@ func (s *Store) Call(ctx context.Context, id ulid.ULID) (memory.Call, bool, erro
 	return cs[0], true, nil
 }
 
-// RecentCalls returns its latest calls, newest first: all of them, or only
-// those with status.
+// RecentCalls returns its latest calls, newest first; status "" is all.
 func (s *Store) RecentCalls(ctx context.Context, status string, limit int) ([]memory.Call, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+callColumns+` FROM judgment_calls WHERE $1 = '' OR status = $1
 		ORDER BY created_at DESC, id DESC LIMIT $2`, status, limit)
@@ -1767,7 +1698,6 @@ func (s *Store) RecentCalls(ctx context.Context, status string, limit int) ([]me
 	return scanCalls(rows)
 }
 
-// CallsAskedSince counts the calls asked on Telegram since a time, in mode.
 func (s *Store) CallsAskedSince(ctx context.Context, mode string, since time.Time) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM judgment_calls WHERE mode = $1 AND asked_at >= $2`, mode, since).Scan(&n)
@@ -1777,7 +1707,6 @@ func (s *Store) CallsAskedSince(ctx context.Context, mode string, since time.Tim
 	return n, nil
 }
 
-// MarkCallAsked records that a logged call was asked, and where.
 func (s *Store) MarkCallAsked(ctx context.Context, id ulid.ULID, where json.RawMessage, at time.Time) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE judgment_calls SET status = $2, message = $3, asked_at = $4 WHERE id = $1 AND status = $5`,
 		id.String(), memory.CallAsked, where, at, memory.CallLogged); err != nil {
@@ -1786,7 +1715,6 @@ func (s *Store) MarkCallAsked(ctx context.Context, id ulid.ULID, where json.RawM
 	return nil
 }
 
-// StaleCalls returns calls asked before a time and still unanswered.
 func (s *Store) StaleCalls(ctx context.Context, before time.Time, limit int) ([]memory.Call, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+callColumns+` FROM judgment_calls WHERE status = $1 AND asked_at < $2
 		ORDER BY asked_at LIMIT $3`, memory.CallAsked, before, limit)
@@ -1796,7 +1724,7 @@ func (s *Store) StaleCalls(ctx context.Context, before time.Time, limit int) ([]
 	return scanCalls(rows)
 }
 
-// ExpireCall marks an asked call unanswered in time. It returns whether it was still asked.
+// ExpireCall returns whether it was still asked.
 func (s *Store) ExpireCall(ctx context.Context, id ulid.ULID) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `UPDATE judgment_calls SET status = $2, waiting = '' WHERE id = $1 AND status = $3`,
 		id.String(), memory.CallExpired, memory.CallAsked)
@@ -1806,8 +1734,6 @@ func (s *Store) ExpireCall(ctx context.Context, id ulid.ULID) (bool, error) {
 	return tag.RowsAffected() == 1, nil
 }
 
-// WaitForOwner records what the owner's next message is for a call: their
-// reason, or their own answer.
 func (s *Store) WaitForOwner(ctx context.Context, id ulid.ULID, waiting string, at time.Time) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE judgment_calls SET waiting = $2, waiting_since = $3 WHERE id = $1`,
 		id.String(), waiting, at); err != nil {
@@ -1816,8 +1742,6 @@ func (s *Store) WaitForOwner(ctx context.Context, id ulid.ULID, waiting string, 
 	return nil
 }
 
-// WaitingCall returns the latest call waiting for the owner's next message
-// since a time, and whether there is one.
 func (s *Store) WaitingCall(ctx context.Context, since time.Time) (memory.Call, bool, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+callColumns+` FROM judgment_calls WHERE waiting <> '' AND waiting_since >= $1
 		ORDER BY waiting_since DESC LIMIT 1`, since)
@@ -1831,11 +1755,9 @@ func (s *Store) WaitingCall(ctx context.Context, since time.Time) (memory.Call, 
 	return cs[0], true, nil
 }
 
-// AnswerCall records the owner's answer to a call (c's OwnerPick,
-// OwnerChoice, OwnerReason, AnsweredBy, AnsweredAt and Waiting), and whether
-// they agree. With asCase, the answer is also kept as one of their decisions
-// (approved: it's theirs), so their judgment grows. It returns false if the
-// call was already answered.
+// AnswerCall records c's OwnerPick, OwnerChoice, OwnerReason, AnsweredBy,
+// AnsweredAt and Waiting. With asCase, the answer is also kept as one of their
+// decisions (approved: it's theirs). It returns false if already answered.
 func (s *Store) AnswerCall(ctx context.Context, c memory.Call, asCase bool) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -1869,8 +1791,8 @@ func (s *Store) AnswerCall(ctx context.Context, c memory.Call, asCase bool) (boo
 	return true, tx.Commit(ctx)
 }
 
-// GiveCallReason records the owner's reason for an answered call, and on
-// the case it became; it stops waiting for one.
+// GiveCallReason also sets the reason on the case the call became, and stops
+// waiting for one.
 func (s *Store) GiveCallReason(ctx context.Context, id ulid.ULID, reason string, at time.Time) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -1891,8 +1813,7 @@ func (s *Store) GiveCallReason(ctx context.Context, id ulid.ULID, reason string,
 	return tx.Commit(ctx)
 }
 
-// Agreement is how often the owner agreed with its calls, by type, over the
-// latest n they answered of each type.
+// Agreement is over the latest n answered calls of each type.
 func (s *Store) Agreement(ctx context.Context, n int) ([]memory.Agreement, error) {
 	rows, err := s.pool.Query(ctx, `SELECT type, count(*), count(*) FILTER (WHERE agreed) FROM (
 			SELECT type, agreed, row_number() OVER (PARTITION BY type ORDER BY answered_at DESC, id DESC) AS n
@@ -1921,8 +1842,8 @@ func kindOf(p memory.Principle) string {
 	return p.Kind
 }
 
-// RankPriority moves a priority to rank (1 first), shifting the others to
-// make room, and returns whether there was such a priority.
+// RankPriority shifts the others to make room, and returns whether there was
+// such a priority. Rank 1 is first.
 func (s *Store) RankPriority(ctx context.Context, id ulid.ULID, rank int, at time.Time) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -1950,7 +1871,7 @@ func (s *Store) RankPriority(ctx context.Context, id ulid.ULID, rank int, at tim
 	if err != nil || tag.RowsAffected() == 0 {
 		return false, err
 	}
-	for i, o := range others { // the others in their order, around it
+	for i, o := range others {
 		r := i + 1
 		if r >= rank {
 			r++
@@ -1962,9 +1883,8 @@ func (s *Store) RankPriority(ctx context.Context, id ulid.ULID, rank int, at tim
 	return true, tx.Commit(ctx)
 }
 
-// CallsToLookBack returns calls of types made between from and to that
-// haven't been looked back on yet, oldest first: what its weekly review
-// judges.
+// CallsToLookBack returns calls not looked back on yet, oldest first: what its
+// weekly review judges.
 func (s *Store) CallsToLookBack(ctx context.Context, types []string, from, to time.Time, limit int) ([]memory.Call, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+callColumns+` FROM judgment_calls
 		WHERE outcome = '' AND type = ANY($1) AND created_at >= $2 AND created_at < $3 AND status <> $4
@@ -1975,9 +1895,9 @@ func (s *Store) CallsToLookBack(ctx context.Context, types []string, from, to ti
 	return scanCalls(rows)
 }
 
-// SetOutcome records how a call turned out, and on the owner's decision it
-// became. The owner's verdict stands: its review never overrides it. It
-// returns whether it was recorded.
+// SetOutcome also records it on the owner's decision the call became. The
+// owner's verdict stands: its review never overrides it. It returns whether it
+// was recorded.
 func (s *Store) SetOutcome(ctx context.Context, id ulid.ULID, outcome, verdict, note, by string, at time.Time) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -1986,7 +1906,7 @@ func (s *Store) SetOutcome(ctx context.Context, id ulid.ULID, outcome, verdict, 
 	defer tx.Rollback(ctx)
 	var (
 		caseID *string
-		kept   string // the note, as it now is
+		kept   string
 	)
 	err = tx.QueryRow(ctx, `UPDATE judgment_calls SET outcome = $2, verdict = $3, outcome_note = COALESCE(NULLIF($4, ''), outcome_note),
 			outcome_by = $5, outcome_at = $6
@@ -2010,9 +1930,8 @@ func (s *Store) SetOutcome(ctx context.Context, id ulid.ULID, outcome, verdict, 
 	return true, tx.Commit(ctx)
 }
 
-// AgreementByStakes is how often the owner agreed with its calls, by what
-// they put at stake ("low", "medium", "high"; "low, can't undo", ...), over
-// the latest n they answered at each level.
+// AgreementByStakes is by what the calls put at stake ("low", "medium",
+// "high"; "low, can't undo", ...), over the latest n answered at each level.
 func (s *Store) AgreementByStakes(ctx context.Context, n int) ([]memory.Agreement, error) {
 	rows, err := s.pool.Query(ctx, `SELECT level, count(*), count(*) FILTER (WHERE agreed) FROM (
 			SELECT CASE WHEN stakes = '' THEN 'unknown' ELSE stakes END || CASE WHEN reversible THEN '' ELSE ', can''t undo' END AS level,
@@ -2034,8 +1953,6 @@ func (s *Store) AgreementByStakes(ctx context.Context, n int) ([]memory.Agreemen
 	return out, rows.Err()
 }
 
-// SaveCaseEmbedding keeps what one of the owner's decisions means, as a
-// vector, and the model that embedded it.
 func (s *Store) SaveCaseEmbedding(ctx context.Context, id ulid.ULID, v []float32, model string) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE judgment_cases SET embedding = $2, embedded_with = $3 WHERE id = $1`, id.String(), v, model); err != nil {
 		return fmt.Errorf("save case embedding: %w", err)
@@ -2043,7 +1960,6 @@ func (s *Store) SaveCaseEmbedding(ctx context.Context, id ulid.ULID, v []float32
 	return nil
 }
 
-// SaveTaste keeps something its owner likes or doesn't in its work.
 func (s *Store) SaveTaste(ctx context.Context, t memory.Taste) error {
 	if _, err := s.pool.Exec(ctx, `INSERT INTO tastes (id, kind, likes, text, work_id, source, at) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		t.ID.String(), t.Kind, t.Likes, t.Text, nullULID(t.WorkID), t.Source, t.At); err != nil {
@@ -2052,7 +1968,7 @@ func (s *Store) SaveTaste(ctx context.Context, t memory.Taste) error {
 	return nil
 }
 
-// Tastes returns its owner's tastes that are still true, newest first, up to limit.
+// Tastes returns those still true, newest first.
 func (s *Store) Tastes(ctx context.Context, limit int) ([]memory.Taste, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, kind, likes, text, work_id, source, at FROM tastes WHERE retired_at IS NULL
 		ORDER BY at DESC, id DESC LIMIT $1`, limit)
@@ -2081,7 +1997,6 @@ func (s *Store) Tastes(ctx context.Context, limit int) ([]memory.Taste, error) {
 	return out, rows.Err()
 }
 
-// RetireTaste marks a taste no longer true. It returns whether there was one.
 func (s *Store) RetireTaste(ctx context.Context, id ulid.ULID, at time.Time) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `UPDATE tastes SET retired_at = $2 WHERE id = $1 AND retired_at IS NULL`, id.String(), at)
 	if err != nil {
@@ -2090,10 +2005,8 @@ func (s *Store) RetireTaste(ctx context.Context, id ulid.ULID, at time.Time) (bo
 	return tag.RowsAffected() == 1, nil
 }
 
-// ErrNotTheirs means the database holds someone else's memory.
 var ErrNotTheirs = errors.New("this database holds someone else's memory")
 
-// Whose returns whose memory the database holds, and whether anyone's yet.
 func (s *Store) Whose(ctx context.Context) (string, bool, error) {
 	var name string
 	err := s.pool.QueryRow(ctx, `SELECT name FROM whose`).Scan(&name)

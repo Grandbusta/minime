@@ -20,27 +20,24 @@ import (
 	"unicode/utf8"
 )
 
-// Defaults: the real services.
 const (
 	GutenbergURL = "https://www.gutenberg.org"
 	WikipediaURL = "https://en.wikipedia.org"
 	userAgent    = "github.com/Grandbusta/minime/1.0 (https://github.com/Grandbusta/minime)"
 )
 
-// ErrNotFound means a search found nothing to read.
 var ErrNotFound = errors.New("nothing found")
 
 type Client struct {
-	Gutenberg string // base URL of Project Gutenberg
-	Wikipedia string // base URL of Wikipedia
-	MaxBytes  int64  // the most it downloads at once
+	Gutenberg string
+	Wikipedia string
+	MaxBytes  int64 // the most it downloads at once
 	http      *http.Client
-	allowed   map[string]bool // hosts it may fetch from
+	allowed   map[string]bool
 }
 
-// New makes a client for the given services (empty: the real ones).
-// gutenberg.org redirects books' text within itself, so both of its hosts
-// are allowed.
+// New makes a client for the given services ("" for the real ones). Both
+// gutenberg.org hosts are allowed because it redirects books' text between them.
 func New(gutenberg, wikipedia string) *Client {
 	if gutenberg == "" {
 		gutenberg = GutenbergURL
@@ -118,16 +115,13 @@ func (c *Client) getOnce(ctx context.Context, raw string) (body []byte, retry bo
 	return body, false, nil
 }
 
-// Book is a public-domain book on Project Gutenberg.
 type Book struct {
 	ID      int
 	Title   string
 	Author  string
-	TextURL string // plain text
+	TextURL string
 }
 
-// FindBook returns the book that best matches query, e.g. "Pride and
-// Prejudice Austen", from Project Gutenberg's own catalogue search (OPDS).
 func (c *Client) FindBook(ctx context.Context, query string) (Book, error) {
 	body, err := c.get(ctx, c.Gutenberg+"/ebooks/search.opds/?query="+url.QueryEscape(query))
 	if err != nil {
@@ -166,7 +160,6 @@ func authorName(s string) string {
 	return s
 }
 
-// BookText returns a book's text without Project Gutenberg's header and licence.
 func (c *Client) BookText(ctx context.Context, b Book) (string, error) {
 	body, err := c.get(ctx, b.TextURL)
 	if err != nil {
@@ -175,7 +168,6 @@ func (c *Client) BookText(ctx context.Context, b Book) (string, error) {
 	return StripGutenberg(strings.ReplaceAll(string(body), "\r\n", "\n")), nil
 }
 
-// StripGutenberg keeps what is between "*** START OF ..." and "*** END OF ...".
 func StripGutenberg(text string) string {
 	if i := strings.Index(text, "*** START OF"); i >= 0 {
 		if j := strings.Index(text[i:], "\n"); j >= 0 {
@@ -188,14 +180,12 @@ func StripGutenberg(text string) string {
 	return strings.TrimSpace(text)
 }
 
-// Article is a Wikipedia article as plain text.
 type Article struct {
 	Title string
 	URL   string
 	Text  string
 }
 
-// FindArticle returns the Wikipedia article that best matches query.
 func (c *Client) FindArticle(ctx context.Context, query string) (Article, error) {
 	body, err := c.get(ctx, c.Wikipedia+"/w/api.php?action=query&list=search&srlimit=1&format=json&formatversion=2&srsearch="+
 		url.QueryEscape(query))

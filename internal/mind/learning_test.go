@@ -54,7 +54,7 @@ func TestASkillGoalGetsALearningPlan(t *testing.T) {
 	if len(s.resources) != 1 || s.resources[0].Ability != "look_up" || s.resources[0].Stage != 0 || s.resources[0].Status != memory.ResourceTodo {
 		t.Errorf("resources = %+v; want only the one it can read", s.resources)
 	}
-	m.EnsurePlans(context.Background(), at(29, 9, 0)) // one plan per goal
+	m.EnsurePlans(context.Background(), at(29, 9, 0))
 	if len(s2.requests) != 1 {
 		t.Error("planned the same goal twice")
 	}
@@ -123,7 +123,6 @@ func TestTheReviewMovesTheLearningPlanOn(t *testing.T) {
 		t.Errorf("plans = %d; the goal already had one", len(s.plans))
 	}
 
-	// A plan ends with its goal.
 	done := strings.Replace(review, `"status":"active"`, `"status":"done"`, 1)
 	m.System2 = &fakeSystem2{formats: map[string]string{"weekly_review": done}}
 	if err := m.Review(context.Background(), at(25, 21, 0)); err != nil {
@@ -216,7 +215,6 @@ func TestTakingOnAGoalTheOwnerAsksFor(t *testing.T) {
 		t.Errorf("plans = %+v", s.plans)
 	}
 
-	// Someone else's goal for it isn't taken on.
 	before := len(s.goals)
 	m.handle(ctx, percept("2", "Learn juggling"))
 	if len(s.goals) != before {

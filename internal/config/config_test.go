@@ -69,6 +69,13 @@ working_memory:
 	if err := cfg.ValidateAgent(); err != nil {
 		t.Errorf("ValidateAgent: %v", err)
 	}
+	if cfg.DailyLife.Pace != 1 {
+		t.Errorf("pace = %d, want a person's pace", cfg.DailyLife.Pace)
+	}
+	cfg.DailyLife.Enabled, cfg.DailyLife.Pace = false, 0 // checked even with no day of its own
+	if err := cfg.ValidateAgent(); err == nil {
+		t.Error("ValidateAgent passed with pace 0")
+	}
 }
 
 func TestLoadRequiresDatabaseURL(t *testing.T) {
@@ -150,7 +157,6 @@ func TestLiving(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeConfig(t, "self:\n  dir: "+dir+"\ndatabase:\n  url: postgres://x\ninitiative:\n  check_ins: [\"11:00\"]\n  quiet: 2h\n"+
 		"daily_life:\n  plan_at: \"06:00\"\n  plan_prompt: prompts/mine.md\n")
-	// No living.yaml: the config file's.
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)

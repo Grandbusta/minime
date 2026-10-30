@@ -112,7 +112,6 @@ func TestPassage(t *testing.T) {
 	if strings.Join(all, "|") != "One.\n\nTwo two two.|Three three three three.|Four." {
 		t.Errorf("passages = %q", all)
 	}
-	// No break to cut at: never split a character.
 	long := strings.Repeat("é", 100)
 	p, next = Passage(long, 0, 51)
 	if !utf8.ValidString(p) || !utf8.ValidString(long[next:]) {

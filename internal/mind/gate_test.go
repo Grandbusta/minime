@@ -15,13 +15,12 @@ import (
 	"github.com/Grandbusta/minime/internal/providers/system2"
 )
 
-// owner is who approves in these tests; sam is someone else it talks with.
 const owner = "test:owner"
 
 type fakeAsker struct {
-	asked   []string // what it asked
+	asked   []string
 	ids     []string
-	settled []string // how each ended
+	settled []string
 }
 
 func (f *fakeAsker) Ask(_ context.Context, p perception.Percept, text, id string) (json.RawMessage, error) {
@@ -55,7 +54,6 @@ func gatedMind(r *fakeReplier, s2 *fakeSystem2) (*Mind, *fakeStore, *fakeAsker) 
 	return m, s, asker
 }
 
-// tap is the owner (or someone else) answering approval id.
 func tap(from, id string, approve bool) perception.Percept {
 	payload, _ := json.Marshal(perception.Answer{Approval: id, Approve: approve})
 	return perception.Percept{ID: ulid.Make(), Source: "test", ExternalID: "callback:" + ulid.Make().String(), Thread: "chat-owner",
@@ -92,7 +90,6 @@ func TestMessagingOthersFirstWaitsForTheOwner(t *testing.T) {
 		t.Errorf("decision = %+v", d)
 	}
 
-	// Someone else's tap doesn't count; the owner's does, once.
 	m.handle(context.Background(), tap(sam, asker.ids[0], true))
 	if len(r.sent) != 0 {
 		t.Fatal("someone who isn't the owner approved it")

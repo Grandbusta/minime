@@ -14,12 +14,8 @@ import (
 	"github.com/Grandbusta/minime/internal/providers/system2"
 )
 
-// Learning plans: when a goal is about growing a skill, it plans how to learn
-// it, the way a self-taught person does: a few stages, each with what to
-// learn, a practice piece slightly beyond it, a "done when", and resources to
-// study. Its days follow the current stage (study a resource, practise,
-// reflect), and its weekly review moves it on to the next stage when the
-// "done when" is met by what it actually made.
+// Learning plans: its weekly review moves a plan on to the next stage only
+// when the stage's "done when" is met by what it actually made.
 
 const (
 	minStages         = 3
@@ -49,8 +45,7 @@ var learnFormat = &system2.Format{Name: "learning_plan", Schema: map[string]any{
 	},
 }}
 
-// EnsurePlans drafts a learning plan for each active skill goal that has
-// none: the review does it, and `minime learn` on demand.
+// EnsurePlans drafts a plan for each active skill goal that has none.
 func (m *Mind) EnsurePlans(ctx context.Context, now time.Time) {
 	if m.Day.LearnPrompt.Text == "" {
 		return
@@ -76,7 +71,6 @@ func (m *Mind) EnsurePlans(ctx context.Context, now time.Time) {
 	}
 }
 
-// draftPlan has System 2 plan how to grow a goal's skill.
 func (m *Mind) draftPlan(ctx context.Context, g memory.Goal, now time.Time) error {
 	start := time.Now()
 	d := &decision.Decision{ID: ulid.Make(), At: start.UTC(), Tier: decision.TierSystem2, SetID: m.Day.LearnPrompt.Ref,
@@ -164,7 +158,7 @@ func (m *Mind) draftPlan(ctx context.Context, g memory.Goal, now time.Time) erro
 	return nil
 }
 
-// resource is something to study, if it can be read with an ability it has.
+// resource is false unless an ability it has can read it.
 func (m *Mind) resource(plan ulid.ULID, stage int, ability, query, why string, now time.Time) (memory.Resource, bool) {
 	ability, query = strings.TrimSpace(ability), strings.TrimSpace(query)
 	ab, ok := m.Abilities.Get(ability)
@@ -185,7 +179,6 @@ func countStage(rs []memory.Resource, stage int) int {
 	return n
 }
 
-// readingList is the abilities it can study with, for a prompt.
 func (m *Mind) readingList() string {
 	var lines []string
 	for _, a := range m.plannable() {
@@ -197,8 +190,6 @@ func (m *Mind) readingList() string {
 	return strings.Join(lines, "\n")
 }
 
-// plansNote is where it is in each learning plan, for the morning plan or a
-// review: the current stage, and what's left to study for it.
 func (m *Mind) plansNote(ctx context.Context, forReview bool) string {
 	plans, err := m.Store.Plans(ctx, true)
 	if err != nil || len(plans) == 0 {
@@ -234,8 +225,6 @@ func (m *Mind) plansNote(ctx context.Context, forReview bool) string {
 	return b.String()
 }
 
-// studied marks a resource done once it has studied it: the activity that
-// read it names it (in its args), and made notes.
 func (m *Mind) studied(ctx context.Context, i memory.Intention, w memory.Work, now time.Time) {
 	raw := i.Args["resource"]
 	if raw == "" {
@@ -250,7 +239,6 @@ func (m *Mind) studied(ctx context.Context, i memory.Intention, w memory.Work, n
 	}
 }
 
-// resourceFor is a to-study resource of an active plan's current stage, by id.
 func (m *Mind) resourceFor(ctx context.Context, id string) (memory.Resource, bool) {
 	plans, err := m.Store.Plans(ctx, true)
 	if err != nil {
@@ -270,7 +258,6 @@ func (m *Mind) resourceFor(ctx context.Context, id string) (memory.Resource, boo
 	return memory.Resource{}, false
 }
 
-// skillNamed is the name of the skill it has that name means (any case); "" if none.
 func (m *Mind) skillNamed(ctx context.Context, name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -288,8 +275,6 @@ func (m *Mind) skillNamed(ctx context.Context, name string) string {
 	return ""
 }
 
-// foundNote is the pages its web searches found lately, which it can read
-// with read_page, for a plan or a review; "" if it can't read pages.
 func (m *Mind) foundNote(ctx context.Context) string {
 	ab, ok := m.Abilities.Get("read_page")
 	if !ok || !m.allowed(ab) {
@@ -307,9 +292,6 @@ func (m *Mind) foundNote(ctx context.Context) string {
 	return b.String()
 }
 
-// stagesNote is where its learning plans stand, for a note on making
-// something: each one's current stage, so it can say when what it made
-// meets a stage's "done when". Empty without plans.
 func (m *Mind) stagesNote(ctx context.Context) string {
 	plans, err := m.Store.Plans(ctx, true)
 	if err != nil {
@@ -331,8 +313,6 @@ func (m *Mind) stagesNote(ctx context.Context) string {
 		"stage_done and you move on to the next stage; be strict, a start isn't done. Otherwise leave it empty:" + b.String()
 }
 
-// stageDone moves a learning plan on to its next stage, when what it just
-// made met its current one. It returns what it did, for the log.
 func (m *Mind) stageDone(ctx context.Context, planID string, now time.Time) string {
 	if planID == "" {
 		return ""

@@ -11,9 +11,9 @@ import (
 type Tier string
 
 const (
-	TierReflex  Tier = "reflex"  // plain Go code
-	TierSystem1 Tier = "system1" // decision model (Jev, Clef, LLM adapter)
-	TierSystem2 Tier = "system2" // reasoning LLM
+	TierReflex  Tier = "reflex"
+	TierSystem1 Tier = "system1"
+	TierSystem2 Tier = "system2"
 )
 
 // Gate is what the autonomy policy did with the chosen action.
@@ -25,23 +25,20 @@ const (
 	GateDenied Gate = "denied"
 )
 
-// QuestionType is provider-neutral. Providers map it to their own names
-// (e.g. Jev calls a predicate a "noul").
 type QuestionType string
 
 const (
-	QuestionPredicate QuestionType = "predicate" // yes/no → Probability
-	QuestionChoice    QuestionType = "choice"    // one of the named options → Choice
-	QuestionScore     QuestionType = "score"     // position on ordered levels → Score
+	QuestionPredicate QuestionType = "predicate"
+	QuestionChoice    QuestionType = "choice"
+	QuestionScore     QuestionType = "score"
 )
 
-// Answer is a System 1 answer to one typed question.
 type Answer struct {
 	Type          QuestionType       `json:"type"`
-	Refused       bool               `json:"refused,omitempty"`     // the model declined this question
+	Refused       bool               `json:"refused,omitempty"`
 	Probability   float64            `json:"probability,omitempty"` // predicate: chance the statement is true
-	Choice        string             `json:"choice,omitempty"`      // choice: the selected option's value
-	Score         float64            `json:"score,omitempty"`       // score: probability-weighted level index
+	Choice        string             `json:"choice,omitempty"`
+	Score         float64            `json:"score,omitempty"` // score: probability-weighted level index
 	Probabilities map[string]float64 `json:"probabilities,omitempty"`
 	Confidence    float64            `json:"confidence,omitempty"` // choice and score only
 }
@@ -85,7 +82,7 @@ type Decision struct {
 	PerceptID ulid.ULID
 	SetID     string // question set or reflex that decided, e.g. "incoming_message@3"
 	Tier      Tier
-	Provider  string // e.g. "typesafe/jev-1.14.0"; empty for reflexes
+	Provider  string // "" for reflexes
 	Answers   map[string]Answer
 	Action    string
 	Reply     string // what was said, on the decision that said it; "" otherwise

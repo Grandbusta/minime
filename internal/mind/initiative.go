@@ -15,30 +15,20 @@ import (
 	"github.com/Grandbusta/minime/internal/providers/system2"
 )
 
-// Initiative: the agent speaks first, the way a person does. A clock ticks
-// into the mind's loop; on each tick it sends the reminders that are due,
-// keeps the promises that are due (makes what it promised and sends it), and
-// at the check-in times of day it considers checking in on the people it
-// talks with, about what is going on in their lives.
+// Initiative: the agent speaks first, the way a person does: reminders,
+// promises and checking in on people.
 
-// CheckIns is when the agent considers checking in on people.
 type CheckIns struct {
-	// Times of day, from midnight in the agent's time zone, e.g. 11:00 and
-	// 18:00. Empty: it never checks in unprompted.
+	// Times of day, from midnight in its time zone. Empty: it never checks in unprompted.
 	Times []time.Duration
-	// Quiet is how long a conversation must have been quiet first, so it
-	// never interrupts.
 	Quiet time.Duration
 }
 
 const (
 	intentionsPerTick = 10
-	// reminderGiveUp is how late a reminder may still be sent, e.g. after
-	// the agent was down; later, it is marked missed.
-	reminderGiveUp = 24 * time.Hour
-	// promiseGiveUp is how late a promise may still be kept.
-	promiseGiveUp = 24 * time.Hour
-	// maxOpenPromises is how many promises it keeps open with one person.
+	// reminderGiveUp: a reminder later than this, e.g. after downtime, is missed.
+	reminderGiveUp  = 24 * time.Hour
+	promiseGiveUp   = 24 * time.Hour
 	maxOpenPromises = 3
 	// What was said around a promise, for making it: from promiseTalkBefore
 	// it was made to promiseTalkAfter, at most promiseTalkTurns exchanges.
@@ -54,33 +44,36 @@ const (
 	promiseMakeAhead = time.Minute
 )
 
+// tick does first what someone is waiting for, then its own day, the slow part.
 func (m *Mind) tick(ctx context.Context, now time.Time) {
-	m.planDay(ctx, now)
 	m.expireApprovals(ctx, now)
 	m.sendApprovals(ctx)
 	m.expireCalls(ctx, now)
 	m.sendCalls(ctx, now)
-	m.doDueIntentions(ctx, now)
-	m.preparePromises(ctx, now)
-	m.weeklyReview(ctx, now)
-	if m.toPlan { // a goal taken on in a chat: its learning plan, now the reply is sent
-		m.toPlan = false
-		m.EnsurePlans(ctx, now)
-	}
+	m.doDueIntentions(ctx, now, false)
 	if m.checkInTime(now) {
 		m.checkIn(ctx, now)
+	}
+	m.planDay(ctx, now)
+	m.doDueIntentions(ctx, now, true)
+	m.preparePromises(ctx, now)
+	m.weeklyReview(ctx, now)
+	if m.toPlan.Swap(false) { // a goal taken on in a chat: its learning plan, now the reply is sent
+		m.EnsurePlans(ctx, now)
 	}
 	m.lastTick = now
 }
 
-// doDueIntentions does what is due: reminders for people, activities of its own.
-func (m *Mind) doDueIntentions(ctx context.Context, now time.Time) {
+func (m *Mind) doDueIntentions(ctx context.Context, now time.Time, ownDay bool) {
 	due, err := m.Store.DueIntentions(ctx, now, intentionsPerTick)
 	if err != nil {
 		m.Log.Warn("loading due intentions failed", "err", err)
 		return
 	}
 	for _, i := range due {
+		if (i.Kind == memory.IntentionActivity) != ownDay {
+			continue
+		}
 		switch i.Kind {
 		case memory.IntentionRemind:
 			m.remind(ctx, i, now)
@@ -127,11 +120,8 @@ func (m *Mind) remind(ctx context.Context, r memory.Intention, now time.Time) {
 	m.settleSpoken(ctx, r, m.speakFirst(ctx, p, person, nil, speech{action: "remind", note: note, ref: r.ID}), "", now)
 }
 
-// keepPromise sends what it promised a person when it is due, with a few
-// words of its own: made ahead by preparePromises, or now if that failed.
-// It isn't put off by a conversation or the day's budget: a promise is kept.
-// Made but not sent (sending failed), it is sent on the next tick without
-// being made again.
+// keepPromise isn't put off by a conversation or the day's budget: a promise
+// is kept.
 func (m *Mind) keepPromise(ctx context.Context, i memory.Intention, now time.Time) {
 	log := m.Log.With("intention", i.ID.String(), "person", i.Subject)
 	conv, ok := m.conversationWith(ctx, i.Subject)
@@ -146,9 +136,9 @@ func (m *Mind) keepPromise(ctx context.Context, i memory.Intention, now time.Tim
 		log.Error("loading the work failed", "err", err)
 		return
 	}
-	if !made { // not made ahead, e.g. it failed then
+	if !made {
 		if w, made = m.makePromise(ctx, i, conv, person, now); !made {
-			return // missed, or tried again next tick
+			return
 		}
 	}
 	promised := i.CreatedAt.In(m.Zone).Format("Monday 2 January at 15:04")
@@ -162,10 +152,6 @@ func (m *Mind) keepPromise(ctx context.Context, i memory.Intention, now time.Tim
 	m.settleSpoken(ctx, i, got, w.Title, now) // not sent: the work is kept, so the next tick sends it
 }
 
-// preparePromises makes what it promised ahead, so it is ready to send on
-// time: promises due within promiseLead, once they have settled (see
-// promiseSettle). One that fails is tried again next tick, and at the latest
-// when it is due.
 func (m *Mind) preparePromises(ctx context.Context, now time.Time) {
 	soon, err := m.Store.DueIntentions(ctx, now.Add(promiseLead), intentionsPerTick)
 	if err != nil {
@@ -177,20 +163,19 @@ func (m *Mind) preparePromises(ctx context.Context, now time.Time) {
 			continue // not a promise, or due now: kept by keepPromise
 		}
 		if now.Before(i.CreatedAt.Add(promiseSettle)) && now.Before(i.DueAt.Add(-promiseMakeAhead)) {
-			continue // just promised: more may still be said about it
+			continue
 		}
 		if _, made, err := m.Store.IntentionWork(ctx, i.ID); err != nil || made {
 			continue
 		}
 		conv, ok := m.conversationWith(ctx, i.Subject)
 		if !ok {
-			continue // missed when due
+			continue
 		}
 		m.makePromise(ctx, i, conv, m.person(ctx, i.Subject), now)
 	}
 }
 
-// makePromise makes what it promised person, with what was said about it.
 func (m *Mind) makePromise(ctx context.Context, i memory.Intention, conv memory.Conversation, person memory.Person,
 	now time.Time) (memory.Work, bool) {
 	who := orDefault(person.Name, fallbackName)
@@ -199,9 +184,6 @@ func (m *Mind) makePromise(ctx context.Context, i memory.Intention, conv memory.
 	return m.makeWork(ctx, i, "task", what+m.promiseTalk(ctx, conv, i, who), now)
 }
 
-// promiseTalk is what was said around a promise, from a little before it to
-// a while after, so details added once it was made ("funny, please") reach
-// the work.
 func (m *Mind) promiseTalk(ctx context.Context, conv memory.Conversation, i memory.Intention, who string) string {
 	exchanges, err := m.Store.RecentExchanges(ctx, conv.Source, conv.Thread, i.CreatedAt.Add(-promiseTalkBefore), ulid.ULID{}, promiseTalkTurns)
 	if err != nil {
@@ -226,8 +208,6 @@ func (m *Mind) promiseTalk(ctx context.Context, conv memory.Conversation, i memo
 	return "\n\nWhat you and " + who + " said about it (follow any details they added):" + b.String()
 }
 
-// titled is a work as it is sent: its title, then its text, unless the text
-// already starts with the title.
 func titled(w memory.Work) string {
 	text := strings.TrimSpace(w.Text)
 	if first, _, _ := strings.Cut(text, "\n"); strings.EqualFold(strings.Trim(first, " *#\"'"), strings.TrimSpace(w.Title)) {
@@ -236,9 +216,8 @@ func titled(w memory.Work) string {
 	return w.Title + "\n\n" + text
 }
 
-// firstParagraph keeps the words sent with a delivery to their first
-// paragraph, in case System 2 wrote more than it was asked to (like its own
-// version of what is attached).
+// firstParagraph guards against System 2 writing its own version of what is
+// attached.
 func firstParagraph(s string) string {
 	s = strings.TrimSpace(s)
 	if i := strings.Index(s, "\n\n"); i > 0 {
@@ -269,10 +248,6 @@ func (m *Mind) finish(ctx context.Context, i memory.Intention, status, result st
 	}
 }
 
-// checkIn considers each person the agent talks with: someone it knows, in
-// a quiet conversation, not checked in on today, with something recent going
-// on in their life that it has not asked about yet. System 1 picks what is
-// worth asking about (open_threads); System 2 writes the message.
 func (m *Mind) checkIn(ctx context.Context, now time.Time) {
 	if m.OpenThreads.ID == "" || m.RecallCandidates <= 0 {
 		return
@@ -332,38 +307,32 @@ func (m *Mind) checkIn(ctx context.Context, now time.Time) {
 	}
 }
 
-// speech is what the agent says first: why (note), as which action, and
-// what goes with it.
 type speech struct {
 	action     string
-	note       string              // why it is speaking, for System 2
+	note       string
 	attachment string              // sent after what System 2 wrote, e.g. what it promised; "" if none
 	trim       func(string) string // shortens what System 2 wrote; nil: kept as is
-	ref        ulid.ULID           // the intention it is about; zero if none
-	approved   bool                // the owner already approved it: a follow-up to an approval
+	ref        ulid.ULID
+	approved   bool // the owner already approved it: a follow-up to an approval
 }
 
-// spoken is what came of speaking first.
 type spoken int
 
 const (
-	failed    spoken = iota // not sent; worth trying again
-	sent                    // sent
-	asked                   // written, and waiting for the owner's approval
-	forbidden               // not allowed: not even written
+	failed spoken = iota // not sent; worth trying again
+	sent
+	asked
+	forbidden // not allowed: not even written
 )
 
-// speakFirst has System 2 write what the agent says first to person, as a
-// child of root (nil: none), and sends it in the conversation p places it in,
-// followed by the attachment if any. Unless already approved, it goes through
-// the autonomy gate first (reach_out): forbidden, it isn't written; asked,
-// the owner is shown exactly what would be sent, and it is sent if they approve.
+// speakFirst goes through the autonomy gate unless already approved: when
+// asked, the owner is shown exactly what would be sent. root may be nil.
 func (m *Mind) speakFirst(ctx context.Context, p perception.Percept, person memory.Person,
 	root *decision.Decision, s speech) spoken {
 	log := m.Log.With("percept", p.ID.String(), "person", p.Speaker, "action", s.action)
 	verdict := action.Auto
 	if !s.approved {
-		verdict = m.Autonomy.Check(action.ReachOut, p.Speaker)
+		verdict = m.policy().Check(action.ReachOut, p.Speaker)
 	}
 	if verdict == action.Forbid {
 		log.Info("not allowed to message them first", "class", action.ReachOut)
@@ -445,8 +414,6 @@ func (m *Mind) speakFirst(ctx context.Context, p perception.Percept, person memo
 	return got
 }
 
-// outgoing is the percept that places what the agent says first in a
-// conversation: the person's thread, addressed like their last message.
 func outgoing(conv memory.Conversation, person memory.Person, kind string, now time.Time) perception.Percept {
 	id := ulid.Make()
 	return perception.Percept{ID: id, Source: conv.Source, ExternalID: kind + ":" + id.String(), Thread: conv.Thread,

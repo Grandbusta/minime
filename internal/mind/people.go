@@ -13,14 +13,7 @@ import (
 	"github.com/Grandbusta/minime/internal/self"
 )
 
-// People live in memory, like they do for a person: the agent is born knowing
-// its family, meets others, and learns who they are by being told.
-// Nothing about them needs a restart. Before a relation is stored, System 1
-// files the person into a circle of the agent's life (family, school, ...).
-
-// classifyRelation asks System 1 which circle of the agent's life relation
-// puts a person in, e.g. "Busta is Daniel's father." → family. "" if the
-// person_circle set is not configured.
+// classifyRelation is "" if the person_circle set is not configured.
 func (m *Mind) classifyRelation(ctx context.Context, relation string) (string, float64, error) {
 	if m.PersonCircle.ID == "" {
 		return "", 0, nil
@@ -45,15 +38,12 @@ func (m *Mind) classifyRelation(ctx context.Context, relation string) (string, f
 	return a.Choice, resp.CostUSD, nil
 }
 
-// circleFamily is the circle of everyone in the life story's family list. The
-// list itself says so, the way a child knows who its family is, so it takes
-// no model call.
+// circleFamily is given to everyone in the life story's family list, with no
+// model call.
 const circleFamily = "family"
 
-// bornKnowing puts the agent's family (self.Life.Family) into memory, each
-// once: those who talk to it under their account, the others under a key
-// made from their name and relation. Afterwards memory wins: a relative
-// already known is never changed by the file again.
+// bornKnowing adds each relative once: a relative already known is never
+// changed by the file again.
 func (m *Mind) bornKnowing(ctx context.Context) {
 	for _, r := range m.Life.Family {
 		key := r.Account
@@ -75,12 +65,11 @@ func (m *Mind) bornKnowing(ctx context.Context) {
 	}
 }
 
-// familyKey identifies a relative who never talks to the agent, e.g. "family:mother:tolu".
+// familyKey is for a relative who never talks to the agent.
 func familyKey(r self.Relative) string {
 	return "family:" + strings.ToLower(r.Relation) + ":" + strings.ToLower(r.Name)
 }
 
-// meet returns who is speaking, remembering them the first time they talk.
 func (m *Mind) meet(ctx context.Context, p perception.Percept) memory.Person {
 	stranger := memory.Person{Key: p.Speaker, Name: p.SpeakerName, Circle: memory.CircleStranger,
 		Source: memory.KnownByMeeting, FirstSeen: p.At, UpdatedAt: p.At}
@@ -107,9 +96,8 @@ func (m *Mind) meet(ctx context.Context, p perception.Percept) memory.Person {
 	return person
 }
 
-// learnRelation stores who the speaker said they are to the agent, filed
-// into a circle. What the agent was born knowing is never overwritten by a
-// claim. It returns what classifying cost.
+// learnRelation never overwrites what the agent was born knowing. It returns
+// what classifying cost.
 func (m *Mind) learnRelation(ctx context.Context, p perception.Percept, person memory.Person, relation string) float64 {
 	if relation == "" || person.Key == "" || relation == person.Relation {
 		return 0
@@ -131,8 +119,7 @@ func (m *Mind) learnRelation(ctx context.Context, p perception.Percept, person m
 	return cost
 }
 
-// whoTheyAre tells System 2 who it is talking with, and who else it knows,
-// from memory. Only what the agent was born knowing is stated as certain.
+// whoTheyAre states only what the agent was born knowing as certain.
 func (m *Mind) whoTheyAre(ctx context.Context, person memory.Person, n names) string {
 	var b strings.Builder
 	switch {

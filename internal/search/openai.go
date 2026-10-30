@@ -15,15 +15,12 @@ import (
 	"github.com/Grandbusta/minime/internal/providers/openaiclient"
 )
 
-// OpenAI searches with the Responses API's built-in web search tool.
 type OpenAI struct {
 	api   openai.Client
 	model string
 	price pricing.Price
 }
 
-// NewOpenAI returns a searcher using model (e.g. the System 2 model) and the
-// OpenAI key; an empty baseURL means the public API.
 func NewOpenAI(apiKey, model, baseURL string, price pricing.Price) *OpenAI {
 	return &OpenAI{api: openaiclient.New(apiKey, baseURL, 90*time.Second), model: model, price: price}
 }

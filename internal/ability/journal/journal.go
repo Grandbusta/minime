@@ -12,10 +12,8 @@ import (
 	"github.com/Grandbusta/minime/internal/memory"
 )
 
-// Name is the journal's ability; its intention is planned every day.
 const Name = "journal"
 
-// Store is what it looks back at.
 type Store interface {
 	IntentionsDue(ctx context.Context, from, to time.Time) ([]memory.Intention, error)
 	WorksBetween(ctx context.Context, from, to time.Time) ([]memory.Work, error)
@@ -32,7 +30,6 @@ func (Journal) Describe() string { return "" }
 
 func (Journal) Risk() ability.Risk { return ability.Private }
 
-// Prepare gives what today held: what it planned and how it went, and what it made.
 func (j Journal) Prepare(ctx context.Context, a ability.Act) (ability.Material, error) {
 	var b strings.Builder
 	b.WriteString("\n\nIt's evening: write today's journal entry, a short honest look back at your day, in your own voice. Use title for the date and a few words.")

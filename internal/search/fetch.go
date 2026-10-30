@@ -24,7 +24,6 @@ const (
 	userAgent    = "github.com/Grandbusta/minime/1.0 (https://github.com/Grandbusta/minime)"
 )
 
-// HTTPFetcher reads public https pages as plain text.
 type HTTPFetcher struct {
 	client *http.Client
 }
@@ -62,7 +61,6 @@ func newFetcher(allow func(netip.Addr) bool) *HTTPFetcher {
 		}}}
 }
 
-// publicOnly is whether an address is on the public internet.
 func publicOnly(ip netip.Addr) bool {
 	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() &&
 		!netip.MustParsePrefix("100.64.0.0/10").Contains(ip) // carrier-grade NAT
@@ -114,10 +112,8 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, raw string) (Page, error) {
 	return page, nil
 }
 
-// readable is an HTML page's title and the text of its content, by
-// Readability (the algorithm behind Firefox's reader view): what's left
-// once scripts, styles and the page's chrome (navigation, headers, footers,
-// sidebars, forms) are dropped.
+// readable uses Readability (Firefox's reader view) to drop scripts, styles
+// and the page's navigation, headers, footers and sidebars.
 func readable(doc string, page *url.URL) (title, text string, err error) {
 	article, err := readability.FromReader(strings.NewReader(doc), page)
 	if err != nil {
@@ -130,7 +126,6 @@ func readable(doc string, page *url.URL) (title, text string, err error) {
 	return strings.TrimSpace(article.Title()), b.String(), nil
 }
 
-// collapse trims each line, squeezes spaces, and keeps at most one blank line in a row.
 func collapse(s string) string {
 	var out []string
 	blank := false
@@ -148,7 +143,6 @@ func collapse(s string) string {
 	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
-// cut keeps at most n bytes of s, ending at a whole rune.
 func cut(s string, n int) string {
 	if len(s) <= n {
 		return s

@@ -92,7 +92,7 @@ func TestFacts(t *testing.T) {
 		if err := s.SaveFact(ctx, f); err != nil {
 			t.Fatal(err)
 		}
-		want = append([]string{text}, want...) // newest first
+		want = append([]string{text}, want...)
 	}
 
 	got, err := s.RecentFacts(ctx, 2)
@@ -110,7 +110,7 @@ func TestFactAreasAndRecallOrder(t *testing.T) {
 	// Far in the future so these are the newest facts in the table.
 	base := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Microsecond)
 
-	sam, other := "test:"+ulid.Make().String(), "test:"+ulid.Make().String() // fresh people per run
+	sam, other := "test:"+ulid.Make().String(), "test:"+ulid.Make().String()
 	save := func(i int, subject, text string, areas []string) memory.Fact {
 		t.Helper()
 		p := perception.Percept{ID: ulid.Make(), Source: "test", ExternalID: ulid.Make().String(), Speaker: sam,
@@ -197,11 +197,11 @@ func TestPeople(t *testing.T) {
 func TestRecentExchanges(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
-	thread := ulid.Make().String() // a fresh conversation per run
+	thread := ulid.Make().String()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 
-	// say saves a message at base+offset, plus a decision chain like the mind's:
-	// a System 1 root and, if reply is set, a System 2 child that said it.
+	// say saves a message at base+offset with a decision chain like the mind's: a
+	// System 1 root and, if reply is set, a System 2 child that said it.
 	say := func(offset time.Duration, text, reply string) perception.Percept {
 		t.Helper()
 		p := perception.Percept{ID: ulid.Make(), Source: "test", ExternalID: ulid.Make().String(),
@@ -313,7 +313,6 @@ func TestPublicFactsAndProfile(t *testing.T) {
 		t.Errorf("public = %v, want only the colour", got)
 	}
 
-	// A decision the agent makes on its own has no percept.
 	d := decision.Decision{ID: ulid.Make(), At: base, SetID: "public_profile@1", Tier: decision.TierSystem1,
 		Action: "decide_public", Gate: decision.GateAuto}
 	if err := s.SaveDecision(ctx, d); err != nil {
@@ -381,7 +380,6 @@ func TestRemindersConversationsAndCheckIns(t *testing.T) {
 		t.Errorf("intentions due = %+v, %v", got, err)
 	}
 
-	// The agent speaks first in the same thread.
 	checkIn := perception.Percept{ID: ulid.Make(), Source: "test", ExternalID: "check_in:" + ulid.Make().String(),
 		Thread: msg.Thread, Speaker: person, Kind: perception.KindCheckIn, At: base.Add(2 * time.Hour)}
 	if _, err := s.SavePercept(ctx, checkIn); err != nil {
@@ -456,7 +454,6 @@ func TestProjectsWorksAndOwnIntentions(t *testing.T) {
 		t.Errorf("active = %+v, %v", active, err)
 	}
 
-	// An activity of its own: no percept, part of the project.
 	own := memory.Intention{ID: ulid.Make(), Subject: memory.SubjectSelf, Kind: memory.IntentionActivity, ProjectID: song.ID,
 		Text: "write verse 2", DueAt: base, Status: memory.IntentionPending, CreatedAt: base}
 	if err := s.SaveIntention(ctx, own); err != nil {
@@ -495,7 +492,6 @@ func TestProjectsWorksAndOwnIntentions(t *testing.T) {
 		t.Errorf("work for an intention without one: %v, %v", ok, err)
 	}
 
-	// Promises to a person: only the pending tasks for them.
 	person := "test:" + ulid.Make().String()
 	task := func(text, status string) memory.Intention {
 		return memory.Intention{ID: ulid.Make(), Subject: person, Kind: memory.IntentionTask, Text: text,
@@ -632,7 +628,6 @@ func TestPublicWorks(t *testing.T) {
 	if set(journal.ID, true, memory.PublicByOwner) || set(forThem.ID, true, memory.PublicByOwner) {
 		t.Error("made the journal or a promise public")
 	}
-	// The owner hides the notes; the daily check can't bring them back.
 	if !set(notes.ID, false, memory.PublicByOwner) || set(notes.ID, true, memory.PublicBySystem1) {
 		t.Error("the owner's choice was overridden")
 	}
@@ -732,7 +727,6 @@ func TestLearning(t *testing.T) {
 	base := time.Now().UTC().Truncate(time.Microsecond).AddDate(0, 0, -600) // older than other tests' data
 	thread := "learn-" + ulid.Make().String()
 
-	// Permission changes: every one kept, the newest per class wins.
 	if err := s.SaveAutonomyRule(ctx, "reach_out", "auto", "test:owner", ulid.ULID{}, base); err != nil {
 		t.Fatal(err)
 	}
@@ -743,7 +737,6 @@ func TestLearning(t *testing.T) {
 		t.Errorf("rules = %v, %v", rules, err)
 	}
 
-	// Forgetting a fact.
 	fp := perception.Percept{ID: ulid.Make(), Source: "test", ExternalID: ulid.Make().String(), Thread: thread, Kind: "message", At: base}
 	if _, err := s.SavePercept(ctx, fp); err != nil {
 		t.Fatal(err)
@@ -850,7 +843,7 @@ func TestGrowth(t *testing.T) {
 	if err := s.AddSkill(ctx, memory.Skill{Name: name, Level: 3, ShownBy: []string{"beat_idea"}, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddSkill(ctx, memory.Skill{Name: name, Level: 9, UpdatedAt: now}); err != nil { // already has it: kept
+	if err := s.AddSkill(ctx, memory.Skill{Name: name, Level: 9, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetSkillLevel(ctx, name, 4.6, now); err != nil {
@@ -983,7 +976,7 @@ func TestWeb(t *testing.T) {
 	if err := s.SaveFound(ctx, "hooks", []search.Result{{Title: "Hooks", URL: url, Snippet: "a guide"}}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SaveFound(ctx, "again", []search.Result{{Title: "Renamed", URL: url}}, now); err != nil { // kept as first found
+	if err := s.SaveFound(ctx, "again", []search.Result{{Title: "Renamed", URL: url}}, now); err != nil {
 		t.Fatal(err)
 	}
 	if r, ok, err := s.Found(ctx, url); err != nil || !ok || r.Title != "Hooks" || r.Snippet != "a guide" {
@@ -1009,7 +1002,7 @@ func TestJudgment(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	tag := ulid.Make().String() // keys and seed texts unique to this run
+	tag := ulid.Make().String()
 	cases := []memory.JudgmentCase{
 		{ID: ulid.Make(), Key: "tiny-" + tag, Type: "general", Situation: "What to build first.", Options: []string{"all", "tiny"},
 			Choice: "tiny", Reason: "build on it", Status: memory.JudgmentProposed, Source: memory.JudgmentFromSeed, At: now},
@@ -1021,7 +1014,6 @@ func TestJudgment(t *testing.T) {
 	if nc, np, err := s.SeedJudgment(ctx, cases, []memory.Principle{p}); err != nil || nc != 2 || np != 1 {
 		t.Fatalf("seed = %d cases, %d principles, %v", nc, np, err)
 	}
-	// Edited and seeded again: nothing new, and the edit stays.
 	if ok, err := s.ReviewPrinciple(ctx, p.ID, memory.JudgmentApproved, "Start small, then grow "+tag, now); err != nil || !ok {
 		t.Fatalf("review = %v, %v", ok, err)
 	}
@@ -1080,7 +1072,7 @@ func TestCalls(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Microsecond).AddDate(2, 0, 0) // after other tests' calls
-	kind := "focus_" + ulid.Make().String()[:8]                         // a type only this run uses
+	kind := "focus_" + ulid.Make().String()[:8]
 	c := memory.Call{ID: ulid.Make(), Type: kind, Mode: memory.CallAfter, Situation: "What to focus on today.",
 		Options: []string{"the motif", "Equiano"}, Pick: 0, Why: "the stage is due", Confidence: 0.7, Status: memory.CallLogged, CreatedAt: now}
 	if err := s.SaveCall(ctx, c); err != nil {
@@ -1095,7 +1087,6 @@ func TestCalls(t *testing.T) {
 	if stale, err := s.StaleCalls(ctx, now.Add(time.Minute), 100); err != nil || !slices.ContainsFunc(stale, func(x memory.Call) bool { return x.ID == c.ID }) {
 		t.Errorf("stale = %v, %v", stale, err)
 	}
-	// The owner picks the other option, then says why.
 	c.OwnerPick, c.AnsweredBy, c.AnsweredAt, c.Waiting = 1, memory.AnsweredOnTelegram, now.Add(time.Minute), memory.CallWaitingReason
 	if ok, err := s.AnswerCall(ctx, c, true); err != nil || !ok {
 		t.Fatalf("answer = %v, %v", ok, err)
@@ -1292,11 +1283,11 @@ func TestCaseEmbeddings(t *testing.T) {
 	if got := find(); len(got.Embedding) != 3 || got.Embedding[2] != 2 || got.EmbeddedWith != "openai/x" {
 		t.Errorf("case = %+v", got)
 	}
-	s.ReviewCase(ctx, c.ID, memory.JudgmentApproved, "", now) // same text: kept
+	s.ReviewCase(ctx, c.ID, memory.JudgmentApproved, "", now)
 	if got := find(); len(got.Embedding) != 3 {
 		t.Error("a review that didn't change the text cleared the embedding")
 	}
-	s.ReviewCase(ctx, c.ID, memory.JudgmentApproved, "a new reason", now) // new text: embedded again
+	s.ReviewCase(ctx, c.ID, memory.JudgmentApproved, "a new reason", now)
 	if got := find(); got.Embedding != nil || got.Reason != "a new reason" {
 		t.Errorf("after a new reason = %+v", got)
 	}

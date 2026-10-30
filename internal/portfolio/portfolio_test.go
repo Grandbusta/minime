@@ -25,7 +25,7 @@ import (
 
 type fakeStore struct {
 	facts     []memory.Fact
-	public    map[ulid.ULID]bool // decided facts
+	public    map[ulid.ULID]bool
 	page      []byte
 	inputs    string
 	at        time.Time
@@ -227,13 +227,11 @@ func TestRefreshDecidesPublicFactsAndWritesThePage(t *testing.T) {
 		t.Errorf("decisions = %+v", st.decisions)
 	}
 
-	// Nothing new: nothing is asked or rewritten.
 	w.refresh(context.Background())
 	if len(s1.reqs) != 1 || len(s2.reqs) != 1 {
 		t.Errorf("second refresh asked again: system 1 %d, system 2 %d", len(s1.reqs), len(s2.reqs))
 	}
 
-	// A new public fact rewrites the page.
 	beat := fact(memory.SubjectSelf, "Tobi is making a beat called Lagos Rain")
 	st.facts = append(st.facts, beat)
 	s1.probs[beat.Text] = 0.9
@@ -385,7 +383,6 @@ func TestUpdateDecidesWhichWorksArePublic(t *testing.T) {
 		t.Errorf("decision = %+v", d)
 	}
 
-	// Decided works aren't asked about again.
 	if _, err := w.Update(context.Background(), false); err != nil || len(s1.reqs) != 3 {
 		t.Errorf("asked again: %d requests, %v", len(s1.reqs), err)
 	}
@@ -470,12 +467,11 @@ func TestPublishingCanWaitForTheOwner(t *testing.T) {
 		!strings.HasPrefix(st.approvals[0].What, "Harmattan Groove (beat idea)\n\n92 BPM") {
 		t.Errorf("approvals = %+v", st.approvals)
 	}
-	// Waiting, it isn't asked about again.
 	if _, err := w.Update(context.Background(), false); err != nil || len(s1.reqs) != 2 || len(st.approvals) != 1 {
 		t.Errorf("asked again: %d requests, %d approvals, %v", len(s1.reqs), len(st.approvals), err)
 	}
 
-	st.rules = map[string]string{"publish": "forbid"} // the owner changed it by chat
+	st.rules = map[string]string{"publish": "forbid"}
 	other := work("lyrics", "Odd one", "...", 29)
 	st.works = append(st.works, other)
 	s1.probs[other.Title] = 0.9

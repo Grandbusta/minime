@@ -1,5 +1,5 @@
-// Package system1 defines the provider-neutral interface to fast decision models
-// (OpenAI Decisions, TypeSafe Jev, ...). Each provider lives in its own subpackage.
+// Package system1 defines the provider-neutral interface to fast decision
+// models. Each provider lives in its own subpackage.
 package system1
 
 import (
@@ -8,7 +8,6 @@ import (
 	"github.com/Grandbusta/minime/internal/decision"
 )
 
-// DecisionModel answers typed questions about a state in a single call.
 type DecisionModel interface {
 	Decide(ctx context.Context, req Request) (Response, error)
 }
@@ -39,7 +38,7 @@ type Level struct {
 }
 
 type Response struct {
-	Provider string                     // e.g. "openai/gpt-6-luna": who answered, as recorded in the decision log
+	Provider string
 	Answers  map[string]decision.Answer // by question name
 	Usage    Usage
 	CostUSD  float64

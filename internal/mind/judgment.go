@@ -14,26 +14,21 @@ import (
 	"github.com/Grandbusta/minime/internal/providers/embed"
 )
 
-// Judgment: how its owner decides, so it can learn to decide the way they
-// would. Their judgment file seeds it as proposed: decisions they made
-// (cases) and the rules drawn from them (principles). The owner approves,
-// edits or rejects each in the console; only approved ones go into how it
-// plans its day, reviews its week and plans its learning.
+// Judgment: how its owner decides. The judgment file seeds it as proposed;
+// only what the owner approves in the console is used.
 
 const (
-	// judgmentCases is how many of its owner's past decisions go into a note.
 	judgmentCases = 5
 )
 
-// Decision types each kind of thinking it does draws judgment from.
 var (
 	planJudgment   = []string{"general", "life", "product"}
 	reviewJudgment = []string{"general", "life", "product", "autonomy"}
 	learnJudgment  = []string{"general", "life"}
 )
 
-// seedJudgment copies its owner's judgment file into memory, as proposed:
-// anything not seeded before. What the owner edited or rejected stays so.
+// seedJudgment adds only what was not seeded before, so what the owner
+// edited or rejected stays so.
 func (m *Mind) seedJudgment(ctx context.Context) {
 	if len(m.Judgment.Cases) == 0 && len(m.Judgment.Principles) == 0 && len(m.Judgment.Priorities) == 0 && len(m.Judgment.Boundaries) == 0 {
 		return
@@ -70,11 +65,8 @@ func (m *Mind) seedJudgment(ctx context.Context) {
 	}
 }
 
-// judgmentNote is how its owner decides, for a note: what they never do,
-// what matters most to them in order, the rules they approved that apply to
-// these types of decision, and a few of their past decisions: the ones most
-// like what it's deciding (about), or else the newest of these types. Empty
-// when none are approved.
+// judgmentNote picks the past decisions most like about, or else the newest
+// of these types. Empty when none are approved.
 func (m *Mind) judgmentNote(ctx context.Context, types []string, about string) string {
 	ps, err := m.Store.Principles(ctx, memory.JudgmentApproved)
 	if err != nil {
@@ -148,8 +140,6 @@ func (m *Mind) judgmentNote(ctx context.Context, types []string, about string) s
 	return b.String()
 }
 
-// boundariesNote is what its owner never does, for a note on making
-// something: only the boundaries they approved. Empty when there are none.
 func (m *Mind) boundariesNote(ctx context.Context) string {
 	ps, err := m.Store.Principles(ctx, memory.JudgmentApproved)
 	if err != nil {
@@ -171,10 +161,8 @@ func (m *Mind) boundariesNote(ctx context.Context) string {
 // like the one at hand.
 const minSimilarity = 0.2
 
-// similarCases are its owner's approved decisions most like about, most
-// alike first, embedding any not embedded yet. ok is false when it can't
-// tell (no embedder, nothing to compare, or the embedder failed), so the
-// caller falls back to the newest.
+// similarCases embeds any decision not embedded yet. ok is false when it
+// can't tell (no embedder, nothing to compare, or the embedder failed).
 func (m *Mind) similarCases(ctx context.Context, about string) ([]memory.JudgmentCase, bool) {
 	if m.Embedder == nil || strings.TrimSpace(about) == "" {
 		return nil, false
@@ -183,7 +171,6 @@ func (m *Mind) similarCases(ctx context.Context, about string) ([]memory.Judgmen
 	if err != nil || len(cs) == 0 {
 		return nil, false
 	}
-	// One call: what it's deciding, and each decision not embedded yet.
 	texts := []string{about}
 	var missing []int
 	for i, c := range cs {
@@ -223,8 +210,6 @@ func (m *Mind) similarCases(ctx context.Context, about string) ([]memory.Judgmen
 	return picked, true
 }
 
-// dayAbout is what planning a day is about, to find the owner's decisions
-// most like it: what to focus on among its goals and projects.
 func (m *Mind) dayAbout(ctx context.Context, projects []memory.Project) string {
 	var parts []string
 	if goals, err := m.Store.Goals(ctx, true); err == nil {
@@ -241,8 +226,6 @@ func (m *Mind) dayAbout(ctx context.Context, projects []memory.Project) string {
 	return "Planning the day: what to focus on, and whether to start something new or finish what's started. " + strings.Join(parts, "; ") + "."
 }
 
-// reviewAbout is what a weekly review is about: which goals to keep, set or
-// drop, among these.
 func reviewAbout(goals []memory.Goal, projects []memory.Project) string {
 	var parts []string
 	for _, g := range goals {

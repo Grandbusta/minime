@@ -91,7 +91,6 @@ func TestPlanDay(t *testing.T) {
 		t.Errorf("decision = %+v", d)
 	}
 
-	// Planned once a day, even after a restart.
 	m.tick(ctx, at(29, 9, 1))
 	restarted, _ := lifeMind(s2)
 	restarted.Store = s
@@ -117,7 +116,7 @@ const activityJSON = `{"title":"Lagos Rain, verse 2","kind":"lyrics","text":"Rai
 func activityMind() (*Mind, *fakeStore, *fakeSystem2, memory.Project, memory.Intention) {
 	s2 := &fakeSystem2{formats: map[string]string{"activity": activityJSON}}
 	m, s := lifeMind(s2)
-	m.planned = "2026-10-29" // already planned today
+	m.planned = "2026-10-29"
 	song := memory.Project{ID: ulid.Make(), Title: "Lagos Rain", Kind: "music", Status: memory.ProjectActive,
 		Notes: "Verse 1 done; next: verse 2", CreatedAt: at(27, 10, 0), UpdatedAt: at(28, 18, 0)}
 	s.projects[song.ID] = song
@@ -356,7 +355,6 @@ func TestRounds(t *testing.T) {
 		t.Error("a later round made calls")
 	}
 
-	// Restarted mid-round: it doesn't plan this round again, and goes on with the next.
 	m2, _ := lifeMind(s2)
 	m2.Store, m2.Day.Pace = s, 4
 	m2.planDay(ctx, at(29, 12, 0))

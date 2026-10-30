@@ -177,7 +177,6 @@ func TestSimilarCases(t *testing.T) {
 	if e.calls != 2 {
 		t.Errorf("embed calls = %d", e.calls)
 	}
-	// With the embedder down, the newest of the right type.
 	e.err = errors.New("down")
 	if note := m.judgmentNote(ctx, planJudgment, "anything"); !strings.Contains(note, "Some of your owner's decisions:") || !strings.Contains(note, "Two beat ideas") {
 		t.Errorf("fallback note:\n%s", note)

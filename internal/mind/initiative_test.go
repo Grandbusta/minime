@@ -137,15 +137,13 @@ func TestCheckIns(t *testing.T) {
 		t.Errorf("checked in twice in one day: sent %v", r.sent)
 	}
 
-	// The next day: only the age and the new fact are unasked; the new fact
-	// passes, but a busy conversation means no check-in.
+	// The next day: a busy conversation means no check-in.
 	s.convs[0].LastActivity = at(28, 10, 0)
 	m.tick(ctx, at(28, 11, 0))
 	if len(r.sent) != 1 {
 		t.Errorf("checked in on a busy conversation: %v", r.sent)
 	}
 
-	// Quiet again, but nothing new worth asking about: recorded without a message.
 	s.facts = []memory.Fact{age}
 	s.convs[0].LastActivity = at(27, 12, 0)
 	m.tick(ctx, at(28, 18, 0))

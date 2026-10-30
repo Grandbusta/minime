@@ -17,17 +17,14 @@ import (
 	"github.com/Grandbusta/minime/internal/self"
 )
 
-type fakeTelegram struct{ waited int }
-
-func (fakeTelegram) Bot(_ context.Context, token string) (string, error) {
+func fakeBotName(_ context.Context, token string) (string, error) {
 	if token != "123:good" {
 		return "", errors.New("401 Unauthorized")
 	}
 	return "mei_bot", nil
 }
 
-func (f *fakeTelegram) FirstMessage(context.Context, string, time.Duration) (int64, string, error) {
-	f.waited++
+func fakeFirstMessage(context.Context, string, time.Duration) (int64, string, error) {
 	return 42, "Sam", nil
 }
 
@@ -47,7 +44,7 @@ func newSetup(t *testing.T, answers string) (*Setup, *bytes.Buffer, string) {
 	os.WriteFile(filepath.Join(dir, ".env.example"), []byte("# Copy to .env.\nTELEGRAM_BOT_TOKEN=\n# Your ID.\nTELEGRAM_OWNER_ID=\nDATABASE_URL=\n"), 0o600)
 	out := &bytes.Buffer{}
 	return &Setup{Ask: &script{in: bufio.NewReader(strings.NewReader(answers)), out: out}, Out: out, Lives: "../../lives", Self: filepath.Join(dir, "self"),
-		Env: filepath.Join(dir, ".env"), Example: filepath.Join(dir, ".env.example"), Telegram: &fakeTelegram{}, Database: fakeDatabase,
+		Env: filepath.Join(dir, ".env"), Example: filepath.Join(dir, ".env.example"), BotName: fakeBotName, FirstMessage: fakeFirstMessage, Database: fakeDatabase,
 		Now: func() time.Time { return time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC) }}, out, dir
 }
 
@@ -89,7 +86,6 @@ func TestStartingMei(t *testing.T) {
 		}
 	}
 
-	// .env: the example's comments kept, the values set, quoted where a shell needs it.
 	raw, _ := os.ReadFile(filepath.Join(dir, ".env"))
 	if !strings.Contains(string(raw), "# Your ID.\nTELEGRAM_OWNER_ID=42\n") || !strings.Contains(string(raw), "OPENAI_API_KEY=") {
 		t.Errorf(".env =\n%s", raw)
@@ -102,7 +98,6 @@ func TestStartingMei(t *testing.T) {
 		t.Errorf("the key reads back as %q", vars["OPENAI_API_KEY"])
 	}
 
-	// self/: Mei's three files, with Sam in them as her mentor.
 	life, err := self.Load(filepath.Join(dir, "self", "life.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -165,8 +160,7 @@ func TestSetEnv(t *testing.T) {
 
 func itoa(n int) string { return strconv.Itoa(n) }
 
-// script answers setup's questions from lines of text, one per question,
-// the way an owner would type them, and echoes the questions to out.
+// script answers setup's questions one line each, and echoes them to out.
 type script struct {
 	in  *bufio.Reader
 	out *bytes.Buffer

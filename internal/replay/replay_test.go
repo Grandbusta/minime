@@ -18,7 +18,6 @@ func (f fakeStore) LabelledExamples(context.Context, string, string, int) ([]sto
 	return f.examples, nil
 }
 
-// fakeS1 answers each message from a table: choice and confidence.
 type fakeS1 map[string]decision.Answer
 
 func (f fakeS1) Decide(_ context.Context, req system1.Request) (system1.Response, error) {

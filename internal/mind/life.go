@@ -19,39 +19,30 @@ import (
 	"github.com/Grandbusta/minime/internal/self"
 )
 
-// A day of its own, like a person: in the morning it plans a few things from
-// its interests, its projects and its routine; through the day it does them,
-// for real, in writing; at night it writes a journal entry. What it makes is
-// kept as works, what it did becomes facts about itself, and projects carry
-// over from one day to the next. What it can do beyond writing (read, write
-// its journal) are its abilities.
+// A day of its own: it plans in the morning, does things for real through
+// the day, and writes a journal at night. Projects carry over between days.
 
-// Day is how the agent lives its own day.
 type Day struct {
 	PlanAt        time.Duration // when it plans its day, from midnight in its time zone
-	JournalAt     time.Duration // when it writes its journal
-	MaxActivities int           // things it plans a round (a day at pace 1), besides the journal
-	BudgetUSD     float64       // most its own day may cost; past it, the rest waits for tomorrow
-	// Pace is how much faster than a person it works: its waking day (from
-	// PlanAt to JournalAt) runs in this many rounds, each planned when it
-	// starts. 0 or 1: one plan for the day.
+	JournalAt     time.Duration
+	MaxActivities int     // things it plans a round (a day at pace 1), besides the journal
+	BudgetUSD     float64 // most its own day may cost; past it, the rest waits for tomorrow
+	// Pace is how much faster than a person it works: its waking day runs in
+	// this many rounds, each planned when it starts. 0 or 1: one plan a day.
 	Pace           int
-	PlanPrompt     Prompt        // how System 2 plans the day; zero: no day of its own
-	ActivityPrompt Prompt        // how System 2 does an activity
-	ReviewDay      time.Weekday  // its weekly review: the day
-	ReviewAt       time.Duration // and the time, from midnight in its time zone
-	ReviewPrompt   Prompt        // how System 2 reviews the week; zero: no review
-	LearnPrompt    Prompt        // how System 2 plans to learn a skill for a goal; zero: no learning plans
+	PlanPrompt     Prompt // zero: no day of its own
+	ActivityPrompt Prompt
+	ReviewDay      time.Weekday
+	ReviewAt       time.Duration // from midnight in its time zone
+	ReviewPrompt   Prompt        // zero: no review
+	LearnPrompt    Prompt        // zero: no learning plans
 }
 
 const (
-	// journalText is the journal's intention: it is planned every day.
 	journalText = "Write today's journal entry."
-	// lifeSource is the source of the percepts of its own day.
-	lifeSource = "life"
-	// busyFor: a conversation this recent means it is busy; activities wait.
-	busyFor = 10 * time.Minute
-	// postponeBy is how long a busy activity waits.
+	lifeSource  = "life"
+	// busyFor: a conversation this recent means activities wait.
+	busyFor    = 10 * time.Minute
 	postponeBy = 30 * time.Minute
 	// activityGiveUp: an activity this late is missed; the day moved on.
 	activityGiveUp = 6 * time.Hour
@@ -66,16 +57,13 @@ var lifeActions = []string{"plan_day", "activity", "task", "weekly_review", "pla
 
 func (m *Mind) dayOn() bool { return m.Day.PlanPrompt.Text != "" && m.Day.ActivityPrompt.Text != "" }
 
-// startOfDay is midnight of t's day in the agent's time zone.
 func (m *Mind) startOfDay(t time.Time) time.Time {
 	l := t.In(m.Zone)
 	return time.Date(l.Year(), l.Month(), l.Day(), 0, 0, 0, 0, m.Zone)
 }
 
-// planDay plans today, at PlanAt or the first tick after it: once at a
-// person's pace, or in rounds at a faster one (Day.Pace), each planned when
-// it starts. Nothing is planned past journal time, and a round already
-// planned (e.g. before a restart) isn't planned again.
+// planDay plans nothing past journal time, and never a round already planned
+// (e.g. before a restart).
 func (m *Mind) planDay(ctx context.Context, now time.Time) {
 	if !m.dayOn() {
 		return
@@ -102,7 +90,7 @@ func (m *Mind) planDay(ctx context.Context, now time.Time) {
 		}
 		for _, i := range existing {
 			if i.Subject == memory.SubjectSelf && i.Kind == memory.IntentionActivity {
-				m.planned, m.round = today, round // already planned; rounds go on from the next one
+				m.planned, m.round = today, round
 				return
 			}
 		}
@@ -115,7 +103,6 @@ func (m *Mind) planDay(ctx context.Context, now time.Time) {
 	m.writePlan(ctx, now, midnight, round, first)
 }
 
-// roundAt is the round of its day that now falls in: 0 at a person's pace.
 func (m *Mind) roundAt(now, midnight time.Time) int {
 	if m.Day.Pace <= 1 {
 		return 0
@@ -124,7 +111,6 @@ func (m *Mind) roundAt(now, midnight time.Time) int {
 	return min(int(now.Sub(midnight.Add(m.Day.PlanAt))/length), m.Day.Pace-1)
 }
 
-// roundEnd is when a round of its day ends: the next round, or journal time.
 func (m *Mind) roundEnd(round int, midnight time.Time) time.Time {
 	if m.Day.Pace <= 1 || round >= m.Day.Pace-1 {
 		return midnight.Add(m.Day.JournalAt)
@@ -163,8 +149,7 @@ func planFormat(abilities []ability.Ability) *system2.Format {
 	}}
 }
 
-// writePlan plans a round of its day, from now until the round ends. The
-// day's first plan (first) also has the journal and its calls for its owner.
+// writePlan: only the day's first plan has the journal and its calls for its owner.
 func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time, round int, first bool) {
 	until := m.roundEnd(round, midnight)
 	start := time.Now()
@@ -215,7 +200,7 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time, round int
 	}
 	if len(facts) > 0 {
 		note.WriteString("\n\nWhat you remember about yourself lately:")
-		for i := len(facts) - 1; i >= 0; i-- { // oldest first
+		for i := len(facts) - 1; i >= 0; i-- {
 			fmt.Fprintf(&note, "\n- %s: %s", facts[i].At.In(m.Zone).Format("2 Jan"), facts[i].Text)
 		}
 	}
@@ -316,7 +301,7 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time, round int
 			}
 		}
 		if r, ok := m.resourceFor(ctx, strings.TrimSpace(a.ResourceID)); ok {
-			i.Ability, i.Args = r.Ability, map[string]string{"query": r.Query, "resource": r.ID.String()} // studying it
+			i.Ability, i.Args = r.Ability, map[string]string{"query": r.Query, "resource": r.ID.String()}
 		}
 		if m.intend(ctx, i, now) {
 			line := due.Format("15:04") + " " + what
@@ -341,7 +326,6 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time, round int
 	m.Log.Info("planned the day", "round", round+1, "of", max(1, m.Day.Pace), "things", len(lines), "cost_usd", resp.CostUSD)
 }
 
-// linkGoal links a project to the goal it serves, if it serves none yet.
 func (m *Mind) linkGoal(ctx context.Context, project, goal ulid.ULID) {
 	if goal.IsZero() {
 		return
@@ -356,7 +340,6 @@ func (m *Mind) linkGoal(ctx context.Context, project, goal ulid.ULID) {
 	}
 }
 
-// intend saves an activity of its own day: i's text, time, project and ability.
 func (m *Mind) intend(ctx context.Context, i memory.Intention, now time.Time) bool {
 	i.ID, i.Subject, i.Kind, i.Status = ulid.Make(), memory.SubjectSelf, memory.IntentionActivity, memory.IntentionPending
 	i.DueAt, i.CreatedAt = i.DueAt.UTC(), now.UTC()
@@ -420,12 +403,8 @@ func (m *Mind) doActivity(ctx context.Context, i memory.Intention, now time.Time
 	}
 }
 
-// makeWork does an intention for real: its ability (if any) gets what it
-// works from, System 2 writes it, and the work, its project and what it
-// learned are kept. what tells System 2 what it is doing. If it can't be done
-// the intention is finished as missed or cancelled; if System 2 fails, it
-// stays pending and is tried again on the next tick. It reports whether a
-// work was made.
+// makeWork finishes the intention as missed or cancelled if it can't be done;
+// if System 2 fails, it stays pending and is tried again on the next tick.
 func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what string, now time.Time) (memory.Work, bool) {
 	log := m.Log.With("intention", i.ID.String())
 
@@ -453,7 +432,6 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 		m.finishLife(ctx, d, start, decision.OutcomeFailed, "project not found")
 		return memory.Work{}, false
 	}
-	// Its ability, if it uses one, gets what it works from: a passage, an article, its day.
 	var material ability.Material
 	ab, ok := m.Abilities.For(i, project)
 	if !ok {
@@ -487,7 +465,7 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	})
 	if err != nil {
 		log.Error(action+" failed", "err", err)
-		m.finishLife(ctx, d, start, decision.OutcomeFailed, err.Error()) // still pending: tried again next tick
+		m.finishLife(ctx, d, start, decision.OutcomeFailed, err.Error())
 		return memory.Work{}, false
 	}
 	d.Provider, d.CostUSD = resp.Provider, resp.CostUSD
@@ -522,7 +500,7 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 		project.Notes = orDefault(out.ProjectNotes, project.Notes)
 		project.UpdatedAt = now.UTC()
 		if out.ProjectDone || material.Done {
-			project.Status = memory.ProjectDone // finished, or e.g. read to the end
+			project.Status = memory.ProjectDone
 		}
 		if err := m.Store.SaveProject(ctx, *project); err != nil {
 			log.Error("save project", "err", err)
@@ -550,7 +528,7 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	m.scoreWork(ctx, w, p.ID, &d.ID)
 	source := memory.LessonFromSelf
 	if ab != nil && ab.Risk() == ability.ReadsWeb {
-		source = memory.LessonFromOthers // it read how others do it
+		source = memory.LessonFromOthers
 	}
 	var skills []string
 	if sk := m.workingOn(ctx, i, project); sk != "" {
@@ -558,16 +536,14 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	}
 	m.learnFromWork(ctx, w, out.Lessons, source, skills)
 	m.studied(ctx, i, w, now)
-	if out.AskForReview && action == "activity" { // not what it made for someone else
+	if out.AskForReview && action == "activity" {
 		m.askForReview(ctx, w, strings.TrimSpace(out.ReviewQuestion), now)
 	}
 	log.Info("made something", "action", action, "ability", i.Ability, "kind", w.Kind, "title", title, "cost_usd", d.CostUSD)
 	return w, true
 }
 
-// activityNote tells System 2 what it is doing (what) and where it got to:
-// the project and its latest works. It returns the project (nil if none), and
-// false if the project is gone.
+// activityNote returns the project (nil if none), and false if it is gone.
 func (m *Mind) activityNote(ctx context.Context, i memory.Intention, what string, now time.Time) (string, *memory.Project, bool) {
 	var b strings.Builder
 	b.WriteString(m.now(now))
@@ -594,7 +570,6 @@ func (m *Mind) activityNote(ctx context.Context, i memory.Intention, what string
 	return b.String(), &p, true
 }
 
-// busy reports whether it is in the middle of a conversation.
 func (m *Mind) busy(ctx context.Context, now time.Time) bool {
 	convs, err := m.Store.Conversations(ctx)
 	if err != nil {
@@ -608,7 +583,6 @@ func (m *Mind) busy(ctx context.Context, now time.Time) bool {
 	return false
 }
 
-// overBudget reports whether its own day has cost BudgetUSD or more today.
 func (m *Mind) overBudget(ctx context.Context, now time.Time) bool {
 	if m.Day.BudgetUSD <= 0 {
 		return false
@@ -624,10 +598,9 @@ func (m *Mind) overBudget(ctx context.Context, now time.Time) bool {
 // allowed reports whether the autonomy policy lets it use an ability: one
 // that reads the web needs read_web.
 func (m *Mind) allowed(a ability.Ability) bool {
-	return a.Risk() != ability.ReadsWeb || m.Autonomy.Check(action.ReadWeb, "") != action.Forbid
+	return a.Risk() != ability.ReadsWeb || m.policy().Check(action.ReadWeb, "") != action.Forbid
 }
 
-// plannable is the abilities it may plan with: offered by the set, and allowed.
 func (m *Mind) plannable() []ability.Ability {
 	var out []ability.Ability
 	for _, a := range m.Abilities.Planned() {
@@ -638,7 +611,6 @@ func (m *Mind) plannable() []ability.Ability {
 	return out
 }
 
-// makesList is what it makes, for a prompt: one "- kind: about" line each.
 func (m *Mind) makesList() string {
 	var lines []string
 	for _, c := range m.Life.Crafts() {
@@ -647,7 +619,6 @@ func (m *Mind) makesList() string {
 	return strings.Join(lines, "\n")
 }
 
-// abilitiesList is what it can do beyond writing, for a prompt.
 func (m *Mind) abilitiesList() string {
 	var lines []string
 	for _, a := range m.plannable() {
@@ -659,7 +630,6 @@ func (m *Mind) abilitiesList() string {
 	return strings.Join(lines, "\n")
 }
 
-// lifeInstructions renders a prompt about its own day: who it is and what it makes.
 func (m *Mind) lifeInstructions(p Prompt) string {
 	var kinds []string
 	for _, c := range m.Life.Crafts() {
@@ -695,13 +665,10 @@ func orDefault(s, def string) string {
 	return def
 }
 
-// pace is how much faster than a person it works: 1 at a person's pace.
 func (m *Mind) pace() int { return max(1, m.Day.Pace) }
 
-// paced is how long something that takes a person d takes it, at its pace.
 func (m *Mind) paced(d time.Duration) time.Duration { return d / time.Duration(m.pace()) }
 
-// goalDue is when a goal should be due, in words, at its pace.
 func (m *Mind) goalDue() string {
 	if m.pace() == 1 {
 		return "within weeks"
@@ -710,7 +677,6 @@ func (m *Mind) goalDue() string {
 		"about %d days", m.pace(), max(1, int(m.paced(28*24*time.Hour).Hours()/24+0.5)))
 }
 
-// practiceTime is how long a practice piece should take, in words, at its pace.
 func (m *Mind) practiceTime() string {
 	if m.pace() == 1 {
 		return "a day or two"

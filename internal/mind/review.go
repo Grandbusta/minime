@@ -18,16 +18,13 @@ import (
 	"github.com/Grandbusta/minime/internal/self"
 )
 
-// The weekly review: once a week (Day.ReviewAt) it looks back at what it did
-// and how its skills are going, checks each goal (progress, done, dropped),
-// sets new goals for its dreams, links its projects to goals, and may want to
-// change a dream (add, reword or drop), which the autonomy gate may make it
-// ask its owner first (dream). The review itself is kept as a private work.
+// The weekly review: it checks its goals and skills, sets new goals for its
+// dreams, and may want to change a dream, which the autonomy gate may make it
+// ask its owner first. The review itself is kept as a private work.
 
 const (
 	maxActiveDreams = 5
-	// reviewWindow is how far back a review looks.
-	reviewWindow = 7 * 24 * time.Hour
+	reviewWindow    = 7 * 24 * time.Hour
 	// reviewJournalChars is how much of each journal entry a review reads.
 	reviewJournalChars = 700
 	// goalHorizon is the latest a new goal may be due.
@@ -118,8 +115,7 @@ var reviewFormat = &system2.Format{Name: "weekly_review", Schema: map[string]any
 	},
 }}
 
-// weeklyReview runs the review once a week, at the first tick after ReviewAt
-// on ReviewDay, unless it already did this week (e.g. before a restart).
+// weeklyReview skips a week already reviewed (e.g. before a restart).
 func (m *Mind) weeklyReview(ctx context.Context, now time.Time) {
 	if m.Day.ReviewPrompt.Text == "" {
 		return
@@ -130,14 +126,13 @@ func (m *Mind) weeklyReview(ctx context.Context, now time.Time) {
 	}
 	m.reviewed = at
 	if last, ok, err := m.Store.LatestWork(ctx, "review"); err == nil && ok && !last.CreatedAt.Before(at) {
-		return // already reviewed this week
+		return
 	}
 	if err := m.Review(ctx, now); err != nil {
 		m.Log.Error("weekly review failed", "err", err)
 	}
 }
 
-// reviewTime is this week's review time: the latest ReviewDay at ReviewAt on or before now's day.
 func (m *Mind) reviewTime(now time.Time) time.Time {
 	midnight := m.startOfDay(now)
 	back := (int(now.In(m.Zone).Weekday()) - int(m.Day.ReviewDay) + 7) % 7
@@ -208,7 +203,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 	note.WriteString(disagreements)
 	lookBack, looked := m.lookBackNote(ctx, now)
 	note.WriteString(lookBack)
-	for _, c := range looked { // a principle may come from how one of the owner's decisions turned out
+	for _, c := range looked {
 		if !c.CaseID.IsZero() {
 			if callCases == nil {
 				callCases = map[string]string{}
@@ -309,7 +304,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 			m.Log.Error("save goal", "err", err)
 		}
 	}
-	proposed := map[string]memory.Goal{} // new goals waiting for its owner's answer
+	proposed := map[string]memory.Goal{}
 	activeDreams := map[string]memory.Dream{}
 	for _, dr := range dreams {
 		activeDreams[dr.ID.String()] = dr
@@ -372,7 +367,6 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 			m.Log.Error("save project", "err", err)
 		}
 	}
-	// Learning plans: move on a stage whose done-when is met; add what to study.
 	if plans, err := m.Store.Plans(ctx, true); err == nil {
 		byPlan := map[string]memory.LearningPlan{}
 		for _, p := range plans {
@@ -398,7 +392,7 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 				}
 			}
 		}
-		for _, p := range plans { // a plan ends with its goal
+		for _, p := range plans {
 			if _, still := activeGoals[p.GoalID.String()]; !still {
 				status := memory.PlanDone
 				for _, u := range out.Goals {
@@ -413,7 +407,6 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 		}
 	}
 
-	// Lessons: retire what it has absorbed, keep what the week taught it.
 	if ls, err := m.Store.Lessons(ctx, "", 100); err == nil {
 		active := map[string]bool{}
 		for _, l := range ls {
@@ -480,13 +473,12 @@ func (m *Mind) Review(ctx context.Context, now time.Time) error {
 	}
 	m.finishLife(ctx, d, start, decision.OutcomeOK, detail)
 	m.Log.Info("weekly review", "changes", len(changes), "cost_usd", d.CostUSD)
-	m.EnsurePlans(ctx, now) // a learning plan for each new skill goal
+	m.EnsurePlans(ctx, now)
 	return nil
 }
 
-// wantDreamChange is the review wanting to add, reword or drop a dream: done
-// now, asked of the owner first, or not at all, as the autonomy gate says.
-// It returns what happened, for the log; "" if nothing.
+// wantDreamChange does the change now, asks the owner first, or drops it, as
+// the autonomy gate says. It returns "" if nothing happened.
 func (m *Mind) wantDreamChange(ctx context.Context, active map[string]memory.Dream, act, id, text, why string, now time.Time) string {
 	old, known := active[id]
 	switch {
@@ -503,7 +495,7 @@ func (m *Mind) wantDreamChange(ctx context.Context, active map[string]memory.Dre
 	if known {
 		a.Ref = old.ID
 	}
-	switch m.Autonomy.Check(action.Dream, "") {
+	switch m.policy().Check(action.Dream, "") {
 	case action.Forbid:
 		return ""
 	case action.Ask:
@@ -529,7 +521,6 @@ func dreamChangeText(act, old, text, why string) string {
 	return what
 }
 
-// changeDream adds, rewords or drops a dream, as approved.
 func (m *Mind) changeDream(ctx context.Context, a memory.Approval, now time.Time) string {
 	dreams, err := m.Store.Dreams(ctx, true)
 	if err != nil {

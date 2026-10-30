@@ -6,8 +6,6 @@ import (
 	"github.com/charmbracelet/huh"
 )
 
-// Terminal asks in the terminal, with huh: menus you move through with the
-// arrow keys, and secrets masked as you type.
 type Terminal struct{}
 
 func (Terminal) Input(title, current string, secret bool) (string, error) {
@@ -66,7 +64,6 @@ func run(f huh.Field) error {
 	return err
 }
 
-// mask shows only the ends of a secret.
 func mask(s string) string {
 	if len(s) <= 8 {
 		return "****"

@@ -20,18 +20,17 @@ import (
 )
 
 const (
-	// defaultMaxOutputTokens is the room it has to answer, reasoning included:
-	// a few times what its longest work needs (a promised plan, about 1,700).
-	// Only what it writes is billed; the cap stops a runaway answer.
+	// defaultMaxOutputTokens includes reasoning. It is a few times what its
+	// longest work needs, so it only stops a runaway answer.
 	defaultMaxOutputTokens = 8000
-	requestTimeout         = 120 * time.Second // reasoning can take a while
+	requestTimeout         = 120 * time.Second
 )
 
 type Client struct {
 	api    openai.Client
 	model  string
-	price  pricing.Price // zero: cost is recorded as 0
-	effort string        // reasoning effort; "" leaves the model's default
+	price  pricing.Price
+	effort string // reasoning effort; "" leaves the model's default
 }
 
 func New(apiKey, model, baseURL string, price pricing.Price, effort string) *Client {
@@ -137,13 +136,12 @@ func input(req system2.Request) responses.ResponseInputParam {
 	if req.Note != "" {
 		in = append(in, responses.ResponseInputItemParamOfMessage(req.Note, responses.EasyInputMessageRoleDeveloper))
 	}
-	if req.Message == "" { // the agent speaks first: the note says why
+	if req.Message == "" {
 		return in
 	}
 	return append(in, responses.ResponseInputItemParamOfMessage(req.Message, responses.EasyInputMessageRoleUser))
 }
 
-// jsonFormat asks for output matching schema, strictly.
 func jsonFormat(name string, schema map[string]any) responses.ResponseTextConfigParam {
 	return responses.ResponseTextConfigParam{Format: responses.ResponseFormatTextConfigUnionParam{
 		OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{Name: name, Schema: schema, Strict: param.NewOpt(true)}}}
@@ -168,9 +166,8 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 	if c.effort != "" {
 		params.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffort(c.effort)}
 	}
-	// Cut off (it ran out of room): the text is unfinished, and structured
-	// output is broken JSON, so it's no answer. Out of room, it tries once
-	// more with twice as much.
+	// Cut-off structured output is broken JSON, so it's no answer. Out of
+	// room, it tries once more with twice as much.
 	structured := req.CollectFacts || req.Format != nil
 	var w *responses.Response
 	for attempt := 1; ; attempt++ {
@@ -194,7 +191,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 	var text, refusal strings.Builder
 	for _, o := range w.Output {
 		if o.Type != "message" {
-			continue // reasoning items and the like carry no reply text
+			continue
 		}
 		for _, part := range o.Content {
 			switch part.Type {

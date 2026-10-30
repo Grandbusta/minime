@@ -34,30 +34,23 @@ type Config struct {
 	Autonomy      Autonomy      `yaml:"autonomy"`
 	Judgment      Judgment      `yaml:"judgment"`
 	Search        Search        `yaml:"search"`
-	// Embedding finds the owner's past decisions most like the one at hand;
-	// no provider: it takes the newest instead.
-	Embedding Provider `yaml:"embedding"`
-	// Pricing per model, used to record what each decision cost.
-	Pricing map[string]pricing.Price `yaml:"pricing"`
-	Log     Log                      `yaml:"log"`
+	// Embedding finds the past decisions most like the one at hand; no
+	// provider: the newest are used instead.
+	Embedding Provider                 `yaml:"embedding"`
+	Pricing   map[string]pricing.Price `yaml:"pricing"`
+	Log       Log                      `yaml:"log"`
 }
 
-// Memory is long-term memory: facts about the agent itself and the people it talks to.
 type Memory struct {
-	// RecallCandidates is how many of the newest facts System 1 checks for
-	// relevance before each System 2 reply; about 170 input tokens each.
 	RecallCandidates int `yaml:"recall_candidates"`
 }
 
-// Portfolio is the agent's public profile page, served by the agent itself.
 type Portfolio struct {
-	Addr   string `yaml:"addr"`   // where to serve it, e.g. 127.0.0.1:8080; empty: no page
-	Prompt string `yaml:"prompt"` // file with how System 2 writes the page
-	// UpdateAt is when it updates the page each day, "HH:MM" in UTC.
-	UpdateAt string `yaml:"update_at"`
+	Addr     string `yaml:"addr"` // empty: no page
+	Prompt   string `yaml:"prompt"`
+	UpdateAt string `yaml:"update_at"` // "HH:MM" in UTC, not its own time zone
 }
 
-// UpdateTime is UpdateAt as a time of day: the time since midnight UTC.
 func (p Portfolio) UpdateTime() (time.Duration, error) {
 	at, err := timeOfDay(p.UpdateAt)
 	if err != nil {
@@ -66,16 +59,10 @@ func (p Portfolio) UpdateTime() (time.Duration, error) {
 	return at, nil
 }
 
-// Initiative is the agent speaking first: reminders, and checking in on people.
 type Initiative struct {
-	// Timezone is the agent's own, an IANA name like Africa/Lagos: reminders
-	// and check-in times are in it. Empty: the one in its life story.
-	Timezone string `yaml:"timezone"`
-	// CheckIns are the times of day ("HH:MM") it considers checking in on
-	// people, at most once a day each. Empty: never unprompted.
-	CheckIns []string `yaml:"check_ins"`
-	// Quiet is how long a conversation must have been quiet before a check-in.
-	Quiet time.Duration `yaml:"quiet"`
+	Timezone string        `yaml:"timezone"` // empty: the one in its life story
+	CheckIns []string      `yaml:"check_ins"`
+	Quiet    time.Duration `yaml:"quiet"`
 }
 
 func (i Initiative) Zone() (*time.Location, error) {
@@ -87,7 +74,6 @@ func (i Initiative) Zone() (*time.Location, error) {
 	return loc, nil
 }
 
-// CheckInTimes are CheckIns as times of day: the time since midnight.
 func (i Initiative) CheckInTimes() ([]time.Duration, error) {
 	out := make([]time.Duration, len(i.CheckIns))
 	for n, s := range i.CheckIns {
@@ -100,9 +86,8 @@ func (i Initiative) CheckInTimes() ([]time.Duration, error) {
 	return out, nil
 }
 
-// Console is the owner's private mind console.
 type Console struct {
-	Addr  string `yaml:"addr"`  // e.g. 127.0.0.1:8090; empty: no console
+	Addr  string `yaml:"addr"`  // empty: no console
 	Token string `yaml:"token"` // required unless addr is localhost
 }
 
@@ -116,45 +101,38 @@ func (c Console) Local() bool {
 	return host == "localhost" || (ip != nil && ip.IsLoopback())
 }
 
-// DailyLife is the agent's own day: it plans it, does things, and journals.
 type DailyLife struct {
 	Enabled bool `yaml:"enabled"`
-	// Abilities are what it can do beyond writing, by name, e.g. read_book;
-	// the journal is always on. Unset: the default abilities.
+	// Abilities nil: DefaultAbilities. Empty: none besides the journal.
 	Abilities []string `yaml:"abilities"`
-	// Reading is the old switch for read_book and read_article, used only
-	// when Abilities is unset. Deprecated: list abilities instead.
+	// Deprecated: list Abilities instead. Used only when Abilities is nil.
 	Reading    *bool  `yaml:"reading"`
-	PlanAt     string `yaml:"plan_at"`    // "HH:MM" in its time zone
-	JournalAt  string `yaml:"journal_at"` // "HH:MM" in its time zone
-	ReviewAt   string `yaml:"review_at"`  // its weekly review, "Sun 20:00" in its time zone
-	Activities int    `yaml:"activities"` // things it plans a round (a day at pace 1), besides the journal
-	// Pace is how much faster than a person it works and learns: its waking
-	// day runs in this many rounds, and its budget and web caps (per pace-1
-	// day) grow with it. 1 (the default): a person's pace.
+	PlanAt     string `yaml:"plan_at"`
+	JournalAt  string `yaml:"journal_at"`
+	ReviewAt   string `yaml:"review_at"`
+	Activities int    `yaml:"activities"`
+	// Pace is the rounds in its waking day; BudgetUSD and Web are per pace-1
+	// day and are multiplied by it.
 	Pace           int     `yaml:"pace"`
-	BudgetUSD      float64 `yaml:"budget_usd"` // most its own day may cost
+	BudgetUSD      float64 `yaml:"budget_usd"`
 	PlanPrompt     string  `yaml:"plan_prompt"`
 	ActivityPrompt string  `yaml:"activity_prompt"`
 	ReviewPrompt   string  `yaml:"review_prompt"`
-	LearnPrompt    string  `yaml:"learn_prompt"` // how it plans to learn a skill for a goal
-	Web            Web     `yaml:"web"`          // how much of the web it may use a day
+	LearnPrompt    string  `yaml:"learn_prompt"`
+	Web            Web     `yaml:"web"`
 }
 
-// Web is how much of the open web it may use in a day.
 type Web struct {
 	Searches int `yaml:"searches_per_day"`
 	Pages    int `yaml:"pages_per_day"`
 }
 
-// Search is the provider its web abilities search with. The OpenAI provider
-// uses the System 2 key (reasoning.api_key).
+// Search with the openai provider uses the System 2 key (reasoning.api_key).
 type Search struct {
-	Provider string `yaml:"provider"` // openai; later tinyfish
-	Model    string `yaml:"model"`    // empty: the System 2 model
+	Provider string `yaml:"provider"`
+	Model    string `yaml:"model"` // empty: the System 2 model
 }
 
-// ReviewTime is ReviewAt as a weekday and a time of day.
 func (d DailyLife) ReviewTime() (time.Weekday, time.Duration, error) {
 	day, at, ok := strings.Cut(strings.TrimSpace(d.ReviewAt), " ")
 	days := map[string]time.Weekday{"sun": time.Sunday, "mon": time.Monday, "tue": time.Tuesday, "wed": time.Wednesday,
@@ -167,10 +145,8 @@ func (d DailyLife) ReviewTime() (time.Weekday, time.Duration, error) {
 	return wd, t, nil
 }
 
-// DefaultAbilities are on unless the config lists its own.
 var DefaultAbilities = []string{"read_book", "read_article"}
 
-// AbilityNames are the abilities switched on, besides the journal.
 func (d DailyLife) AbilityNames() []string {
 	switch {
 	case d.Abilities != nil:
@@ -181,30 +157,20 @@ func (d DailyLife) AbilityNames() []string {
 	return DefaultAbilities
 }
 
-// Judgment is how it learns its owner's judgment from its own decisions:
-// it predicts what they'd choose, asks some on Telegram, and the rest wait
-// to be graded in the console.
 type Judgment struct {
-	Calls      bool `yaml:"calls"`        // off: it makes no calls, and sets and drops goals on its own
-	AsksPerDay int  `yaml:"asks_per_day"` // day-plan calls asked a day; goal calls are always asked
-	// ReplyWindow is how long after the owner picks differently their next
-	// message is taken as why.
+	Calls       bool          `yaml:"calls"`
+	AsksPerDay  int           `yaml:"asks_per_day"` // day-plan calls only; goal calls are always asked
 	ReplyWindow time.Duration `yaml:"reply_window"`
 }
 
-// Autonomy is what the agent may do on its own (see package action).
 type Autonomy struct {
-	// Owner approves what it asks to do, e.g. "telegram:123". Empty: the
-	// first of telegram.owner_ids.
-	Owner string `yaml:"owner"`
-	// Classes overrides the default verdict (auto, ask or forbid) per action class.
-	Classes map[string]string `yaml:"classes"`
-	// AskExpires is how long a request waits for an answer; then it is denied.
-	AskExpires time.Duration `yaml:"ask_expires"`
+	Owner      string            `yaml:"owner"`
+	Classes    map[string]string `yaml:"classes"`
+	AskExpires time.Duration     `yaml:"ask_expires"`
 }
 
-// Policy is the autonomy policy: the defaults with the config's overrides,
-// and the owner (the first Telegram owner if none is set).
+// Policy is the defaults with the config's overrides. The owner defaults to
+// the first Telegram owner.
 func (c *Config) Policy() (action.Policy, error) {
 	classes := action.Defaults()
 	overrides := map[action.Class]action.Verdict{}
@@ -227,7 +193,6 @@ func (c *Config) Policy() (action.Policy, error) {
 	return action.Policy{Owner: owner, Classes: classes, AskExpires: c.Autonomy.AskExpires}, nil
 }
 
-// Times are PlanAt and JournalAt as times of day: the time since midnight.
 func (d DailyLife) Times() (plan, journal time.Duration, err error) {
 	if plan, err = timeOfDay(d.PlanAt); err != nil {
 		return 0, 0, fmt.Errorf("config: daily_life.plan_at must be HH:MM, have %q", d.PlanAt)
@@ -238,7 +203,6 @@ func (d DailyLife) Times() (plan, journal time.Duration, err error) {
 	return plan, journal, nil
 }
 
-// timeOfDay parses "HH:MM" into the time since midnight.
 func timeOfDay(s string) (time.Duration, error) {
 	t, err := time.Parse("15:04", s)
 	if err != nil {
@@ -247,15 +211,12 @@ func timeOfDay(s string) (time.Duration, error) {
 	return time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute, nil
 }
 
-// WorkingMemory is how much of the current conversation System 2 sees.
 type WorkingMemory struct {
-	Turns  int           `yaml:"turns"`  // earlier exchanges; 0 turns recall off
-	Window time.Duration `yaml:"window"` // e.g. 2h: older exchanges are left out
+	Turns  int           `yaml:"turns"` // 0 turns recall off
+	Window time.Duration `yaml:"window"`
 }
 
-// Self is where the person is: a folder with their life (life.yaml), how
-// they live (living.yaml) and their owner's judgment (judgment.yaml), laid
-// out like each life in lives/.
+// Self is the person's folder, laid out like each life in lives/.
 type Self struct {
 	Dir string `yaml:"dir"`
 }
@@ -276,26 +237,24 @@ type Telegram struct {
 
 type Provider struct {
 	Provider string `yaml:"provider"`
-	Model    string `yaml:"model"`    // empty: the provider's default
-	APIKey   string `yaml:"api_key"`  // usually ${SOME_API_KEY}
-	BaseURL  string `yaml:"base_url"` // empty: the provider's default
+	Model    string `yaml:"model"`
+	APIKey   string `yaml:"api_key"`
+	BaseURL  string `yaml:"base_url"`
 }
 
 type Decision struct {
 	Provider     `yaml:",inline"`
-	QuestionSets string `yaml:"question_sets"` // directory of question set files
+	QuestionSets string `yaml:"question_sets"`
 }
 
 type Reasoning struct {
 	Provider `yaml:",inline"`
-	Prompt   string `yaml:"prompt"` // file with the agent's reply instructions
-	// Effort is how hard System 2 thinks before replying: none, low, medium,
-	// high, ... Empty leaves the model's default (medium for gpt-6-luna).
-	Effort string `yaml:"effort"`
+	Prompt   string `yaml:"prompt"`
+	Effort   string `yaml:"effort"` // empty: the model's default
 }
 
 type Log struct {
-	Level string `yaml:"level"` // debug | info | warn | error
+	Level string `yaml:"level"`
 }
 
 // Load reads the file at path, expanding ${VAR} references from the environment.
@@ -328,8 +287,7 @@ func Load(path string) (*Config, error) {
 	if err := cfg.loadLiving(); err != nil {
 		return nil, err
 	}
-	// Where it listens, from the environment when set: in a container it must
-	// listen on all addresses, not localhost.
+	// The environment wins: in a container these must be all addresses, not localhost.
 	if addr, ok := os.LookupEnv("MINIME_CONSOLE_ADDR"); ok {
 		cfg.Console.Addr = addr
 	}
@@ -342,10 +300,8 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// loadLiving reads how the person lives (living.yaml in their folder) over
-// the defaults and the config file: their days, check-ins, abilities, what
-// they may do on their own, and how they learn their owner's judgment. A
-// missing file leaves those as they are.
+// loadLiving reads living.yaml over the defaults and the config file. A
+// missing file leaves them as they are.
 func (c *Config) loadLiving() error {
 	raw, err := os.ReadFile(c.Self.LivingFile())
 	if errors.Is(err, fs.ErrNotExist) {
@@ -368,7 +324,6 @@ func (c *Config) loadLiving() error {
 	return nil
 }
 
-// ValidateAgent checks the settings needed to run the agent, beyond what Load requires.
 func (c *Config) ValidateAgent() error {
 	if c.Telegram.Token == "" {
 		return errors.New("config: telegram.token is required")
@@ -400,12 +355,12 @@ func (c *Config) ValidateAgent() error {
 	if c.Console.Addr != "" && !c.Console.Local() && len(c.Console.Token) < 16 {
 		return errors.New("config: console.token (16+ characters) is required when console.addr is not localhost")
 	}
+	if c.DailyLife.Pace < 1 || c.DailyLife.Pace > 100 {
+		return errors.New("config: daily_life.pace must be from 1 (a person's pace) to 100")
+	}
 	if c.DailyLife.Enabled {
 		if _, _, err := c.DailyLife.Times(); err != nil {
 			return err
-		}
-		if c.DailyLife.Pace < 1 || c.DailyLife.Pace > 100 {
-			return errors.New("config: daily_life.pace must be from 1 (a person's pace) to 100")
 		}
 		if c.DailyLife.Activities < 1 || c.DailyLife.BudgetUSD < 0 {
 			return errors.New("config: daily_life.activities must be at least 1 and budget_usd not negative")

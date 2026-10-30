@@ -51,7 +51,6 @@ func TestRepliesKeepTheirPromises(t *testing.T) {
 		t.Errorf("kept an ability it doesn't have: %+v", audio)
 	}
 
-	// The next reply knows what it promised, and no more are taken on past the limit.
 	s2.promises = []system2.Promise{{By: "2026-10-29T10:00", What: "a fourth"}, {By: "2026-10-29T11:00", What: "a fifth"}}
 	m.handle(context.Background(), percept("2", "And a poem?"))
 	if note := s2.requests[len(s2.requests)-1].Note; !strings.Contains(note, "What you've promised Sam and not sent yet") ||

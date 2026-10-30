@@ -5,9 +5,8 @@ import (
 	"strings"
 )
 
-// WithoutEmDashes wraps r so nothing it writes has an em dash (—): the
-// agent's replies, what it makes and remembers, and its profile page. The
-// prompts ask for none; this catches the ones a model writes anyway.
+// WithoutEmDashes wraps r so nothing it writes has an em dash. The prompts
+// ask for none; this catches the ones a model writes anyway.
 func WithoutEmDashes(r Reasoner) Reasoner { return noEmDashes{r} }
 
 type noEmDashes struct{ Reasoner }
@@ -37,11 +36,9 @@ func (n noEmDashes) Reason(ctx context.Context, req Request) (Response, error) {
 	return resp, nil
 }
 
-// RemoveEmDashes rewrites em dashes the way a person would punctuate
-// without them: a comma between words ("Sure—funny" → "Sure, funny"), just
-// a space after other punctuation ("Done!— next" → "Done! next"), and
-// nothing at the start or end of a line. JSON stays valid: an em dash is
-// never part of its syntax.
+// RemoveEmDashes punctuates the way a person would without em dashes: a comma
+// between words, a space after other punctuation, nothing at a line's ends.
+// JSON stays valid: an em dash is never part of its syntax.
 func RemoveEmDashes(s string) string {
 	if !strings.Contains(s, "—") {
 		return s
@@ -57,7 +54,7 @@ func RemoveEmDashes(s string) string {
 			case p == "":
 				// a dash at the end of the line, or two in a row
 			case strings.TrimSpace(out) == "":
-				out += p // at the start of the line
+				out += p
 			case strings.ContainsAny(out[len(out)-1:], ".,;:!?(\"'"):
 				out += " " + p
 			default:

@@ -16,7 +16,7 @@ flowchart TB
     TG["Telegram sensor<br/>owner's messages and button taps"]
     CLK["Clock<br/>a tick every minute"]
 
-    subgraph MIND["Mind: one percept or tick at a time"]
+    subgraph MIND["Mind: talk and life, two loops"]
         direction TB
         subgraph MSG["A message"]
             direction LR
@@ -61,14 +61,17 @@ Postgres (running any new migrations), and then runs five goroutines:
 
 | Goroutine | What it does |
 |---|---|
-| Telegram sensor | Long-polls Telegram, turns owner messages and button taps into percepts on the bus. Everyone else is ignored and logged. |
-| Mind | Takes percepts and ticks one at a time ([internal/mind](../internal/mind)). |
+| Telegram sensor | Long-polls Telegram, turns owner messages and button taps into percepts for the mind. Everyone else is ignored and logged. |
+| Mind | Two loops ([internal/mind](../internal/mind)): talk takes percepts one at a time, life takes ticks one at a time. |
 | Clock | Sends the minute to the mind, on the minute. |
 | Profile writer and server | Decides what's public and rewrites the page daily; serves it ([internal/portfolio](../internal/portfolio)). |
 | Console | Serves the private console and streams new decisions ([internal/console](../internal/console)). |
 
-The mind handles one percept or tick at a time, so nothing it does races with anything
-else it does.
+The mind runs two loops, so a slow plan, activity or review never keeps a reply waiting:
+talk handles percepts one at a time, and life handles ticks one at a time. They share the
+database, where approvals and calls are settled once (whoever settles first wins), plus
+two values held in memory: the owner's permissions (behind a lock) and the flag that a goal
+taken on in a chat needs a learning plan.
 
 ## Who the person is
 
@@ -169,15 +172,20 @@ A tap on a button is a percept too, with no text: an approval (`gate:<id>:y|n`) 
 ## The clock
 
 The clock ticks once a minute, on the minute. Each tick runs, in order (`tick` in
-[initiative.go](../internal/mind/initiative.go)):
+[initiative.go](../internal/mind/initiative.go)), first what someone is waiting for, then
+the slow work of its own day:
 
-1. **Plan the day**, once, at the first tick after `plan_at`.
-2. **Approvals:** deny the ones unanswered for 24 hours; send the ones not yet sent.
-3. **Calls:** expire the ones unanswered for 24 hours; ask the ones due today.
-4. **Due intentions:** reminders, activities and promises whose time has come.
-5. **Make promises ahead**, up to 30 minutes before they're due.
-6. **The weekly review**, once, at the first tick after `review_at`.
-7. **Check-ins**, when a `check_ins` time passed since the last tick.
+1. **Approvals:** deny the ones unanswered for 24 hours; send the ones not yet sent.
+2. **Calls:** expire the ones unanswered for 24 hours; ask the ones due today.
+3. **Due reminders and promises** whose time has come.
+4. **Check-ins**, when a `check_ins` time passed since the last tick.
+5. **Plan the day**, once, at the first tick after `plan_at`, and each round at its pace.
+6. **Due activities** of its own day.
+7. **Make promises ahead**, up to 30 minutes before they're due.
+8. **The weekly review**, once, at the first tick after `review_at`.
+
+While the life loop is busy, the clock waits; minutes it misses are skipped, and anything
+due is still done on the next tick, because what's due is "due by now".
 
 The first tick after a start never counts as a check-in time, so a restart sends nothing.
 
@@ -476,8 +484,7 @@ it needs nothing; anywhere else, a token.
 cmd/minime/              the binary: commands, wiring, providers chosen from config
 internal/
   perception/            percepts and their kinds
-  bus/                   in-process percept bus
-  channel/telegram/      on go-telegram/bot: sensor (messages, taps), replies, buttons
+  channel/telegram/      on go-telegram/bot: one bot that hears messages and taps, and replies
   mind/                  the mind
     mind.go              handle a percept: meet, read, recall, reason, act, record
     router.go            act / ask / escalate from System 1's confidence

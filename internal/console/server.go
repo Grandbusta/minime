@@ -1,8 +1,6 @@
-// Package console is the owner's mind console: a private web view
-// of everything about the agent, live. Its brain (the parts of its mind,
-// firing as decisions flow), what it decided and why, what it remembers,
-// its day, what it made, and its conversations. It writes only what the owner
-// reviews: labels on decisions, and their judgment.
+// Package console is the owner's mind console: a private live web view of
+// everything about the agent. It writes only what the owner reviews: labels on
+// decisions, and their judgment.
 //
 // It never shares a server with the public profile page. It listens on
 // localhost, or, anywhere else, only with a token.
@@ -33,7 +31,6 @@ import (
 //go:embed web
 var web embed.FS
 
-// Store is what the console reads; *store.Store.
 type Store interface {
 	DecisionLog(ctx context.Context, after time.Time, limit int, newestFirst bool) ([]store.LogEntry, error)
 	DecisionChain(ctx context.Context, id ulid.ULID) ([]store.LogEntry, error)
@@ -77,18 +74,15 @@ type Store interface {
 	RetireTaste(ctx context.Context, id ulid.ULID, at time.Time) (bool, error)
 }
 
-// agreementOver is how many of the latest answered calls of a type its
-// agreement is measured over.
 const agreementOver = 20
 
-// Info is what the console says about the running agent.
 type Info struct {
 	Name    string
 	Zone    *time.Location
 	Started time.Time
-	System1 string   // e.g. "openai/gpt-6-luna"
-	System2 string   // e.g. "openai/gpt-6-luna (effort low)"
-	Sets    []string // question sets and prompts in use, e.g. "incoming_message@1"
+	System1 string
+	System2 string
+	Sets    []string
 }
 
 type Server struct {
@@ -96,8 +90,7 @@ type Server struct {
 	Store Store
 	Token string // required when set; empty only on localhost
 	Log   *slog.Logger
-	// Poll is how often the live stream looks for new decisions.
-	Poll time.Duration
+	Poll  time.Duration
 }
 
 func (s *Server) Handler() http.Handler {
@@ -269,8 +262,6 @@ func fromConsole(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// label records what a System 1 answer should have been, from the owner in
-// the console.
 func (s *Server) label(w http.ResponseWriter, r *http.Request) {
 	if !fromConsole(w, r) {
 		return
@@ -335,7 +326,7 @@ type intentionView struct {
 	Status    string    `json:"status"`
 	Result    string    `json:"result"`
 	ProjectID string    `json:"project_id"`
-	Ability   string    `json:"ability"` // e.g. "read_book"; "" if it only writes
+	Ability   string    `json:"ability"`
 	Query     string    `json:"query"`
 }
 
@@ -405,8 +396,8 @@ func (s *Server) work(w http.ResponseWriter, r *http.Request) {
 	s.json(w, workViews([]memory.Work{work}, true)[0])
 }
 
-// conversation is the recent thread with a person (or everyone it talks
-// with, each with their latest exchanges).
+// conversation is the thread with a person, or with no person, everyone's
+// latest exchanges.
 func (s *Server) conversation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	convs, err := s.Store.Conversations(ctx)
@@ -434,8 +425,6 @@ func (s *Server) conversation(w http.ResponseWriter, r *http.Request) {
 	s.json(w, out)
 }
 
-// events streams new decisions as they are made (server-sent events), so the
-// console's brain fires live.
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -483,8 +472,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// approvals is what the agent asked its owner: what's waiting, then the
-// newest decided. Read-only: the owner answers on Telegram.
+// approvals is read-only: the owner answers on Telegram.
 func (s *Server) approvals(w http.ResponseWriter, r *http.Request) {
 	as, err := s.Store.RecentApprovals(r.Context(), intParam(r, "limit", 20, 100))
 	if s.failed(w, err) {
@@ -508,9 +496,6 @@ func (s *Server) approvals(w http.ResponseWriter, r *http.Request) {
 	s.json(w, out)
 }
 
-// growth is who it wants to become: its dreams with their goals and the
-// projects serving them, its skills with their recent scores, and its last
-// weekly review.
 func (s *Server) growth(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	dreams, err := s.Store.Dreams(ctx, false)
@@ -607,8 +592,6 @@ func (s *Server) growth(w http.ResponseWriter, r *http.Request) {
 	s.json(w, out)
 }
 
-// judgment is how its owner decides: their principles, with the cases
-// behind them, and their decisions, for them to review.
 func (s *Server) judgment(w http.ResponseWriter, r *http.Request) {
 	ps, err := s.Store.Principles(r.Context(), "")
 	if s.failed(w, err) {
@@ -740,9 +723,6 @@ func (s *Server) gradeCall(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// reviewJudgment records the owner's review of a principle or one of their
-// decisions: approved, rejected or back to proposed, with a principle's
-// edited text or a decision's reason.
 func (s *Server) reviewJudgment(w http.ResponseWriter, r *http.Request) {
 	if !fromConsole(w, r) {
 		return
@@ -792,8 +772,6 @@ func (s *Server) reviewJudgment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// judgeOutcome records how one of its calls turned out, as the owner sees
-// it: it stands over what its review said.
 func (s *Server) judgeOutcome(w http.ResponseWriter, r *http.Request) {
 	if !fromConsole(w, r) {
 		return
@@ -828,8 +806,6 @@ func (s *Server) judgeOutcome(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// addTaste keeps something the owner likes or doesn't in its work, from the
-// console: about a work they're looking at (its kind), or any work.
 func (s *Server) addTaste(w http.ResponseWriter, r *http.Request) {
 	if !fromConsole(w, r) {
 		return
@@ -871,7 +847,6 @@ func (s *Server) addTaste(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// retireTaste marks a taste of the owner's no longer true.
 func (s *Server) retireTaste(w http.ResponseWriter, r *http.Request) {
 	if !fromConsole(w, r) {
 		return
@@ -917,7 +892,7 @@ type entryView struct {
 	Answers   json.RawMessage   `json:"answers"`
 	Action    string            `json:"action"`
 	Gate      string            `json:"gate"`
-	Labels    map[string]string `json:"labels,omitempty"` // what answers should have been, by question
+	Labels    map[string]string `json:"labels,omitempty"`
 	Reply     string            `json:"reply"`
 	LatencyMS int64             `json:"latency_ms"`
 	CostUSD   float64           `json:"cost_usd"`
@@ -1033,8 +1008,7 @@ func (s *Server) failed(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-// Serve runs the console on addr until ctx is done. No write timeout: the
-// live stream stays open.
+// Serve has no write timeout: the live stream stays open.
 func Serve(ctx context.Context, addr string, h http.Handler, log *slog.Logger) error {
 	srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 120 * time.Second,
 		BaseContext: func(net.Listener) context.Context { return ctx }} // live streams end with the agent

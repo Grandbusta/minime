@@ -1,8 +1,6 @@
-// Package replay re-asks System 1 about messages the owner labelled (a
-// correction in chat, or a label in the console) with the question set as it
-// is now, so a change to a question, a threshold or the model can be checked
-// before it is trusted. It reports how often the old and new answers match
-// the labels, and suggests an act threshold; it never changes anything.
+// Package replay re-asks System 1 about messages the owner labelled with the
+// question set as it is now, so a change can be checked before it is
+// trusted. It never changes anything.
 package replay
 
 import (
@@ -18,37 +16,32 @@ import (
 	"github.com/Grandbusta/minime/internal/store"
 )
 
-// Store has the labelled examples.
 type Store interface {
 	LabelledExamples(ctx context.Context, setID, question string, limit int) ([]store.Example, error)
 }
 
-// Row is one labelled message: what System 1 said then, and says now.
 type Row struct {
 	Text, Label string
 	Then, Now   string // the answers (a choice, or "true" / "false")
 	ThenConf    float64
 	NowConf     float64
-	ThenSetID   string // which version decided then
-	Failed      error  // asking now failed
+	ThenSetID   string
+	Failed      error
 }
 
-// Report is a replay's result.
 type Report struct {
-	Set     string // the set and version replayed, e.g. "incoming_message@2"
+	Set     string
 	Rows    []Row
-	Act     float64 // the act threshold now
-	Suggest float64 // a suggested act threshold; 0 if there's too little to go on
+	Act     float64
+	Suggest float64 // 0 if there's too little to go on
 	CostUSD float64
 }
 
-// MinExamples is how many labels a threshold suggestion needs.
 const MinExamples = 10
 
 // Target is the share of answers at or above the act threshold that should be right.
 const Target = 0.95
 
-// Run replays up to limit of the newest labelled examples of set's primary question.
 func Run(ctx context.Context, st Store, s1 system1.DecisionModel, set questions.Set, limit int) (Report, error) {
 	r := Report{Set: set.Ref(), Act: set.Thresholds.Act}
 	examples, err := st.LabelledExamples(ctx, set.ID, set.Primary, limit)
@@ -71,7 +64,6 @@ func Run(ctx context.Context, st Store, s1 system1.DecisionModel, set questions.
 	return r, nil
 }
 
-// value is an answer as a label would say it, and how sure it was.
 func value(a decision.Answer) (string, float64) {
 	switch {
 	case a.Refused:
@@ -86,8 +78,8 @@ func value(a decision.Answer) (string, float64) {
 }
 
 // suggest is the lowest act threshold (in steps of 0.05) at which at least
-// Target of the new answers at or above it are right: it acts on the most
-// while staying right. 0 with fewer than MinExamples answers.
+// Target of the new answers at or above it are right. 0 with fewer than
+// MinExamples answers.
 func suggest(rows []Row) float64 {
 	var ok []Row
 	for _, r := range rows {
@@ -115,7 +107,6 @@ func suggest(rows []Row) float64 {
 	return 0.99
 }
 
-// at counts the rows a threshold acts on, and how many of those are right.
 func at(rows []Row, t float64, now bool) (acted, right int) {
 	for _, r := range rows {
 		conf, ans := r.ThenConf, r.Then
@@ -132,7 +123,6 @@ func at(rows []Row, t float64, now bool) (acted, right int) {
 	return acted, right
 }
 
-// Write prints the report.
 func (r Report) Write(w io.Writer) {
 	if len(r.Rows) == 0 {
 		fmt.Fprintf(w, "No labelled messages for %s yet. Correct Daniel in chat, or label decisions in the console.\n", r.Set)

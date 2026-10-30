@@ -8,8 +8,8 @@ import (
 type routeKind string
 
 const (
-	routeAct      routeKind = "act"      // confident enough to act on the choice
-	routeAsk      routeKind = "ask"      // plausible, but not certain
+	routeAct      routeKind = "act"
+	routeAsk      routeKind = "ask"
 	routeEscalate routeKind = "escalate" // too unsure (or refused): needs System 2
 )
 
@@ -19,8 +19,6 @@ type route struct {
 	Confidence float64
 }
 
-// routeFor applies the set's thresholds to its primary answer. This is the
-// metacognition step: how sure is System 1, and is that sure enough?
 func routeFor(set questions.Set, answers map[string]decision.Answer) route {
 	a, ok := answers[set.Primary]
 	if !ok || a.Refused {
@@ -38,14 +36,7 @@ func routeFor(set questions.Set, answers map[string]decision.Answer) route {
 	return r
 }
 
-// holds reports whether a set's yes/no primary question came back yes with
-// at least its act threshold of probability. A refusal or a missing answer is no.
-func holds(set questions.Set, answers map[string]decision.Answer) bool {
-	return isYes(set, answers, set.Primary)
-}
-
-// isYes reports whether yes/no question name came back yes with at least
-// the set's act threshold of probability.
+// isYes needs at least the set's act threshold of probability.
 func isYes(set questions.Set, answers map[string]decision.Answer, name string) bool {
 	a, ok := answers[name]
 	return ok && !a.Refused && a.Probability >= set.Thresholds.Act

@@ -1,8 +1,5 @@
 // Package setup is `minime new`: it starts a person from one of the lives in
-// lives/. It asks which life, the keys it needs (writing .env), catches the
-// owner's Telegram ID from their first message to the bot, asks who they are
-// to the person, and writes the person's folder (self/). Nothing is written
-// until every answer is in.
+// lives/. Nothing is written until every answer is in.
 package setup
 
 import (
@@ -23,68 +20,55 @@ import (
 	"github.com/Grandbusta/minime/internal/self"
 )
 
-// Telegram is what setup needs from a bot (telegram.Client, per token).
-type Telegram interface {
-	// Bot checks a token and returns the bot's @username.
-	Bot(ctx context.Context, token string) (string, error)
-	// FirstMessage waits for someone to message the bot and returns who: their
-	// user ID and first name. The message is marked read, so the person
-	// doesn't answer it later.
-	FirstMessage(ctx context.Context, token string, wait time.Duration) (int64, string, error)
-}
+type BotName func(ctx context.Context, token string) (string, error)
 
-// Database is what setup needs from a Postgres URL: whether it can connect,
-// and whose memory it holds ("" if no one's).
+// FirstMessage returns the sender's user ID and first name, and marks the
+// message read so the person doesn't answer it later.
+type FirstMessage func(ctx context.Context, token string, wait time.Duration) (int64, string, error)
+
+// Database says whose memory a database holds ("" if no one's).
 type Database func(ctx context.Context, url string) (whose string, err error)
 
-// LocalPostgres starts a Postgres in Docker for the person and returns its
-// URL; nil when Docker isn't there.
 type LocalPostgres func(ctx context.Context, name string) (string, error)
 
-// Prompter asks the owner things: huh in a terminal, a script in tests.
 type Prompter interface {
 	// Input asks for text; current is offered (masked when secret) and kept
 	// on an empty answer. There must be an answer.
 	Input(title, current string, secret bool) (string, error)
-	// Select asks which of options, and returns its index.
 	Select(title string, options []string) (int, error)
-	// Confirm asks yes or no.
 	Confirm(title string, def bool) (bool, error)
 }
 
 type Setup struct {
 	Ask Prompter
-	Out io.Writer // what it tells the owner along the way
+	Out io.Writer
 
-	Lives   string // where the lives are, e.g. "lives"
-	Self    string // the person's folder, e.g. "self"
-	Env     string // the .env file, e.g. ".env"
-	Example string // what a new .env starts from, e.g. ".env.example"
+	Lives   string
+	Self    string
+	Env     string
+	Example string
 
-	Telegram Telegram
-	Database Database
-	Postgres LocalPostgres // nil: none offered
-	Now      func() time.Time
+	BotName      BotName
+	FirstMessage FirstMessage
+	Database     Database
+	Postgres     LocalPostgres // nil: none offered
+	Now          func() time.Time
 }
 
-// Result is what setup decided: who was started, and the environment it wrote.
 type Result struct {
 	Name  string
 	Env   map[string]string
-	Start bool // start them now
+	Start bool
 }
 
-// errStop means the owner chose to stop.
 var errStop = errors.New("stopped; nothing was written")
 
-// Run asks everything, then writes .env and the person's folder.
 func (s *Setup) Run(ctx context.Context) (Result, error) {
 	if s.Now == nil {
 		s.Now = time.Now
 	}
 	s.say("Let's start a person.\n")
 
-	// Someone already lives here?
 	if old, err := self.Load(filepath.Join(s.Self, "life.yaml")); err == nil {
 		s.say("\n%s already lives in %s/. Starting someone new moves %s's files to %s/previous/ (their memory stays in their database).\n",
 			old.Name, s.Self, old.Name, s.Self)
@@ -121,7 +105,6 @@ func (s *Setup) Run(ctx context.Context) (Result, error) {
 	return Result{Name: tmpl.Name, Env: env, Start: start && err == nil}, nil
 }
 
-// pickLife lists the lives and asks which one.
 func (s *Setup) pickLife() (self.Template, error) {
 	ts, err := self.Templates(s.Lives)
 	if err != nil {
@@ -141,7 +124,6 @@ func (s *Setup) pickLife() (self.Template, error) {
 	return ts[n], nil
 }
 
-// keys asks for what .env needs, keeping what's there when the owner wants.
 func (s *Setup) keys(ctx context.Context, tmpl self.Template) (map[string]string, error) {
 	have := s.readEnv()
 	env := map[string]string{}
@@ -152,7 +134,7 @@ func (s *Setup) keys(ctx context.Context, tmpl self.Template) (map[string]string
 		if err != nil {
 			return nil, err
 		}
-		username, err := s.Telegram.Bot(ctx, token)
+		username, err := s.BotName(ctx, token)
 		if err != nil {
 			s.say("  That token doesn't work (%v). Try again.\n", err)
 			continue
@@ -211,8 +193,6 @@ func (s *Setup) keys(ctx context.Context, tmpl self.Template) (map[string]string
 	return env, nil
 }
 
-// owner finds who the owner is: their Telegram ID (from their first message
-// to the bot), what the person calls them, and who they are to them.
 func (s *Setup) owner(ctx context.Context, tmpl self.Template, env map[string]string) (self.Owner, error) {
 	firstName := ""
 	if id := env["TELEGRAM_OWNER_ID"]; id != "" && s.confirm(fmt.Sprintf("Keep %s as your Telegram user ID?", id), true) {
@@ -220,7 +200,7 @@ func (s *Setup) owner(ctx context.Context, tmpl self.Template, env map[string]st
 	} else {
 		s.say("\nNow message @%s on Telegram (anything, like \"hi\") so I know it's you. Waiting...\n", env["bot"])
 		for {
-			id, name, err := s.Telegram.FirstMessage(ctx, env["TELEGRAM_BOT_TOKEN"], 3*time.Minute)
+			id, name, err := s.FirstMessage(ctx, env["TELEGRAM_BOT_TOKEN"], 3*time.Minute)
 			if err == nil {
 				env["TELEGRAM_OWNER_ID"], firstName = strconv.FormatInt(id, 10), name
 				s.say("  Got it: %s (user ID %d). Only you will be able to talk to %s.\n", orDefault(name, "you"), id, tmpl.Name)
@@ -248,8 +228,7 @@ func (s *Setup) owner(ctx context.Context, tmpl self.Template, env map[string]st
 	return self.Owner{Name: name, Relation: tmpl.Relations[n], Account: "telegram:" + env["TELEGRAM_OWNER_ID"]}, nil
 }
 
-// writeEnv sets the keys in .env, keeping everything else in it (or in the
-// example, for a new one).
+// writeEnv keeps everything else in .env, or in the example for a new one.
 func (s *Setup) writeEnv(env map[string]string) error {
 	raw, err := os.ReadFile(s.Env)
 	if errors.Is(err, os.ErrNotExist) {
@@ -270,12 +249,11 @@ func (s *Setup) writeEnv(env map[string]string) error {
 	return os.WriteFile(s.Env, []byte(text), 0o600)
 }
 
-// SetEnv sets key to value in a .env file's text: on its line, or appended,
-// keeping everything else (comments too). The line is written by godotenv,
-// so it reads back exactly.
+// SetEnv keeps everything else in text, comments too. The line is written by
+// godotenv, so it reads back exactly.
 func SetEnv(text, key, value string) string {
 	line, err := godotenv.Marshal(map[string]string{key: value})
-	if err != nil { // only for a key it can't write, which these never are
+	if err != nil {
 		line = key + "=" + value
 	}
 	lines := strings.Split(text, "\n")
@@ -291,8 +269,7 @@ func SetEnv(text, key, value string) string {
 	return text + line + "\n"
 }
 
-// writeSelf writes the person's folder, moving anyone already there to
-// previous/ first.
+// writeSelf moves anyone already there to previous/ first.
 func (s *Setup) writeSelf(files map[string][]byte) error {
 	if err := os.MkdirAll(s.Self, 0o755); err != nil {
 		return err
@@ -323,7 +300,6 @@ func (s *Setup) writeSelf(files map[string][]byte) error {
 	return nil
 }
 
-// readEnv is what .env has now, by key.
 func (s *Setup) readEnv() map[string]string {
 	have, err := godotenv.Read(s.Env)
 	if err != nil {
@@ -347,5 +323,4 @@ func orDefault(s, def string) string {
 	return def
 }
 
-// Stopped reports whether err is the owner choosing to stop.
 func Stopped(err error) bool { return errors.Is(err, errStop) }

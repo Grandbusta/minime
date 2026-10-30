@@ -34,7 +34,6 @@ import (
 	"github.com/Grandbusta/minime/internal/ability/journal"
 	"github.com/Grandbusta/minime/internal/ability/reading"
 	"github.com/Grandbusta/minime/internal/ability/web"
-	"github.com/Grandbusta/minime/internal/bus"
 	"github.com/Grandbusta/minime/internal/channel/telegram"
 	"github.com/Grandbusta/minime/internal/config"
 	"github.com/Grandbusta/minime/internal/console"
@@ -97,7 +96,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if cfg.Initiative.Timezone == "" { // where it lives is part of its life
+	if cfg.Initiative.Timezone == "" {
 		if life, err := self.Load(cfg.Self.LifeFile()); err == nil {
 			cfg.Initiative.Timezone = life.Timezone
 		}
@@ -115,8 +114,7 @@ func run(args []string) error {
 		if err := cfg.ValidateAgent(); err != nil {
 			return err
 		}
-		// Who the agent is comes first: without a life story it does not start,
-		// and the database is not touched.
+		// Without a life story it does not start, and the database is not touched.
 		life, err := self.Load(cfg.Self.LifeFile())
 		if errors.Is(err, os.ErrNotExist) {
 			return errors.New("no one lives here yet: start someone with `go run ./cmd/minime new`")
@@ -312,7 +310,6 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		return err
 	}
 	ticks := make(chan time.Time)
-	// What it can do in its day beyond writing: the journal, and those switched on.
 	var names []string
 	if cfg.DailyLife.Enabled {
 		names = cfg.DailyLife.AbilityNames()
@@ -330,13 +327,17 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		return err
 	}
 
-	tg := telegram.NewClient(cfg.Telegram.Token)
-	percepts := bus.New[perception.Percept](64)
+	percepts := make(chan perception.Percept, 64)
+	tg, err := telegram.New(cfg.Telegram.Token, cfg.Telegram.OwnerIDs, time.Duration(cfg.Telegram.PollTimeoutSeconds)*time.Second,
+		percepts, log.With("component", "telegram"))
+	if err != nil {
+		return err
+	}
 
 	m := mind.New(mind.Config{
 		Life:     life,
 		Judgment: judgment,
-		Percepts: percepts.Subscribe(), Store: st, Replier: tg,
+		Percepts: percepts, Store: st, Replier: tg,
 		System1: s1, System2: s2, Incoming: incoming, FollowUp: followUp, LifeArea: lifeArea, ReplyPrompt: replyPrompt,
 		PersonCircle:  personCircle,
 		FactRelevance: factRelevance, OpenThreads: openThreads, RecallCandidates: cfg.Memory.RecallCandidates,
@@ -350,8 +351,6 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		Embedder:   embedder,
 		Log:        log.With("component", "mind"),
 	})
-	sensor := telegram.NewSensor(tg, cfg.Telegram.OwnerIDs, cfg.Telegram.PollTimeoutSeconds, percepts,
-		log.With("component", "telegram"))
 
 	log.Info("minime awake", "name", life.Name, "life_story_lines", len(life.Story), "owners", len(cfg.Telegram.OwnerIDs),
 		"system1", cfg.Decision.Provider.Provider, "question_set", incoming.Ref(), "follow_up", followUp.Ref(),
@@ -362,7 +361,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		"system2", cfg.Reasoning.Provider.Provider+"/"+cfg.Reasoning.Model, "effort", cfg.Reasoning.Effort, "prompt", replyPrompt.Ref)
 	started := time.Now()
 	g, ctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return sensor.Run(ctx) })
+	g.Go(func() error { return tg.Run(ctx) })
 	g.Go(func() error { return m.Run(ctx) })
 	g.Go(func() error { return runClock(ctx, ticks) })
 	if cfg.Console.Addr != "" {
@@ -386,10 +385,9 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	return err
 }
 
-// runClock ticks once a minute, on the minute, so the mind can speak first.
-// Each tick is the minute it was due, not when the timer fired: a timer may
-// fire a hair before the wall clock reaches the minute, and something due at
-// 17:50 must count as due at the 17:50 tick.
+// runClock ticks once a minute, on the minute. Each tick is the minute it was
+// due, not when the timer fired: a timer may fire a hair early, and something
+// due at 17:50 must count as due at the 17:50 tick.
 func runClock(ctx context.Context, ticks chan<- time.Time) error {
 	for {
 		now := time.Now()
@@ -407,9 +405,8 @@ func runClock(ctx context.Context, ticks chan<- time.Time) error {
 	}
 }
 
-// updateProfile updates the profile page once, now, the way the daily update
-// does; with force it rewrites the page even if nothing changed. It works
-// whether or not the agent is running: the page is served from the database.
+// updateProfile works whether or not the agent is running: the page is served
+// from the database.
 func updateProfile(ctx context.Context, cfg *config.Config, life self.Life, st *store.Store, force bool, log *slog.Logger) error {
 	s1, err := newDecisionModel(cfg.Decision.Provider, cfg.Pricing, log)
 	if err != nil {
@@ -439,8 +436,7 @@ func updateProfile(ctx context.Context, cfg *config.Config, life self.Life, st *
 	return nil
 }
 
-// newDay is its own day, from config: when it plans, journals and reviews,
-// and how. The zero Day (daily life off) has no day of its own.
+// newDay returns the zero Day when daily life is off.
 func newDay(cfg *config.Config) (mind.Day, error) {
 	var day mind.Day
 	dl := cfg.DailyLife
@@ -463,15 +459,13 @@ func newDay(cfg *config.Config) (mind.Day, error) {
 			return day, err
 		}
 	}
-	p := pace(cfg)
+	p := cfg.DailyLife.Pace
 	day.MaxActivities, day.BudgetUSD, day.Pace = dl.Activities, dl.BudgetUSD*float64(p), p
 	return day, nil
 }
 
-// growthMind is the mind the review and learn commands run: enough to
-// review its week and plan its learning, without talking to anyone. What it
-// wants to change about its dreams is saved for the owner's approval; the
-// running agent asks them.
+// growthMind talks to no one: changes to its dreams are saved for the owner's
+// approval, and the running agent asks them.
 func growthMind(cfg *config.Config, life self.Life, st *store.Store, log *slog.Logger) (*mind.Mind, error) {
 	s2, err := newReasoner(cfg.Reasoning, cfg.Pricing, log)
 	if err != nil {
@@ -492,7 +486,7 @@ func growthMind(cfg *config.Config, life self.Life, st *store.Store, log *slog.L
 	if err != nil {
 		return nil, err
 	}
-	abilities, err := newAbilities(cfg.DailyLife.AbilityNames(), depsFor(cfg, st, log)) // so it knows what it can study with
+	abilities, err := newAbilities(cfg.DailyLife.AbilityNames(), depsFor(cfg, st, log))
 	if err != nil {
 		return nil, err
 	}
@@ -500,8 +494,6 @@ func growthMind(cfg *config.Config, life self.Life, st *store.Store, log *slog.L
 		Calls: calls(cfg), Embedder: newEmbedder(cfg, log), Log: log.With("component", "mind")}), nil
 }
 
-// newEmbedder is what finds the owner's past decisions most like the one at
-// hand; nil (the newest instead) when none is configured.
 func newEmbedder(cfg *config.Config, log *slog.Logger) embed.Embedder {
 	e := cfg.Embedding
 	switch e.Provider {
@@ -520,12 +512,10 @@ func newEmbedder(cfg *config.Config, log *slog.Logger) embed.Embedder {
 	}
 }
 
-// calls is how the mind learns its owner's judgment, from the config.
 func calls(cfg *config.Config) mind.Calls {
 	return mind.Calls{On: cfg.Judgment.Calls, AsksPerDay: cfg.Judgment.AsksPerDay, ReplyWindow: cfg.Judgment.ReplyWindow}
 }
 
-// runReview runs the weekly review now.
 func runReview(ctx context.Context, cfg *config.Config, life self.Life, st *store.Store, log *slog.Logger) error {
 	m, err := growthMind(cfg, life, st, log)
 	if err != nil {
@@ -538,7 +528,6 @@ func runReview(ctx context.Context, cfg *config.Config, life self.Life, st *stor
 	return nil
 }
 
-// runLearn drafts a learning plan now for each skill goal that has none.
 func runLearn(ctx context.Context, cfg *config.Config, life self.Life, st *store.Store, log *slog.Logger) error {
 	m, err := growthMind(cfg, life, st, log)
 	if err != nil {
@@ -549,14 +538,12 @@ func runLearn(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	return nil
 }
 
-// growthStore is what printGrowth reads.
 type growthStore interface {
 	Dreams(ctx context.Context, activeOnly bool) ([]memory.Dream, error)
 	Goals(ctx context.Context, activeOnly bool) ([]memory.Goal, error)
 	Skills(ctx context.Context) ([]memory.Skill, error)
 }
 
-// printGrowth shows who it wants to become: its dreams, its goals and its skills.
 func printGrowth(ctx context.Context, st growthStore, zone *time.Location, out io.Writer) error {
 	dreams, err := st.Dreams(ctx, true)
 	if err != nil {
@@ -593,8 +580,6 @@ func printGrowth(ctx context.Context, st growthStore, zone *time.Location, out i
 	return nil
 }
 
-// runReplay re-asks System 1 about the messages the owner labelled, with the
-// incoming_message question set as it is now, and prints how it compares.
 func runReplay(ctx context.Context, cfg *config.Config, st *store.Store, n int, log *slog.Logger) error {
 	s1, err := newDecisionModel(cfg.Decision.Provider, cfg.Pricing, log)
 	if err != nil {
@@ -619,8 +604,6 @@ func runReplay(ctx context.Context, cfg *config.Config, st *store.Store, n int, 
 	return nil
 }
 
-// replayHint logs when labelled messages were read by an older version of
-// the incoming_message set: the new one should be replayed before it's trusted.
 func replayHint(ctx context.Context, st *store.Store, set questions.Set, log *slog.Logger) {
 	examples, err := st.LabelledExamples(ctx, set.ID, set.Primary, 500)
 	if err != nil {
@@ -638,15 +621,13 @@ func replayHint(ctx context.Context, st *store.Store, set questions.Set, log *sl
 	}
 }
 
-// worksStore is what the work command needs.
 type worksStore interface {
 	RecentWorks(ctx context.Context, limit int) ([]memory.Work, error)
 	SetWorkPublic(ctx context.Context, id ulid.ULID, public bool, by string) (bool, error)
 }
 
-// works lists the newest works and whether each is on the profile page
-// (no args), or puts one on it or takes it off ("show <id>", "hide <id>"),
-// as the owner: the daily check never overrides that.
+// works shows or hides a work as the owner ("show <id>", "hide <id>"); the
+// daily check never overrides that. With no args it lists the newest.
 func works(ctx context.Context, st worksStore, args []string, n int, out io.Writer) error {
 	if len(args) == 0 {
 		ws, err := st.RecentWorks(ctx, n)
@@ -689,7 +670,6 @@ func works(ctx context.Context, st worksStore, args []string, n int, out io.Writ
 	return nil
 }
 
-// newProfileWriter builds what keeps the agent's profile page up to date.
 func newProfileWriter(cfg *config.Config, life self.Life, st *store.Store, s1 system1.DecisionModel,
 	s2 system2.Reasoner, sets map[string]questions.Set, log *slog.Logger) (*portfolio.Writer, error) {
 	public, ok := sets["public_profile"]
@@ -721,8 +701,6 @@ func newProfileWriter(cfg *config.Config, life self.Life, st *store.Store, s1 sy
 		Prompt: prompt, UpdateAt: at, Log: log}, nil
 }
 
-// newDecisionModel picks the System 1 provider named in config. Adding a
-// provider means one more case here and a package under providers/system1.
 func newDecisionModel(c config.Provider, prices map[string]pricing.Price, log *slog.Logger) (system1.DecisionModel, error) {
 	switch c.Provider {
 	case "openai":
@@ -738,7 +716,6 @@ func newDecisionModel(c config.Provider, prices map[string]pricing.Price, log *s
 	}
 }
 
-// newReasoner picks the System 2 provider named in config, the same way.
 func newReasoner(c config.Reasoning, prices map[string]pricing.Price, log *slog.Logger) (system2.Reasoner, error) {
 	switch c.Provider.Provider {
 	case "openai":
@@ -748,8 +725,8 @@ func newReasoner(c config.Reasoning, prices map[string]pricing.Price, log *slog.
 	}
 }
 
-// priceFor looks a model up in the pricing table. A missing model still runs,
-// but its decisions are recorded at $0, so say so once at startup.
+// A model missing from the pricing table still runs, but its decisions are
+// recorded at $0.
 func priceFor(model string, prices map[string]pricing.Price, log *slog.Logger) pricing.Price {
 	p, ok := prices[model]
 	if !ok {
@@ -758,8 +735,6 @@ func priceFor(model string, prices map[string]pricing.Price, log *slog.Logger) p
 	return p
 }
 
-// checkFactTemplate makes sure a set (fact_relevance, open_threads,
-// public_profile) is a one-question template expanded per fact.
 func checkFactTemplate(s questions.Set) error {
 	if len(s.Questions) != 1 || s.Questions[0].Type != decision.QuestionPredicate ||
 		!strings.Contains(s.Questions[0].Instructions, "{fact}") {
@@ -768,8 +743,6 @@ func checkFactTemplate(s questions.Set) error {
 	return nil
 }
 
-// checkLifeAreaSet makes sure life_area has the questions the mind reads:
-// an `area` choice and the `personal` and `broad` predicates.
 func checkLifeAreaSet(s questions.Set) error {
 	want := map[string]decision.QuestionType{
 		"area": decision.QuestionChoice, "personal": decision.QuestionPredicate, "broad": decision.QuestionPredicate,
@@ -785,8 +758,8 @@ func checkLifeAreaSet(s questions.Set) error {
 	return nil
 }
 
-// loadPrompt reads a prompt file. Its ref is the file name plus a short hash
-// of the text, so every edit shows up as a new version in the decision log.
+// loadPrompt's ref is the file name plus a short hash of the text, so every
+// edit shows up as a new version in the decision log.
 func loadPrompt(path string) (mind.Prompt, error) {
 	text, err := os.ReadFile(path)
 	if err != nil {
@@ -828,7 +801,6 @@ func printDecisions(ctx context.Context, st *store.Store, n int) error {
 	return w.Flush()
 }
 
-// printDay shows what the agent planned on a day, how each went, and what it made.
 func printDay(ctx context.Context, st *store.Store, zone *time.Location, date string) error {
 	day := time.Now().In(zone)
 	if date != "" {
@@ -887,7 +859,6 @@ func newLogger(level string) (*slog.Logger, error) {
 	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: l})), nil
 }
 
-// abilityDeps is what abilities are built from.
 type abilityDeps struct {
 	st     *store.Store
 	search config.Search
@@ -897,8 +868,6 @@ type abilityDeps struct {
 	log    *slog.Logger
 }
 
-// abilityMakers builds each ability by the name config uses for it. A new
-// ability is a package under internal/ability and a line here.
 var abilityMakers = map[string]func(d abilityDeps, lib func() *library.Client, net func() (search.Searcher, search.Fetcher, error)) (ability.Ability, error){
 	reading.BookName: func(d abilityDeps, lib func() *library.Client, _ func() (search.Searcher, search.Fetcher, error)) (ability.Ability, error) {
 		return reading.Book{Library: lib(), Store: d.st}, nil
@@ -918,10 +887,9 @@ var abilityMakers = map[string]func(d abilityDeps, lib func() *library.Client, n
 
 func depsFor(cfg *config.Config, st *store.Store, log *slog.Logger) abilityDeps {
 	return abilityDeps{st: st, search: cfg.Search, s2: cfg.Reasoning, prices: cfg.Pricing,
-		web: web.Limits{Searches: cfg.DailyLife.Web.Searches * pace(cfg), Pages: cfg.DailyLife.Web.Pages * pace(cfg)}, log: log}
+		web: web.Limits{Searches: cfg.DailyLife.Web.Searches * cfg.DailyLife.Pace, Pages: cfg.DailyLife.Web.Pages * cfg.DailyLife.Pace}, log: log}
 }
 
-// newAbilities builds the journal and the abilities named in config.
 func newAbilities(names []string, d abilityDeps) (*ability.Set, error) {
 	var client *library.Client
 	lib := func() *library.Client { // one client, made only if an ability reads
@@ -934,7 +902,7 @@ func newAbilities(names []string, d abilityDeps) (*ability.Set, error) {
 		searcher search.Searcher
 		fetcher  search.Fetcher
 	)
-	net := func() (search.Searcher, search.Fetcher, error) { // one of each, made only if an ability uses the web
+	net := func() (search.Searcher, search.Fetcher, error) {
 		if searcher == nil {
 			switch d.search.Provider {
 			case "openai":
@@ -966,6 +934,3 @@ func newAbilities(names []string, d abilityDeps) (*ability.Set, error) {
 	}
 	return ability.NewSet(abilities...), nil
 }
-
-// pace is how much faster than a person it works: 1 if unset.
-func pace(cfg *config.Config) int { return max(1, cfg.DailyLife.Pace) }

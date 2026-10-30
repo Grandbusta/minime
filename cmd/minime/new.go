@@ -16,12 +16,11 @@ import (
 	"github.com/Grandbusta/minime/internal/store"
 )
 
-// newPerson is `minime new`: it starts a person from one of the lives, and
-// returns whether to run them now. What it wrote to .env is set in this
-// process's environment too.
+// newPerson returns whether to run the person now. What it wrote to .env is
+// set in this process's environment too.
 func newPerson(ctx context.Context) (bool, error) {
 	s := &setup.Setup{Ask: setup.Terminal{}, Out: os.Stdout, Lives: "lives", Self: "self", Env: ".env", Example: ".env.example",
-		Telegram: telegramSetup{}, Database: databaseWhose}
+		BotName: telegram.BotName, FirstMessage: telegram.FirstMessage, Database: databaseWhose}
 	if _, err := exec.LookPath("docker"); err == nil {
 		s.Postgres = dockerPostgres
 	}
@@ -42,23 +41,6 @@ func newPerson(ctx context.Context) (bool, error) {
 	return res.Start, nil
 }
 
-// telegramSetup is setup's view of a bot, through the Bot API.
-type telegramSetup struct{}
-
-func (telegramSetup) Bot(ctx context.Context, token string) (string, error) {
-	me, err := telegram.NewClient(token).GetMe(ctx)
-	if err != nil {
-		return "", err
-	}
-	return me.Username, nil
-}
-
-func (telegramSetup) FirstMessage(ctx context.Context, token string, wait time.Duration) (int64, string, error) {
-	return telegram.NewClient(token).FirstMessage(ctx, wait)
-}
-
-// databaseWhose connects to a database (creating its tables) and says whose
-// memory it holds.
 func databaseWhose(ctx context.Context, url string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -71,8 +53,6 @@ func databaseWhose(ctx context.Context, url string) (string, error) {
 	return whose, err
 }
 
-// dockerPostgres starts a Postgres in Docker for one person, kept in a
-// volume of their own, on a free port of this machine, and returns its URL.
 func dockerPostgres(ctx context.Context, name string) (string, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -90,7 +70,7 @@ func dockerPostgres(ctx context.Context, name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("docker run: %s", strings.TrimSpace(string(out)))
 	}
-	for i := 0; i < 60; i++ { // until it takes connections
+	for i := 0; i < 60; i++ {
 		if exec.CommandContext(ctx, "docker", "exec", container, "pg_isready", "-U", "postgres", "-d", "minime").Run() == nil {
 			time.Sleep(time.Second) // it restarts once after its first setup
 			if exec.CommandContext(ctx, "docker", "exec", container, "pg_isready", "-U", "postgres", "-d", "minime").Run() == nil {

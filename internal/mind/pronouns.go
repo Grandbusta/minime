@@ -2,11 +2,9 @@ package mind
 
 import "regexp"
 
-// A reflex, not a model call: people resolve "I" and "you" by grammar, and
-// the decision model is unreliable at it (in testing, 6–10 of 15 messages
-// put "your church" or "my church" in the wrong life). With names in place
-// of pronouns it scored "What is Tobi's church?" and "What is Sam's
-// church?" correctly every time.
+// A reflex, not a model call: the decision model is unreliable at resolving
+// pronouns (in testing, 6–10 of 15 messages put "your church" or "my church"
+// in the wrong life), but scored names in their place correctly every time.
 
 type pronounRule struct {
 	re   *regexp.Regexp
@@ -16,7 +14,6 @@ type pronounRule struct {
 // Contractions first, then possessives before plain forms. Apostrophes may be ' or ’.
 var pronounRules = func() []pronounRule {
 	rules := []struct{ pattern, repl string }{
-		// second person → the one addressed
 		{`(?i)\byou['’]re\b`, "$2 is"},
 		{`(?i)\byou['’]ve\b`, "$2 has"},
 		{`(?i)\byou['’]ll\b`, "$2 will"},
@@ -25,14 +22,13 @@ var pronounRules = func() []pronounRule {
 		{`(?i)\byours\b`, "$2's"},
 		{`(?i)\byour\b`, "$2's"},
 		{`(?i)\byou\b`, "$2"},
-		// first person plural → both
 		{`(?i)\bwe['’]re\b`, "$3 are"},
 		{`(?i)\bourselves\b`, "$3"},
 		{`(?i)\bours\b`, "$3's"},
 		{`(?i)\bour\b`, "$3's"},
 		{`(?i)\bus\b`, "$3"},
 		{`(?i)\bwe\b`, "$3"},
-		// first person singular → the one speaking ("I" is always upper case)
+		// "I" is always upper case
 		{`\bI['’]m\b`, "$1 is"},
 		{`\bI am\b`, "$1 is"},
 		{`\bI['’]ve\b`, "$1 has"},
@@ -51,9 +47,6 @@ var pronounRules = func() []pronounRule {
 	return out
 }()
 
-// resolvePronouns rewrites text so it names people instead of pointing at
-// them: "I/me/my" become firstPerson, "you/your" secondPerson, and
-// "we/us/our" both of them. Text without pronouns comes back unchanged.
 func resolvePronouns(text, firstPerson, secondPerson string) string {
 	both := firstPerson + " and " + secondPerson
 	for _, r := range pronounRules {

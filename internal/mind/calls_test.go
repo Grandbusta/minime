@@ -16,7 +16,6 @@ import (
 	"github.com/Grandbusta/minime/internal/perception"
 )
 
-// callsMind is a mind that makes calls, with an owner to ask.
 func callsMind(s2 *fakeSystem2) (*Mind, *fakeStore, *fakeAsker, *fakeReplier) {
 	r := &fakeReplier{}
 	m, s, asker := gatedMind(r, s2)
@@ -76,7 +75,7 @@ func TestDayPlanCalls(t *testing.T) {
 		t.Error("an em dash in the ask")
 	}
 
-	// The owner picks differently, then says why: the reason is theirs, not a message to answer.
+	// The owner's reason is theirs, not a message to answer.
 	start := s.calls[1]
 	m.handle(ctx, ownerTaps(start.ID, 0))
 	got := s.callAt(start.ID)
@@ -104,7 +103,6 @@ func TestDayPlanCalls(t *testing.T) {
 		t.Errorf("case = %+v", kept)
 	}
 
-	// The next message is a message again.
 	m.handle(ctx, ownerSays("How's the motif going?"))
 	if len(s2.requests) == asked && len(r.sent) == 1 {
 		t.Error("a later message was taken as a reason too")
@@ -129,7 +127,7 @@ func TestSomethingElseAndAgreeing(t *testing.T) {
 	if c := s.callAt(s.calls[0].ID); c.Agreed == nil || !*c.Agreed || c.Waiting != "" {
 		t.Errorf("agreed call = %+v", c)
 	}
-	m.handle(ctx, ownerTaps(s.calls[0].ID, 1)) // a second tap changes nothing
+	m.handle(ctx, ownerTaps(s.calls[0].ID, 1))
 	if c := s.callAt(s.calls[0].ID); !*c.Agreed {
 		t.Error("a second tap changed the answer")
 	}
@@ -278,7 +276,6 @@ func TestLookingBackOnCalls(t *testing.T) {
 	if c := s.callAt(tooNew.ID); c.Outcome != "" {
 		t.Error("recorded an outcome for a call it wasn't asked about")
 	}
-	// How it turned out goes with Busta's decision into later notes.
 	if note := m.judgmentNote(ctx, planJudgment, ""); !strings.Contains(note, "How it turned out: went_badly, bad_call: I pushed on tired") {
 		t.Errorf("judgment note:\n%s", note)
 	}

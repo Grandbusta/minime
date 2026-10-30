@@ -15,26 +15,18 @@ import (
 	"github.com/Grandbusta/minime/internal/providers/system2"
 )
 
-// Lessons: learning from correction. A lesson is specific advice about doing
-// a skill well ("check the error after every file read"), from its owner's
-// correction, its own failures, or studying others. Active lessons go into
-// every practice note, so the next attempt is made with them in mind; its
-// weekly review retires the ones it has absorbed. It may also ask its owner
-// to review what it made, at most once a day.
+// Lessons: specific advice about doing a skill well ("check the error after
+// every file read"). Active ones go into every practice note until its weekly
+// review retires them.
 
 const (
-	// lessonsPerSkill is how many of a skill's lessons go into a practice note.
 	lessonsPerSkill = 3
-	// lessonsPerWork is the most lessons it takes from one work of its own.
-	lessonsPerWork = 2
-	// askReviewEvery is how often it may ask its owner to review its work.
-	askReviewEvery = 24 * time.Hour
+	lessonsPerWork  = 2
+	askReviewEvery  = 24 * time.Hour
 	// reviewAnswerWithin is how long after asking an owner's feedback is tied to that work.
 	reviewAnswerWithin = 48 * time.Hour
 )
 
-// lessonsNote is what it has learned the hard way, for a practice note:
-// each skill's newest active lessons.
 func (m *Mind) lessonsNote(ctx context.Context) string {
 	skills, err := m.Store.Skills(ctx)
 	if err != nil || len(skills) == 0 {
@@ -57,10 +49,8 @@ func (m *Mind) lessonsNote(ctx context.Context) string {
 	return "\n\nThings you've learned the hard way (use them, when they apply):" + b.String()
 }
 
-// learnFromWork keeps the lessons it took from a work of its own: from its
-// own mistakes, or from studying others when the work is notes on what it
-// read (source). They go under the skill it was working on (skills); with
-// none, under each skill the work's kind shows.
+// learnFromWork files lessons under skills; with none, under each skill the
+// work's kind shows.
 func (m *Mind) learnFromWork(ctx context.Context, w memory.Work, lessons []string, source string, skills []string) {
 	if len(skills) == 0 {
 		all, err := m.Store.Skills(ctx)
@@ -85,8 +75,6 @@ func (m *Mind) learnFromWork(ctx context.Context, w memory.Work, lessons []strin
 	}
 }
 
-// workingOn is the skill an activity works on: its learning plan's (the
-// resource it studies), or its project's goal's; "" if neither says.
 func (m *Mind) workingOn(ctx context.Context, i memory.Intention, project *memory.Project) string {
 	if id := i.Args["resource"]; id != "" {
 		if plans, err := m.Store.Plans(ctx, false); err == nil {
@@ -123,10 +111,9 @@ func (m *Mind) saveLesson(ctx context.Context, l memory.Lesson) bool {
 	return true
 }
 
-// askForReview sends its owner a work it just made, with its question, at
-// most once a day. Messaging the owner needs no approval.
+// askForReview asks at most once a day. Messaging the owner needs no approval.
 func (m *Mind) askForReview(ctx context.Context, w memory.Work, question string, now time.Time) {
-	owner := m.Autonomy.Owner
+	owner := m.policy().Owner
 	if owner == "" {
 		return
 	}
@@ -150,10 +137,10 @@ func (m *Mind) askForReview(ctx context.Context, w memory.Work, question string,
 	}
 }
 
-// takeLessons keeps the specific advice its owner gave about its work, tied
-// to the work it last asked them to review, if any.
+// takeLessons ties advice to the work it last asked the owner to review, if
+// any.
 func (m *Mind) takeLessons(ctx context.Context, p perception.Percept, reply *decision.Decision, ls []system2.LessonLearned) []*decision.Decision {
-	if len(ls) == 0 || p.Speaker == "" || p.Speaker != m.Autonomy.Owner {
+	if len(ls) == 0 || p.Speaker == "" || p.Speaker != m.policy().Owner {
 		return nil
 	}
 	skills, err := m.Store.Skills(ctx)
@@ -189,13 +176,12 @@ func lessonSource(s string) string {
 	return "your own mistakes"
 }
 
-// tastesInNote is the most of its owner's tastes a note on making something holds.
 const tastesInNote = 12
 
-// takeTastes keeps what its owner said they like or don't in its work. Only
-// the owner's taste counts; a kind it doesn't make counts for any.
+// takeTastes: only the owner's taste counts; a kind it doesn't make counts
+// for any.
 func (m *Mind) takeTastes(ctx context.Context, p perception.Percept, reply *decision.Decision, ts []system2.Taste) []*decision.Decision {
-	if len(ts) == 0 || p.Speaker == "" || p.Speaker != m.Autonomy.Owner {
+	if len(ts) == 0 || p.Speaker == "" || p.Speaker != m.policy().Owner {
 		return nil
 	}
 	asked, _, _ := m.Store.AskedForReview(ctx, p.At.Add(-reviewAnswerWithin))
@@ -219,8 +205,6 @@ func (m *Mind) takeTastes(ctx context.Context, p perception.Percept, reply *deci
 	return out
 }
 
-// tasteNote is its owner's taste, for a note on making something: what they
-// like and don't, by the kind of work it's about.
 func (m *Mind) tasteNote(ctx context.Context) string {
 	ts, err := m.Store.Tastes(ctx, tastesInNote)
 	if err != nil || len(ts) == 0 {

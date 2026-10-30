@@ -15,7 +15,7 @@ func TestCheck(t *testing.T) {
 		{Commit, "telegram:2", Ask},
 		{Commit, "telegram:1", Auto},
 		{Publish, "", Ask},
-		{Spend, "telegram:1", Forbid}, // forbidden is forbidden, even for the owner
+		{Spend, "telegram:1", Forbid},
 		{Class("unknown"), "telegram:2", Ask},
 	} {
 		if got := p.Check(c.class, c.person); got != c.want {

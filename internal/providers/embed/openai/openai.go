@@ -18,7 +18,7 @@ const requestTimeout = 30 * time.Second
 type Client struct {
 	api   openai.Client
 	model string
-	price pricing.Price // zero: cost is recorded as 0
+	price pricing.Price
 }
 
 func New(apiKey, model, baseURL string, price pricing.Price) *Client {

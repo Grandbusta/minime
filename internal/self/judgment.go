@@ -13,31 +13,24 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Judgment is how the agent's owner decides, so the agent can learn to decide
-// the way they would: real decisions they made (cases), and the rules drawn
-// from them (principles). Optional. Copied into memory the first time as
-// proposed; the owner approves, edits or rejects each in the console, and
-// only approved ones are used.
+// Judgment is copied into memory the first time as proposed; only what the
+// owner approves in the console is used.
 type Judgment struct {
-	// Priorities are what matters most to them, most important first: when
-	// principles clash, the higher priority wins.
-	Priorities []string `yaml:"priorities"`
-	// Boundaries are what they never do, whatever the gain.
+	// Priorities are most important first: when principles clash, the higher wins.
+	Priorities []string    `yaml:"priorities"`
 	Boundaries []string    `yaml:"boundaries"`
 	Principles []Principle `yaml:"principles"`
 	Cases      []Case      `yaml:"cases"`
 }
 
-// Principle is a rule of the owner's, drawn from their decisions.
 type Principle struct {
 	Text  string   `yaml:"text"`
-	Types []string `yaml:"types"` // kinds of decision it applies to
+	Types []string `yaml:"types"`
 	Cases []string `yaml:"cases"` // keys of the cases behind it
 }
 
-// Case is one decision the owner made.
 type Case struct {
-	Key       string   `yaml:"key"` // short and unique, e.g. "no-x402"
+	Key       string   `yaml:"key"`
 	Type      string   `yaml:"type"`
 	Situation string   `yaml:"situation"`
 	Options   []string `yaml:"options"`
@@ -45,10 +38,9 @@ type Case struct {
 	Reason    string   `yaml:"reason"` // the owner's own words; empty when they gave none
 }
 
-// DecisionTypes are the kinds of decision judgment is filed under.
 var DecisionTypes = []string{"general", "engineering", "product", "autonomy", "life"}
 
-// LoadJudgment reads the owner's judgment. A missing file is no judgment.
+// LoadJudgment treats a missing file as no judgment.
 func LoadJudgment(path string) (Judgment, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) || path == "" {

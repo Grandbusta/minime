@@ -47,7 +47,6 @@ func TestCorrectingFacts(t *testing.T) {
 		t.Errorf("decisions = %+v / %+v", ds[0], ds[1])
 	}
 
-	// The owner may correct what it knows about itself.
 	ds = m.correctFacts(context.Background(), from(owner), reply, map[string]memory.Fact{"f1": age},
 		[]system2.Correction{{Fact: "f1", Text: "Tobi is 18"}}, n)
 	if len(ds) != 1 || s.facts[0].Text != "Tobi is 18" || s.facts[0].Subject != memory.SubjectSelf {
@@ -73,7 +72,6 @@ func TestTheOwnerChangesPermissionsByChat(t *testing.T) {
 		t.Error("the change didn't apply")
 	}
 
-	// It lasts across a restart.
 	restarted, _, _ := gatedMind(&fakeReplier{}, &fakeSystem2{})
 	restarted.Store = s
 	restarted.loadPermissions(context.Background())
