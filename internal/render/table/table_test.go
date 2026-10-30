@@ -22,8 +22,10 @@ func TestParse(t *testing.T) {
 	if len(tb.Rows) != 2 || len(tb.Rows[0]) != 3 || tb.Columns[1] != "Area" || tb.Rows[1][2] != "" {
 		t.Errorf("table = %+v", tb)
 	}
-	if _, err := Parse([]byte(`{"columns":[],"rows":[["x"]]}`)); err != ErrEmpty {
-		t.Errorf("no columns: %v", err)
+	for _, raw := range []string{`{"columns":[],"rows":[["x"]]}`, `{"columns":[" ",""],"rows":[]}`} {
+		if _, err := Parse([]byte(raw)); err != ErrEmpty {
+			t.Errorf("%s: %v", raw, err)
+		}
 	}
 }
 
@@ -60,5 +62,24 @@ func TestCSV(t *testing.T) {
 	rows, err := csv.NewReader(bytes.NewReader(bytes.TrimPrefix(data, []byte("\uFEFF")))).ReadAll()
 	if err != nil || len(rows) != 3 || rows[0][2] != "Fee (NGN)" || rows[1][2] != "15000" {
 		t.Errorf("rows = %v, %v", rows, err)
+	}
+}
+
+func TestATemplateHasNoRows(t *testing.T) {
+	w := memory.Work{Title: "Clinic lead tracker", DataKind: "table",
+		Data: json.RawMessage(`{"columns":["Clinic","Contact","Status","Next follow-up"],"rows":[]}`)}
+	data, err := XLSX{}.Render(w, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := f.GetCellValue(f.GetSheetName(0), "D1"); v != "Next follow-up" {
+		t.Errorf("D1 = %q", v)
+	}
+	if data, err := (CSV{}).Render(w, ""); err != nil || !bytes.Contains(data, []byte("Clinic,Contact,Status,Next follow-up")) {
+		t.Errorf("csv = %q, %v", data, err)
 	}
 }

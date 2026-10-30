@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -28,10 +29,11 @@ const (
 	maxCell    = 2000 // runes
 )
 
-var ErrEmpty = errors.New("table: no columns or no rows")
+var ErrEmpty = errors.New("table: no columns")
 
 // Parse reads a table as JSON and cleans it: cells trimmed and cut at
-// maxCell, rows fitted to the columns, empty rows dropped.
+// maxCell, rows fitted to the columns, empty rows dropped. A table with
+// headings and no rows is a template to fill in, so it's kept.
 func Parse(raw []byte) (Table, error) {
 	var t Table
 	if err := json.Unmarshal(raw, &t); err != nil {
@@ -64,7 +66,7 @@ func Parse(raw []byte) (Table, error) {
 			out.Rows = append(out.Rows, row)
 		}
 	}
-	if len(out.Columns) == 0 || len(out.Rows) == 0 {
+	if slices.IndexFunc(out.Columns, func(c string) bool { return c != "" }) < 0 {
 		return Table{}, ErrEmpty
 	}
 	return out, nil
@@ -78,7 +80,8 @@ func (data) WriteHelp() string { return "" }
 
 func (data) DataHelp() string {
 	return "its column headings, then every row, each cell as text in the columns' order. Write numbers as plain digits " +
-		"(1500, 12.5), with no currency signs or thousands commas, so they can be added up; name the unit in the heading."
+		"(1500, 12.5), with no currency signs or thousands commas, so they can be added up; name the unit in the heading. " +
+		"A template to fill in is its headings with no rows; never make up rows to fill it."
 }
 
 var schema = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"columns", "rows"},
