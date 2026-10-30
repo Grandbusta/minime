@@ -381,19 +381,19 @@ func (s *fakeStore) Work(_ context.Context, id ulid.ULID) (memory.Work, bool, er
 	return w, ok, nil
 }
 
-func (s *fakeStore) SetWorkScore(_ context.Context, id ulid.ULID, score json.RawMessage) error {
+func (s *fakeStore) SetWorkData(_ context.Context, id ulid.ULID, kind string, data json.RawMessage) error {
 	for n := range s.works {
 		if s.works[n].ID == id {
-			s.works[n].Score = score
+			s.works[n].Data, s.works[n].DataKind = data, kind
 		}
 	}
 	return nil
 }
 
-func (s *fakeStore) UnscoredWorks(_ context.Context, kinds []string, limit int) ([]memory.Work, error) {
+func (s *fakeStore) WorksMissingData(_ context.Context, kinds []string, limit int) ([]memory.Work, error) {
 	var out []memory.Work
 	for n := len(s.works) - 1; n >= 0 && len(out) < limit; n-- {
-		if w := s.works[n]; len(w.Score) == 0 && slices.Contains(kinds, w.Kind) {
+		if w := s.works[n]; len(w.Data) == 0 && slices.Contains(kinds, w.Kind) {
 			out = append(out, w)
 		}
 	}

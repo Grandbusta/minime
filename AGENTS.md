@@ -42,7 +42,7 @@ Telegram for talking. Always write the name as **minime**, never "mini-me".
 | `decision`, `decision/questions` | What a decision is; loading and checking question sets. |
 | `ability` (`journal`, `reading`, `web`) | What they can do in their day besides writing. |
 | `library`, `search` | Books (Gutenberg), Wikipedia, the open web, with the safety rules. |
-| `render` (`pdf`, `midi`) | A work made into a file. Each kind is a `render.Format`; a new one is a type plus a line in main. |
+| `render` (`pdf`, `midi`) | A work made into a file. Each kind is a `render.Format` (a `render.DataFormat` if it's made from data the work carries, like MIDI from a score); a new one is a type plus a line in main. |
 | `action` | Autonomy: every action is `auto`, `ask` or `forbid`. |
 | `self`, `config`, `setup` | The person's files, the config, and `minime new`. |
 | `console` | The private mind console (localhost unless a token is set). |
@@ -58,7 +58,7 @@ Telegram for talking. Always write the name as **minime**, never "mini-me".
   effects (facts, reminders, promises, corrections, ...), reply, save the decision chain.
 - **Life** handles the clock's tick, once a minute: first what someone is waiting for
   (approvals, calls, reminders, promises, check-ins), then its own day (plan, activities,
-  making promises ahead, the weekly review, scoring old music).
+  making promises ahead, the weekly review, writing old works' data).
 
 A reply must never wait on slow work: anything slow goes in the life loop. The loops
 share the database, the owner's permissions (`policy()`/`setPolicy()`, behind a lock)
@@ -104,15 +104,15 @@ Every change is reviewed against these. They come from real reviews of this code
 - No list, interface or registry for one case (`formats()` holding just "pdf").
 - When something *is* made pluggable, make it truly pluggable: no special-casing its
   members elsewhere. A new `render.Format` touches no other package; the data a work
-  carries is defined once, in the model (`memory.DataScore`, `Work.Carries`,
-  `Craft.Carries`).
+  carries is defined once, by the format made from it (`render.DataFormat`), and only
+  named elsewhere (`data:` on a craft, `Work.Carries`, `Craft.Carries`).
 - Fix the cause at the right depth, not with a special case on top.
 
 **No wasted work.**
 - One check per question along a path; don't look the same thing up three times.
 - Parse and clean once (`midi.Render` takes the JSON and parses it once).
 - No maps or other allocations built on every call in a loop; make them package-level.
-- Work out what never changes once (`m.scored()` with `sync.Once`).
+- Work out what never changes once (`m.dataOf()` with `sync.Once`).
 
 **The person, not the code, holds the life.**
 - Nothing about any person is in the code: lives are YAML, prompts are `prompts/*.md`,

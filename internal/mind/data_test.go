@@ -21,7 +21,7 @@ const beatJSON = `{"title":"Lagos After Rain","kind":"beat_idea","text":"82 BPM,
 	"stage_done":"","score":` + score + `}`
 
 var musicLife = self.Life{Name: "Tobi", Story: []string{"Tobi makes beats."}, Makes: []self.Craft{
-	{Kind: "beat_idea", About: "a beat", Score: true}, {Kind: "lyrics", About: "lyrics"}}}
+	{Kind: "beat_idea", About: "a beat", Data: "score"}, {Kind: "lyrics", About: "lyrics"}}}
 
 func TestMusicIsMadeWithItsScore(t *testing.T) {
 	m, s, s2, r, _ := learningMind()
@@ -51,9 +51,9 @@ func TestMusicIsMadeWithItsScore(t *testing.T) {
 			} `json:"notes"`
 		} `json:"tracks"`
 	}
-	if err := json.Unmarshal(beat.Score, &kept); err != nil || len(kept.Tracks) != 1 || len(kept.Tracks[0].Notes) != 2 ||
+	if err := json.Unmarshal(beat.Data, &kept); err != nil || len(kept.Tracks) != 1 || len(kept.Tracks[0].Notes) != 2 ||
 		kept.Tracks[0].Notes[1].Velocity != 90 {
-		t.Errorf("score kept = %s (%v)", beat.Score, err)
+		t.Errorf("score kept = %s (%v)", beat.Data, err)
 	}
 	filer := m.Filer.(*fakeFiler)
 	if len(filer.sent) != 1 || filer.sent[0].name != "lagos-after-rain.mid" || !bytes.HasPrefix(filer.sent[0].data, []byte("MThd")) ||
@@ -64,23 +64,23 @@ func TestMusicIsMadeWithItsScore(t *testing.T) {
 
 func TestOldMusicIsScoredToBeSentAsMIDI(t *testing.T) {
 	r, filer := &fakeReplier{}, &fakeFiler{}
-	s2 := &fakeSystem2{send: system2.Send{Work: "w1", As: "midi"}, formats: map[string]string{"score": `{"score":` + score + `}`}}
+	s2 := &fakeSystem2{send: system2.Send{Work: "w1", As: "midi"}, formats: map[string]string{"data": `{"score":` + score + `}`}}
 	m, s := promiseMind(r, s2)
 	m.Life, m.Filer, m.Embedder = musicLife, filer, &wordEmbedder{}
-	m.Day.ScorePrompt = Prompt{Ref: "score@test", Text: "You are {name}, scoring a beat."}
+	m.Day.DataPrompt = Prompt{Ref: "data@test", Text: "You are {name}, scoring a beat."}
 	old := addWork(s, "Lagos After Rain", "beat_idea", "82 BPM, D minor. Kick on one, snare on two.", "", now.Add(-3*time.Hour))
 	m.tick(context.Background(), now) // the life loop scores it, not a reply
 
 	var asked system2.Request
 	for _, req := range s2.requests {
-		if req.Format != nil && req.Format.Name == "score" {
+		if req.Format != nil && req.Format.Name == "data" {
 			asked = req
 		}
 	}
 	if !strings.Contains(asked.Note, "Lagos After Rain\n\n82 BPM, D minor. Kick on one") || asked.Instructions != "You are Tobi, scoring a beat." {
 		t.Errorf("scoring request: %+v", asked)
 	}
-	if w, _, _ := s.Work(context.Background(), old.ID); len(w.Score) == 0 {
+	if w, _, _ := s.Work(context.Background(), old.ID); len(w.Data) == 0 {
 		t.Fatal("the score wasn't kept")
 	}
 
@@ -90,7 +90,7 @@ func TestOldMusicIsScoredToBeSentAsMIDI(t *testing.T) {
 		t.Fatalf("files %d, messages %q", len(filer.sent), r.sent)
 	}
 	for _, req := range s2.requests[before:] {
-		if req.Format != nil && req.Format.Name == "score" {
+		if req.Format != nil && req.Format.Name == "data" {
 			t.Error("the reply waited on scoring")
 		}
 	}

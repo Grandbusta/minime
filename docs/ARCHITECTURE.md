@@ -183,6 +183,9 @@ the slow work of its own day:
 6. **Due activities** of its own day.
 7. **Make promises ahead**, up to 30 minutes before they're due.
 8. **The weekly review**, once, at the first tick after `review_at`.
+9. **Old works' data**, one a tick: something made before its kind carried data (music
+   before scores) gets it written from its words ([prompts/data.md](../prompts/data.md)),
+   so it can be made into its file.
 
 While the life loop is busy, the clock waits; minutes it misses are skipped, and anything
 due is still done on the next tick, because what's due is "due by now".
@@ -287,6 +290,28 @@ are in [internal/search](../internal/search):
 - Every search and page is logged (`web_log`) and capped per day (10 and 15); found pages
   are kept (`web_found`), and `read_page` reads only those, so a link on a page can never
   send it anywhere.
+
+### Files
+
+A work can be sent, promised or downloaded as a file. Each kind of file is a
+`render.Format` ([internal/render](../internal/render)): its name, extension and media
+type, how the person knows it and how to write for it, and `Render`. main builds the
+`render.Set` (now PDF and MIDI); the mind's prompts, promises, replies, review requests
+and the console's download links offer whatever the set holds.
+
+A format made from data a work carries beside its words is a `render.DataFormat`, which
+defines that data: its schema, how to write it, and how it's cleaned. MIDI is made from a
+`score`. A craft names the data its works carry (`data: score` in life.yaml); each work of
+that kind then writes it with its words, kept in `works.data` with its `data_kind`.
+
+Adding a format:
+
+1. A package with a type that implements `render.Format`, or `render.DataFormat` if it is
+   made from data of its own.
+2. One line in main adding it to the set.
+3. For a `DataFormat`, `data: <its data>` on the crafts that should carry it.
+
+Nothing else changes: the mind, the store and the console don't name formats.
 
 ## Growth
 
@@ -492,6 +517,8 @@ internal/
     areas.go people.go   life areas; people and circles
     corrections.go       facts corrected or forgotten, misreads, permissions
     initiative.go        the clock: reminders, check-ins, promises, speaking first
+    works.go files.go    its works in a reply's note; sending them as files
+    data.go              the data a work carries beside its words
     life.go              the day: plan, activities, journal, budget
     growth.go            dreams, skills and scoring
     lessons.go           lessons, asking for review
@@ -500,6 +527,7 @@ internal/
     approvals.go         the gate's requests to the owner
     judgment.go calls.go the owner's judgment, and calls
   ability/               abilities: journal/, reading/, web/
+  render/                file formats: pdf/, midi/
   library/               Gutenberg and Wikipedia
   search/                web search and the fetcher
   action/                action classes and the autonomy policy

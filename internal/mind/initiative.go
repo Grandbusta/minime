@@ -59,7 +59,7 @@ func (m *Mind) tick(ctx context.Context, now time.Time) {
 	m.doDueIntentions(ctx, now, true)
 	m.preparePromises(ctx, now)
 	m.weeklyReview(ctx, now)
-	m.scoreOldMusic(ctx)
+	m.fillOldData(ctx)
 	if m.toPlan.Swap(false) { // a goal taken on in a chat: its learning plan, now the reply is sent
 		m.EnsurePlans(ctx, now)
 	}

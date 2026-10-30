@@ -53,7 +53,7 @@ daily_life:
   activity_prompt: prompts/activity.md
   review_prompt: prompts/review.md
   learn_prompt: prompts/learn.md
-  score_prompt: prompts/score.md
+  data_prompt: prompts/data.md
 
 # What finds your past decisions most like the one it faces (closeness of
 # meaning). openai: the Embeddings API, with the System 2 key; a fraction of a

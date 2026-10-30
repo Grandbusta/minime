@@ -34,7 +34,7 @@ em dashes.
   I can print, tonight") is promised like anything else and sent as a PDF at its time.
   Headings, lists and tables are laid out on A4. Every work in the console also has a
   **pdf ↓** link.
-- **MIDI:** music (a craft with `score: true`, like Daniel's beats) is written out note by
+- **MIDI:** music (a craft with `data: score`, like Daniel's beats) is written out note by
   note as well as in words. Ask for a beat as MIDI and it comes as a `.mid` that opens in
   GarageBand or any DAW; a beat they ask you to review comes with its `.mid`; and the
   console has a **midi ↓** link. Beats made before this are scored from their words in

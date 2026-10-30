@@ -345,6 +345,12 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 
 	// What it can send a work as, and the console download it as.
 	formats := render.NewSet(pdf.Format{}, midi.Format{})
+	for _, c := range life.Makes {
+		if _, ok := formats.Data(c.Data); c.Data != "" && !ok {
+			return fmt.Errorf("%s: makes %q carries data %q, which no file is made from (%s)", cfg.Self.LifeFile(), c.Kind, c.Data,
+				strings.Join(formats.DataKinds(), ", "))
+		}
+	}
 
 	m := mind.New(mind.Config{
 		Life:     life,
@@ -469,7 +475,7 @@ func newDay(cfg *config.Config) (mind.Day, error) {
 		to   *mind.Prompt
 		path string
 	}{{&day.PlanPrompt, dl.PlanPrompt}, {&day.ActivityPrompt, dl.ActivityPrompt}, {&day.ReviewPrompt, dl.ReviewPrompt},
-		{&day.LearnPrompt, dl.LearnPrompt}, {&day.ScorePrompt, dl.ScorePrompt}} {
+		{&day.LearnPrompt, dl.LearnPrompt}, {&day.DataPrompt, dl.DataPrompt}} {
 		if *p.to, err = loadPrompt(p.path); err != nil {
 			return day, err
 		}

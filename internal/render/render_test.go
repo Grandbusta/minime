@@ -15,7 +15,7 @@ import (
 func TestAWorkIsMadeOnlyIntoFilesItCarriesTheDataFor(t *testing.T) {
 	s := render.NewSet(pdf.Format{}, midi.Format{})
 	words := memory.Work{Title: "Verse", Text: "Rain on the roof"}
-	beat := memory.Work{Title: "Beat", Text: "82 BPM", Score: json.RawMessage(
+	beat := memory.Work{Title: "Beat", Text: "82 BPM", DataKind: "score", Data: json.RawMessage(
 		`{"bpm":82,"tracks":[{"instrument":"drums","notes":[{"pitch":"kick","bar":1,"beat":1,"length":1,"velocity":100}]}]}`)}
 
 	if fs := s.For(words); len(fs) != 1 || fs[0].Name() != "pdf" {

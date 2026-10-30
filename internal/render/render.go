@@ -4,6 +4,7 @@
 package render
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,9 +23,22 @@ type Format interface {
 	Describe() string
 	WriteHelp() string
 	// Needs is the data a work must carry to be this file (memory.Work.Carries);
-	// "" if its words are enough.
+	// "" if its words are enough. A format that needs data is a DataFormat.
 	Needs() string
 	Render(w memory.Work, author string) ([]byte, error)
+}
+
+// DataFormat is a format made from data a work carries beside its words,
+// which it defines: a craft that names the data (life.yaml's data) gets it
+// written with each work.
+type DataFormat interface {
+	Format
+	// DataSchema is the data for Structured Outputs; DataHelp tells System 2
+	// how to write it.
+	DataSchema() map[string]any
+	DataHelp() string
+	// CleanData keeps what can be used of raw; an error if nothing can.
+	CleanData(raw json.RawMessage) (json.RawMessage, error)
 }
 
 type File struct {
@@ -67,6 +81,27 @@ func (s *Set) All() []Format {
 		return nil
 	}
 	return s.order
+}
+
+// Data is the format that defines data of kind.
+func (s *Set) Data(kind string) (DataFormat, bool) {
+	for _, f := range s.All() {
+		if df, ok := f.(DataFormat); ok && f.Needs() == kind {
+			return df, true
+		}
+	}
+	return nil, false
+}
+
+// DataKinds is the data its formats are made from, in the order NewSet was given.
+func (s *Set) DataKinds() []string {
+	var out []string
+	for _, f := range s.All() {
+		if _, ok := f.(DataFormat); ok {
+			out = append(out, f.Needs())
+		}
+	}
+	return out
 }
 
 // For is the formats w can be made into now.

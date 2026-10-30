@@ -58,7 +58,7 @@ func (f *fakeStore) SaveLabel(_ context.Context, l memory.Label) error {
 	return nil
 }
 func (f *fakeStore) Work(context.Context, ulid.ULID) (memory.Work, bool, error) {
-	return memory.Work{ID: ulid.Make(), Kind: "lyrics", Title: "Verse", Text: "Rain on the roof", Score: f.score}, true, nil
+	return memory.Work{ID: ulid.Make(), Kind: "lyrics", Title: "Verse", Text: "Rain on the roof", Data: f.score, DataKind: "score"}, true, nil
 }
 
 func (f *fakeStore) ReviewPrinciple(_ context.Context, id ulid.ULID, status, text string, _ time.Time) (bool, error) {

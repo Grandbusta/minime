@@ -880,31 +880,32 @@ func TestWorksFor(t *testing.T) {
 	}
 }
 
-func TestWorkScores(t *testing.T) {
+func TestWorkData(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	at := time.Now().UTC().Truncate(time.Microsecond)
-	beat := memory.Work{ID: ulid.Make(), Kind: "beat_idea", Title: "beat", Text: "x", CreatedAt: at, Score: json.RawMessage(`{"bpm": 82}`)}
+	beat := memory.Work{ID: ulid.Make(), Kind: "beat_idea", Title: "beat", Text: "x", CreatedAt: at,
+		Data: json.RawMessage(`{"bpm": 82}`), DataKind: "score"}
 	old := memory.Work{ID: ulid.Make(), Kind: "beat_idea", Title: "old", Text: "x", CreatedAt: at}
 	for _, w := range []memory.Work{beat, old} {
 		if err := s.SaveWork(ctx, w); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if w, _, err := s.Work(ctx, beat.ID); err != nil || string(w.Score) != `{"bpm": 82}` {
-		t.Errorf("score = %s, %v", w.Score, err)
+	if w, _, err := s.Work(ctx, beat.ID); err != nil || string(w.Data) != `{"bpm": 82}` || !w.Carries("score") {
+		t.Errorf("data = %s %q, %v", w.Data, w.DataKind, err)
 	}
-	if w, _, _ := s.Work(ctx, old.ID); w.Score != nil {
-		t.Errorf("no score = %s", w.Score)
+	if w, _, _ := s.Work(ctx, old.ID); w.Data != nil || w.Carries("score") {
+		t.Errorf("no data = %s %q", w.Data, w.DataKind)
 	}
-	if ws, err := s.UnscoredWorks(ctx, []string{"beat_idea"}, 50); err != nil || !slices.ContainsFunc(ws, func(w memory.Work) bool { return w.ID == old.ID }) ||
+	if ws, err := s.WorksMissingData(ctx, []string{"beat_idea"}, 50); err != nil || !slices.ContainsFunc(ws, func(w memory.Work) bool { return w.ID == old.ID }) ||
 		slices.ContainsFunc(ws, func(w memory.Work) bool { return w.ID == beat.ID }) {
-		t.Errorf("unscored = %d works, %v", len(ws), err)
+		t.Errorf("missing data = %d works, %v", len(ws), err)
 	}
-	if err := s.SetWorkScore(ctx, old.ID, json.RawMessage(`{"bpm":90}`)); err != nil {
+	if err := s.SetWorkData(ctx, old.ID, "score", json.RawMessage(`{"bpm":90}`)); err != nil {
 		t.Fatal(err)
 	}
-	if w, _, _ := s.Work(ctx, old.ID); string(w.Score) != `{"bpm": 90}` {
-		t.Errorf("set score = %s", w.Score)
+	if w, _, _ := s.Work(ctx, old.ID); string(w.Data) != `{"bpm": 90}` || w.DataKind != "score" {
+		t.Errorf("set data = %s %q", w.Data, w.DataKind)
 	}
 }

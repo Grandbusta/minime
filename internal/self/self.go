@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
-
-	"github.com/Grandbusta/minime/internal/memory"
 )
 
 // Life is the agent's life story. The agent never contradicts it; anything
@@ -36,9 +34,9 @@ type Life struct {
 type Craft struct {
 	Kind  string `yaml:"kind"` // snake_case; works are filed under it
 	About string `yaml:"about"`
-	// Score is true for music: each one is written out note by note too,
-	// so it can be sent as MIDI.
-	Score bool `yaml:"score"`
+	// Data is what each one carries beside its words, so it can be made into
+	// a file from it, like "score" for music (sent as MIDI); "" if none.
+	Data string `yaml:"data"`
 }
 
 var BuiltIn = []Craft{
@@ -55,7 +53,7 @@ func (l Life) Crafts() []Craft { return append(append([]Craft{}, BuiltIn...), l.
 
 // Carries is whether works of c carry data of kind (memory.Work.Carries).
 func (c Craft) Carries(kind string) bool {
-	return kind == "" || kind == memory.DataScore && c.Score
+	return kind == "" || kind == c.Data
 }
 
 // Carrying is the kinds of work it makes that carry data of kind.

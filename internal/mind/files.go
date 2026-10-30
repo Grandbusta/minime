@@ -65,7 +65,7 @@ func (m *Mind) fileNote(i memory.Intention) string {
 }
 
 // makeFile is w as a file; nil if it can't send it as one, or w doesn't
-// carry what that file is made from yet (scoreOldMusic fills scores in,
+// carry what that file is made from yet (fillOldData fills it in,
 // never a reply).
 func (m *Mind) makeFile(as string, w memory.Work) (*render.File, error) {
 	if !m.canSendAs(as) {

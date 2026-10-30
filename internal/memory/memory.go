@@ -135,9 +135,12 @@ type Work struct {
 	Title       string
 	Text        string
 	CreatedAt   time.Time
-	Public      *bool           // whether it may go on its public page; nil until decided
-	PublicBy    string          // who decided: PublicBySystem1 or PublicByOwner; "" until decided
-	Score       json.RawMessage // its notes, for music (render/midi's Score); nil if none
+	Public      *bool  // whether it may go on its public page; nil until decided
+	PublicBy    string // who decided: PublicBySystem1 or PublicByOwner; "" until decided
+	// Data is what it carries beside its words, defined by the file made from
+	// it (render.DataFormat), like a beat's score; nil if none.
+	Data     json.RawMessage
+	DataKind string
 	// Loaded only by WorksFor. Embedding is nil until embedded; MadeFor is
 	// whom it was made for (SubjectSelf for itself), "" if not for an intention.
 	Embedding    []float32
@@ -145,18 +148,9 @@ type Work struct {
 	MadeFor      string
 }
 
-// DataScore is the data a piece of music carries: its notes, in Score.
-const DataScore = "score"
-
 // Carries is whether w carries data of kind; every work carries its words ("").
 func (w Work) Carries(kind string) bool {
-	switch kind {
-	case "":
-		return true
-	case DataScore:
-		return len(w.Score) > 0
-	}
-	return false
+	return kind == "" || kind == w.DataKind && len(w.Data) > 0
 }
 
 type Approval struct {

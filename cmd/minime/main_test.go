@@ -34,7 +34,7 @@ func TestPaceScalesTheBudgetAndTheWeb(t *testing.T) {
 	cfg := &config.Config{DailyLife: config.DailyLife{Enabled: true, Pace: 10, PlanAt: "06:00", JournalAt: "22:00", ReviewAt: "Sun 20:00",
 		Activities: 4, BudgetUSD: 0.05, Web: config.Web{Searches: 10, Pages: 15},
 		PlanPrompt: "../../prompts/plan.md", ActivityPrompt: "../../prompts/activity.md", ReviewPrompt: "../../prompts/review.md",
-		LearnPrompt: "../../prompts/learn.md", ScorePrompt: "../../prompts/score.md"}}
+		LearnPrompt: "../../prompts/learn.md", DataPrompt: "../../prompts/data.md"}}
 	day, err := newDay(cfg)
 	if err != nil {
 		t.Fatal(err)

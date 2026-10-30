@@ -114,8 +114,8 @@ type Store interface {
 	SetOutcome(ctx context.Context, id ulid.ULID, outcome, verdict, note, by string, at time.Time) (bool, error)
 	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
 	Work(ctx context.Context, id ulid.ULID) (memory.Work, bool, error)
-	SetWorkScore(ctx context.Context, id ulid.ULID, score json.RawMessage) error
-	UnscoredWorks(ctx context.Context, kinds []string, limit int) ([]memory.Work, error)
+	SetWorkData(ctx context.Context, id ulid.ULID, kind string, data json.RawMessage) error
+	WorksMissingData(ctx context.Context, kinds []string, limit int) ([]memory.Work, error)
 	Intention(ctx context.Context, id ulid.ULID) (memory.Intention, bool, error)
 	WorksFor(ctx context.Context, person string, limit int) ([]memory.Work, error)
 	SaveWorkEmbedding(ctx context.Context, id ulid.ULID, v []float32, model string) error
@@ -204,15 +204,15 @@ type Mind struct {
 	policyMu sync.RWMutex // guards Autonomy: the owner can change it in a chat while its day reads it
 	toPlan   atomic.Bool  // a goal was taken on in a chat: draft its learning plan on the next tick
 
-	scoredOnce  sync.Once
-	scoredKinds []string // the kinds of work that are music, from its life
+	dataOnce    sync.Once
+	dataFormats map[string]render.DataFormat // what each kind of work it makes carries, from its life; read by both loops
 
 	// Only the life loop touches these.
 	lastTick   time.Time
 	planned    string // the local date ("2006-01-02") its day was last planned for
 	round      int    // the last round of that day it planned (0: the morning plan)
 	reviewed   time.Time
-	unscorable map[ulid.ULID]bool // music it failed to score; not tried again until a restart
+	unfillable map[ulid.ULID]bool // works whose data it failed to write; not tried again until a restart
 }
 
 func New(c Config) *Mind {
