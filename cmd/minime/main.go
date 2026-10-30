@@ -52,8 +52,12 @@ import (
 	"github.com/Grandbusta/minime/internal/providers/system2"
 	s2openai "github.com/Grandbusta/minime/internal/providers/system2/openai"
 	"github.com/Grandbusta/minime/internal/render"
+	"github.com/Grandbusta/minime/internal/render/archive"
+	"github.com/Grandbusta/minime/internal/render/calendar"
+	"github.com/Grandbusta/minime/internal/render/docx"
 	"github.com/Grandbusta/minime/internal/render/midi"
 	"github.com/Grandbusta/minime/internal/render/pdf"
+	"github.com/Grandbusta/minime/internal/render/table"
 	"github.com/Grandbusta/minime/internal/replay"
 	"github.com/Grandbusta/minime/internal/search"
 	"github.com/Grandbusta/minime/internal/self"
@@ -344,7 +348,8 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	}
 
 	// What it can send a work as, and the console download it as.
-	formats := render.NewSet(pdf.Format{}, midi.Format{})
+	formats := render.NewSet(pdf.Format{}, docx.Format{}, table.XLSX{}, table.CSV{}, calendar.Format{},
+		midi.Format{}, archive.Format{})
 	for _, c := range life.Makes {
 		if _, ok := formats.Data(c.Data); c.Data != "" && !ok {
 			return fmt.Errorf("%s: makes %q carries data %q, which no file is made from (%s)", cfg.Self.LifeFile(), c.Kind, c.Data,

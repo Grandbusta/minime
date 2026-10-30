@@ -42,7 +42,7 @@ Telegram for talking. Always write the name as **minime**, never "mini-me".
 | `decision`, `decision/questions` | What a decision is; loading and checking question sets. |
 | `ability` (`journal`, `reading`, `web`) | What they can do in their day besides writing. |
 | `library`, `search` | Books (Gutenberg), Wikipedia, the open web, with the safety rules. |
-| `render` (`pdf`, `midi`) | A work made into a file. Each kind is a `render.Format` (a `render.DataFormat` if it's made from data the work carries, like MIDI from a score); a new one is a type plus a line in main. |
+| `render` (`pdf`, `docx`, `table`, `calendar`, `midi`, `archive`; `markdown`) | A work made into a file. Each kind is a `render.Format` (a `render.DataFormat` if it's made from data the work carries, like MIDI from a score); a new one is a type plus a line in main. Formats that lay out words read them with `render/markdown`. |
 | `action` | Autonomy: every action is `auto`, `ask` or `forbid`. |
 | `self`, `config`, `setup` | The person's files, the config, and `minime new`. |
 | `console` | The private mind console (localhost unless a token is set). |
@@ -89,7 +89,8 @@ Every change is reviewed against these. They come from real reviews of this code
 
 **Use what exists.**
 - Prefer the standard library and the packages already in `go.mod` over writing your own
-  (godotenv, huh, go-readability, openai-go, go-telegram/bot, goldmark, gopdf, gomidi).
+  (godotenv, huh, go-readability, openai-go, go-telegram/bot, goldmark, gopdf, gomidi,
+  godocx, excelize, golang-ical).
   Write your own only when the library truly lacks it (MIDI has no note-name parser, so
   `midi.key` exists).
 - Before adding a test seam, look for the library's own option: tests reach a fake

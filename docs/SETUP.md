@@ -151,7 +151,7 @@ story.
 | `story` | Their life, one fact per line. They never contradict it; anything it doesn't cover they decide the first time it comes up, and remember. |
 | `personality` | How they are with people. It shapes every reply. |
 | `routine` | How their days usually go. It steers how they plan; they decide the rest. |
-| `makes` | What they make, in writing: `kind` (snake_case; their works are filed under it) and `about` (what it is and what a good one has). `data` (optional) is what each one carries beside its words so it can be made into a file: `score` for music, written note by note and sent as MIDI. Everyone can also write `notes` and short `writing`, and keeps a journal. |
+| `makes` | What they make, in writing: `kind` (snake_case; their works are filed under it) and `about` (what it is and what a good one has). `data` (optional) is what each one carries beside its words so it can be made into a file: `score` for music (sent as MIDI), `files` for code (a zip), `table` (a spreadsheet or CSV) or `events` (a calendar). Everyone can also write `notes`, short `writing`, a `table` and a `schedule` of dated events, and keeps a journal. |
 | `dreams` | Who they want to become. Copied into memory the first time; after that they may change them, asking you. |
 | `skills` | Where they start: `name`, `level` (1–10) and `shown_by` (the kinds of work that show it). After that their levels come from what they make and your feedback. |
 | `family` | Who they're born knowing: `name`, `relation`, `account` (`telegram:<user id>`, only if they talk to them) and `circle` (`family` by default, or `friend`, `school`, `work`, `community`). |

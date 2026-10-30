@@ -20,7 +20,7 @@ import (
 func (m *Mind) dataOf() map[string]render.DataFormat {
 	m.dataOnce.Do(func() {
 		m.dataFormats = map[string]render.DataFormat{}
-		for _, c := range m.Life.Makes {
+		for _, c := range m.Life.Crafts() {
 			if f, ok := m.Formats.Data(c.Data); ok && c.Data != "" {
 				m.dataFormats[c.Kind] = f
 			}
@@ -36,7 +36,7 @@ func (m *Mind) dataKinds() ([]render.DataFormat, map[string][]string) {
 	carriers := map[string][]string{}
 	for _, kind := range m.Formats.DataKinds() {
 		f, _ := m.Formats.Data(kind)
-		for _, c := range m.Life.Makes {
+		for _, c := range m.Life.Crafts() {
 			if m.dataOf()[c.Kind] == f {
 				carriers[kind] = append(carriers[kind], c.Kind)
 			}

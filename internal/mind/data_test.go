@@ -8,7 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Grandbusta/minime/internal/memory"
 	"github.com/Grandbusta/minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/render"
+	"github.com/Grandbusta/minime/internal/render/calendar"
+	"github.com/Grandbusta/minime/internal/render/pdf"
+	"github.com/Grandbusta/minime/internal/render/table"
 	"github.com/Grandbusta/minime/internal/self"
 )
 
@@ -103,5 +108,33 @@ func TestOldMusicIsScoredToBeSentAsMIDI(t *testing.T) {
 	m.handle(context.Background(), percept("2", "Send me those lyrics as MIDI"))
 	if len(filer.sent) != 1 || len(r.sent) != 1 {
 		t.Errorf("lyrics went as MIDI: files %d", len(filer.sent))
+	}
+}
+
+func TestATableIsPromisedAndSentAsASpreadsheet(t *testing.T) {
+	r, filer := &fakeReplier{}, &fakeFiler{}
+	s2 := &fakeSystem2{formats: map[string]string{"activity": `{"title":"Clinic leads","kind":"table","text":"Three clinics to call.",
+		"project_notes":"","project_done":false,"remember":[],"lessons":[],"ask_for_review":false,"review_question":"","stage_done":"",
+		"table":{"columns":["Clinic","Fee (NGN)"],"rows":[["Smile Dental","15000"],["Yaba Dental","12000"]]},
+		"events":{"events":[]}}`}}
+	m, s := promiseMind(r, s2)
+	m.Filer = filer
+	m.Formats = render.NewSet(pdf.Format{}, table.XLSX{}, table.CSV{}, calendar.Format{})
+	i := promised("Tobi sends Sam a list of clinics to call", "", "", now.Add(-time.Minute))
+	i.Args = map[string]string{"as": "xlsx"}
+	s.intentions = []memory.Intention{i}
+	m.tick(context.Background(), now)
+
+	req := s2.requests[0]
+	props := req.Format.Schema["properties"].(map[string]any)
+	if _, ok := props["table"]; !ok || props["events"] == nil || !strings.Contains(req.Note, "It goes to them as a spreadsheet") ||
+		!strings.Contains(req.Note, "make it a table and write its table in full") {
+		t.Errorf("making request:\n%s", req.Note)
+	}
+	if len(filer.sent) != 1 || filer.sent[0].name != "clinic-leads.xlsx" || !bytes.HasPrefix(filer.sent[0].data, []byte("PK")) || len(r.sent) != 0 {
+		t.Fatalf("files %d, messages %q", len(filer.sent), r.sent)
+	}
+	if w, _, _ := s.IntentionWork(context.Background(), i.ID); w.DataKind != "table" || !strings.Contains(string(w.Data), "Yaba Dental") {
+		t.Errorf("work kept %q: %s", w.DataKind, w.Data)
 	}
 }

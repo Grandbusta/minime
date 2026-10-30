@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -93,11 +94,12 @@ func (s *Set) Data(kind string) (DataFormat, bool) {
 	return nil, false
 }
 
-// DataKinds is the data its formats are made from, in the order NewSet was given.
+// DataKinds is the data its formats are made from, each once, in the order
+// NewSet was given.
 func (s *Set) DataKinds() []string {
 	var out []string
 	for _, f := range s.All() {
-		if _, ok := f.(DataFormat); ok {
+		if _, ok := f.(DataFormat); ok && !slices.Contains(out, f.Needs()) {
 			out = append(out, f.Needs())
 		}
 	}

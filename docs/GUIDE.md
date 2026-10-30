@@ -29,11 +29,19 @@ em dashes.
   "make it funny"), and send it on time with a few words of their own. They promise only
   what they can do in writing, at most three open promises per person, and nothing to
   strangers. A promise not kept within 24 hours is missed.
-- **PDFs:** ask for something they already made as a PDF ("send me that outreach as a
+- **Files:** ask for something they already made as a file ("send me that outreach as a
   PDF") and it comes right away, with their reply as its caption. Something new ("a plan
-  I can print, tonight") is promised like anything else and sent as a PDF at its time.
-  Headings, lists and tables are laid out on A4. Every work in the console also has a
-  **pdf ↓** link.
+  I can print, tonight") is promised like anything else and sent as that file at its
+  time. Every work in the console has a download link for each file it can be.
+
+  | File | Made from | Ask for |
+  |---|---|---|
+  | PDF | the words, laid out on A4 | anything to print or pass on |
+  | Word (.docx) | the words, in Word's styles | a document you'll edit |
+  | Spreadsheet (.xlsx) and CSV | a table (the built-in `table` kind) | a list, a comparison, a budget |
+  | Calendar (.ics) | dated events (the built-in `schedule` kind) | a plan to add to your calendar; times are local |
+  | MIDI (.mid) | a score (music with `data: score`) | a beat to open in GarageBand |
+  | Zip | files (a kind with `data: files`, like Tomás's code) | code to unzip and run |
 - **MIDI:** music (a craft with `data: score`, like Daniel's beats) is written out note by
   note as well as in words. Ask for a beat as MIDI and it comes as a `.mid` that opens in
   GarageBand or any DAW; a beat they ask you to review comes with its `.mid`; and the

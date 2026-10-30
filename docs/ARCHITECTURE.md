@@ -296,12 +296,13 @@ are in [internal/search](../internal/search):
 A work can be sent, promised or downloaded as a file. Each kind of file is a
 `render.Format` ([internal/render](../internal/render)): its name, extension and media
 type, how the person knows it and how to write for it, and `Render`. main builds the
-`render.Set` (now PDF and MIDI); the mind's prompts, promises, replies, review requests
+`render.Set` (PDF, Word, a spreadsheet, CSV, a calendar, MIDI and zip); the mind's prompts, promises, replies, review requests
 and the console's download links offer whatever the set holds.
 
 A format made from data a work carries beside its words is a `render.DataFormat`, which
 defines that data: its schema, how to write it, and how it's cleaned. MIDI is made from a
-`score`. A craft names the data its works carry (`data: score` in life.yaml); each work of
+`score`, a spreadsheet and a CSV from a `table`, a calendar from `events`, a zip from
+`files`. A craft names the data its works carry (`data: score` in life.yaml); each work of
 that kind then writes it with its words, kept in `works.data` with its `data_kind`.
 
 Adding a format:
@@ -527,7 +528,8 @@ internal/
     approvals.go         the gate's requests to the owner
     judgment.go calls.go the owner's judgment, and calls
   ability/               abilities: journal/, reading/, web/
-  render/                file formats: pdf/, midi/
+  render/                file formats: pdf/, docx/, table/ (xlsx, csv), calendar/ (ics), midi/,
+                         archive/ (zip); markdown/ reads words for PDF and Word
   library/               Gutenberg and Wikipedia
   search/                web search and the fetcher
   action/                action classes and the autonomy policy

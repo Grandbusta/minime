@@ -42,6 +42,8 @@ type Craft struct {
 var BuiltIn = []Craft{
 	{Kind: "notes", About: "notes on something you're learning or thinking through"},
 	{Kind: "writing", About: "a short piece of writing of any other kind"},
+	{Kind: "table", About: "a table in rows and columns: a list, a comparison, a budget", Data: "table"},
+	{Kind: "schedule", About: "a plan of dated events, to put in a calendar", Data: "events"},
 }
 
 // Reserved are kinds an ability sets itself (the journal, reading notes).
@@ -59,7 +61,7 @@ func (c Craft) Carries(kind string) bool {
 // Carrying is the kinds of work it makes that carry data of kind.
 func (l Life) Carrying(kind string) []string {
 	var kinds []string
-	for _, c := range l.Makes {
+	for _, c := range l.Crafts() {
 		if c.Carries(kind) {
 			kinds = append(kinds, c.Kind)
 		}
