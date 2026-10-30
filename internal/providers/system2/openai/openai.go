@@ -40,7 +40,7 @@ func New(apiKey, model, baseURL string, price pricing.Price, effort string) *Cli
 // replyWithFacts is the Structured Outputs schema used with CollectFacts:
 // strict mode guarantees the output matches it.
 var replyWithFacts = map[string]any{
-	"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises", "permissions", "corrections", "misread", "feedback", "lessons", "tastes", "goals", "send"},
+	"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises", "permissions", "corrections", "misread", "feedback", "lessons", "tastes", "goals", "send", "moves"},
 	"properties": map[string]any{
 		"reply":        map[string]any{"type": "string"},
 		"who_they_are": map[string]any{"type": "string"},
@@ -67,6 +67,13 @@ var replyWithFacts = map[string]any{
 			},
 		}},
 		"misread": map[string]any{"type": "string"},
+		"moves": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"promise", "by"},
+			"properties": map[string]any{
+				"promise": map[string]any{"type": "string", "description": "the ref of a promise in the note, e.g. p1"},
+				"by":      map[string]any{"type": "string", "description": "the new local time, YYYY-MM-DDTHH:MM, or now"},
+			},
+		}},
 		"send": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"work", "as"},
 			"properties": map[string]any{
 				"work": map[string]any{"type": "string", "description": "the ref of a work you made, e.g. w2, or empty"},
@@ -220,6 +227,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		fixes      []system2.Correction
 		misread    string
 		send       system2.Send
+		moves      []system2.Move
 		feedback   []system2.Feedback
 		lessons    []system2.LessonLearned
 		tastes     []system2.Taste
@@ -258,7 +266,11 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 				Text   string `json:"text"`
 			} `json:"corrections"`
 			Misread string `json:"misread"`
-			Send    struct {
+			Moves   []struct {
+				Promise string `json:"promise"`
+				By      string `json:"by"`
+			} `json:"moves"`
+			Send struct {
 				Work string `json:"work"`
 				As   string `json:"as"`
 			} `json:"send"`
@@ -314,6 +326,11 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 			}
 		}
 		misread = strings.TrimSpace(out.Misread)
+		for _, mv := range out.Moves {
+			if ref, by := strings.Trim(strings.TrimSpace(mv.Promise), "[]"), strings.ToLower(strings.TrimSpace(mv.By)); ref != "" && by != "" {
+				moves = append(moves, system2.Move{Promise: ref, By: by})
+			}
+		}
 		if work := strings.Trim(strings.TrimSpace(out.Send.Work), "[]"); work != "" {
 			send = system2.Send{Work: work, As: strings.ToLower(strings.TrimSpace(out.Send.As))}
 		}
@@ -370,6 +387,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		Tastes:      tastes,
 		Goals:       goals,
 		Send:        send,
+		Moves:       moves,
 		Usage: system2.Usage{InputTokens: int(u.InputTokens), OutputTokens: int(u.OutputTokens),
 			ReasoningTokens: int(u.OutputTokensDetails.ReasoningTokens)},
 		CostUSD: c.price.Cost(pricing.Usage{

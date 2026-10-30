@@ -28,7 +28,9 @@ em dashes.
   they promise a time, make it up to 30 minutes ahead (with anything you added since, like
   "make it funny"), and send it on time with a few words of their own. They promise only
   what they can do in writing, at most three open promises per person, and nothing to
-  strangers. A promise not kept within 24 hours is missed.
+  strangers. A promise not kept within 24 hours is missed. Ask for something they promised
+  sooner or later ("can you send it now?") and they move it; "now" arrives within a
+  couple of minutes.
 - **Files:** ask for something they already made as a file ("send me that outreach as a
   PDF") and it comes right away, with their reply as its caption. Something new ("a plan
   I can print, tonight") is promised like anything else and sent as that file at its

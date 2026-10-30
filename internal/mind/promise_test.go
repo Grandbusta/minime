@@ -170,3 +170,29 @@ func TestPromisesAreMadeAheadAndSentOnTime(t *testing.T) {
 		t.Errorf("works = %d, want each made once", len(s.works))
 	}
 }
+
+func TestAPromiseCanBeMovedToNow(t *testing.T) {
+	r := &fakeReplier{}
+	s2 := &fakeSystem2{formats: map[string]string{"activity": verseJSON}}
+	m, s := promiseMind(r, s2)
+	later := promised("Tobi writes Sam a verse about Sunday mornings", "", "", now.Add(20*time.Hour))
+	other := promised("Tobi writes Sam a poem", "", "", now.Add(30*time.Hour))
+	s.intentions = []memory.Intention{later, other}
+
+	s2.moves = []system2.Move{{Promise: "p1", By: "now"}, {Promise: "p2", By: "2026-10-27T09:00"}, {Promise: "p9", By: "now"}}
+	m.handle(context.Background(), percept("1", "Can you send the verse now? And the poem this morning"))
+	if note := s2.requests[0].Note; !strings.Contains(note, "[p1] by Wed 28 Oct 10:16: Tobi writes Sam a verse") {
+		t.Errorf("note:\n%s", note)
+	}
+	if got := s.intention(later.ID); !got.DueAt.Equal(now) {
+		t.Errorf("verse due %v, want now", got.DueAt)
+	}
+	if got := s.intention(other.ID); !got.DueAt.Equal(now) {
+		t.Errorf("a time already past isn't now: %v", got.DueAt)
+	}
+
+	m.tick(context.Background(), now.Add(time.Minute))
+	if len(r.sent) < 2 || !strings.Contains(r.sent[len(r.sent)-1]+r.sent[len(r.sent)-2], "Bells over Yaba") {
+		t.Errorf("not sent on the next tick: %q", r.sent)
+	}
+}

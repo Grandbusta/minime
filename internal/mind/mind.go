@@ -633,11 +633,12 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	if canPromise(p, person) {
 		works, workRefs, embedCost = m.worksNote(ctx, p.Speaker, talkAbout(recent, p.Text))
 	}
+	promises, promised := m.promisesNote(ctx, p, person, n)
 
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.instructions(ctx, person, n),
 		History:      turns(recent),
-		Note: m.now(p.At) + "\n\n" + note + works + m.promisesNote(ctx, p, person, n) + m.permissionsNote(p) +
+		Note: m.now(p.At) + "\n\n" + note + works + promises + m.permissionsNote(p) +
 			nameNote(recent, n.speaker),
 		Message:      p.Text,
 		CollectFacts: true,
@@ -668,6 +669,7 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	d.CostUSD += m.learnRelation(ctx, p, person, resp.WhoTheyAre)
 	m.saveReminders(ctx, p, resp.Reminders)
 	m.savePromises(ctx, p, person, resp.Promises, workRefs)
+	m.movePromises(ctx, p, resp.Moves, promised)
 	var more []*decision.Decision
 	more = append(more, m.correctFacts(ctx, p, d, refs, resp.Corrections, n)...)
 	more = append(more, m.changePermissions(ctx, p, d, resp.Permissions)...)
@@ -684,14 +686,15 @@ func canPromise(p perception.Percept, person memory.Person) bool {
 	return p.Speaker != "" && person.Circle != memory.CircleStranger
 }
 
-func (m *Mind) promisesNote(ctx context.Context, p perception.Percept, person memory.Person, n names) string {
+// promisesNote also returns the open promises it lists, by their ref ("p1").
+func (m *Mind) promisesNote(ctx context.Context, p perception.Percept, person memory.Person, n names) (string, map[string]memory.Intention) {
 	if !canPromise(p, person) {
-		return fmt.Sprintf("\n\nYou don't know %s well yet: don't promise to make them anything; leave promises empty.", n.speaker)
+		return fmt.Sprintf("\n\nYou don't know %s well yet: don't promise to make them anything; leave promises empty.", n.speaker), nil
 	}
 	var gate string
 	switch m.policy().Check(action.Commit, p.Speaker) {
 	case action.Forbid:
-		return fmt.Sprintf("\n\nYou can't promise to make %s anything; leave promises empty.", n.speaker)
+		return fmt.Sprintf("\n\nYou can't promise to make %s anything; leave promises empty.", n.speaker), nil
 	case action.Ask:
 		owner := orDefault(m.person(ctx, m.policy().Owner).Name, "someone")
 		gate = fmt.Sprintf("\n\nBefore you promise to make anything for %s, you check with %s. If %s asks and you'd like to, "+
@@ -699,15 +702,48 @@ func (m *Mind) promisesNote(ctx context.Context, p perception.Percept, person me
 	}
 	open, err := m.Store.OpenIntentions(ctx, p.Speaker, memory.IntentionTask)
 	if err != nil || len(open) == 0 {
-		return gate
+		return gate, nil
 	}
+	refs := map[string]memory.Intention{}
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n\nWhat you've promised %s and not sent yet (at most %d at a time). If they add to one, just say you'll work it in; "+
-		"don't make it now:", n.speaker, maxOpenPromises)
-	for _, i := range open {
-		fmt.Fprintf(&b, "\n- by %s: %s", i.DueAt.In(m.Zone).Format("Mon 2 Jan 15:04"), i.Text)
+	fmt.Fprintf(&b, "\n\nWhat you've promised %s and not sent yet, each with a ref (at most %d at a time). If they add to one, just "+
+		"say you'll work it in; don't make it now:", n.speaker, maxOpenPromises)
+	for k, i := range open {
+		ref := fmt.Sprintf("p%d", k+1)
+		refs[ref] = i
+		fmt.Fprintf(&b, "\n- [%s] by %s: %s", ref, i.DueAt.In(m.Zone).Format("Mon 2 Jan 15:04"), i.Text)
 	}
-	return gate + b.String()
+	return gate + b.String(), refs
+}
+
+// movePromises sets the new time of promises it already made, by their ref
+// in the note: "now", or a local time (one already past is now). The next
+// tick makes and sends what is due.
+func (m *Mind) movePromises(ctx context.Context, p perception.Percept, moves []system2.Move, promised map[string]memory.Intention) {
+	for _, mv := range moves {
+		log := m.Log.With("percept", p.ID.String(), "promise", mv.Promise, "by", mv.By)
+		i, ok := promised[mv.Promise]
+		if !ok {
+			log.Warn("asked to move a promise it hasn't made; left alone")
+			continue
+		}
+		due := p.At
+		if mv.By != "now" {
+			t, err := time.ParseInLocation("2006-01-02T15:04", mv.By, m.Zone)
+			if err != nil {
+				log.Warn("a promise's new time can't be read; left alone", "err", err)
+				continue
+			}
+			if t.After(p.At) {
+				due = t
+			}
+		}
+		if err := m.Store.PostponeIntention(ctx, i.ID, due.UTC()); err != nil {
+			log.Error("moving a promise failed", "err", err)
+			continue
+		}
+		log.Info("moved a promise", "what", i.Text, "from", i.DueAt.In(m.Zone).Format(time.RFC3339), "to", due.In(m.Zone).Format(time.RFC3339))
+	}
 }
 
 // savePromises drops a promise in the past, with a bad time, past

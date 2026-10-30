@@ -54,6 +54,12 @@ type Promise struct {
 	Work    string // the ref in the note of a work it already made that this sends, e.g. "w2"; "" to make one
 }
 
+// Move is a new time for a promise it already made.
+type Move struct {
+	Promise string // its ref in the note, e.g. "p1"
+	By      string // local time, "2006-01-02T15:04", or "now"
+}
+
 // Send is a work it already made, sent with the reply as a file.
 type Send struct {
 	Work string // its ref in the note, e.g. "w2"; "" for none
@@ -132,6 +138,7 @@ type Response struct {
 	Tastes   []Taste
 	Goals    []GoalTaken
 	Send     Send
+	Moves    []Move
 	Usage    Usage
 	CostUSD  float64 // 0 when no price is configured
 }
