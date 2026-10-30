@@ -1,7 +1,9 @@
 package console
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -21,6 +23,7 @@ import (
 // fakeStore implements what the tests reach; anything else panics through the nil Store.
 type fakeStore struct {
 	Store
+	score      json.RawMessage // the work's
 	mu         sync.Mutex
 	log        []store.LogEntry
 	labels     []memory.Label
@@ -52,7 +55,7 @@ func (f *fakeStore) SaveLabel(_ context.Context, l memory.Label) error {
 	return nil
 }
 func (f *fakeStore) Work(context.Context, ulid.ULID) (memory.Work, bool, error) {
-	return memory.Work{ID: ulid.Make(), Kind: "lyrics", Title: "Verse", Text: "Rain on the roof"}, true, nil
+	return memory.Work{ID: ulid.Make(), Kind: "lyrics", Title: "Verse", Text: "Rain on the roof", Score: f.score}, true, nil
 }
 
 func (f *fakeStore) ReviewPrinciple(_ context.Context, id ulid.ULID, status, text string, _ time.Time) (bool, error) {
@@ -338,5 +341,29 @@ func TestTastes(t *testing.T) {
 	}
 	if code := post(t, srv.URL+"/api/tastes/retire", retire); code != http.StatusNotFound {
 		t.Errorf("retire again = %d", code)
+	}
+}
+
+func TestWorkFiles(t *testing.T) {
+	srv, st := newServer(t, "")
+	get := func(path string) (*http.Response, []byte) {
+		resp, err := http.Get(srv.URL + "/api/works/" + ulid.Make().String() + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return resp, body
+	}
+	if resp, body := get("/pdf"); resp.StatusCode != 200 || !bytes.HasPrefix(body, []byte("%PDF-")) ||
+		!strings.Contains(resp.Header.Get("Content-Disposition"), "verse.pdf") {
+		t.Errorf("pdf: %d %s", resp.StatusCode, resp.Header)
+	}
+	if resp, _ := get("/midi"); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("midi without a score: %d", resp.StatusCode)
+	}
+	st.score = json.RawMessage(`{"bpm":82,"beats_per_bar":4,"bars":1,"tracks":[{"name":"d","instrument":"drums","notes":[{"pitch":"kick","bar":1,"beat":1,"length":1,"velocity":100}]}]}`)
+	if resp, body := get("/midi"); resp.StatusCode != 200 || !bytes.HasPrefix(body, []byte("MThd")) || resp.Header.Get("Content-Type") != "audio/midi" {
+		t.Errorf("midi: %d %s", resp.StatusCode, resp.Header)
 	}
 }

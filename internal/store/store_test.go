@@ -879,3 +879,32 @@ func TestWorksFor(t *testing.T) {
 		t.Errorf("made for: %q, %q, %q", ws[0].MadeFor, ws[1].MadeFor, ws[2].MadeFor)
 	}
 }
+
+func TestWorkScores(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	beat := memory.Work{ID: ulid.Make(), Kind: "beat_idea", Title: "beat", Text: "x", CreatedAt: at, Score: json.RawMessage(`{"bpm": 82}`)}
+	old := memory.Work{ID: ulid.Make(), Kind: "beat_idea", Title: "old", Text: "x", CreatedAt: at}
+	for _, w := range []memory.Work{beat, old} {
+		if err := s.SaveWork(ctx, w); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if w, _, err := s.Work(ctx, beat.ID); err != nil || string(w.Score) != `{"bpm": 82}` {
+		t.Errorf("score = %s, %v", w.Score, err)
+	}
+	if w, _, _ := s.Work(ctx, old.ID); w.Score != nil {
+		t.Errorf("no score = %s", w.Score)
+	}
+	if ws, err := s.UnscoredWorks(ctx, []string{"beat_idea"}, 50); err != nil || !slices.ContainsFunc(ws, func(w memory.Work) bool { return w.ID == old.ID }) ||
+		slices.ContainsFunc(ws, func(w memory.Work) bool { return w.ID == beat.ID }) {
+		t.Errorf("unscored = %d works, %v", len(ws), err)
+	}
+	if err := s.SetWorkScore(ctx, old.ID, json.RawMessage(`{"bpm":90}`)); err != nil {
+		t.Fatal(err)
+	}
+	if w, _, _ := s.Work(ctx, old.ID); string(w.Score) != `{"bpm": 90}` {
+		t.Errorf("set score = %s", w.Score)
+	}
+}

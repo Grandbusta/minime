@@ -26,7 +26,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Grandbusta/minime/internal/memory"
-	"github.com/Grandbusta/minime/internal/render/pdf"
+	"github.com/Grandbusta/minime/internal/render"
 	"github.com/Grandbusta/minime/internal/store"
 )
 
@@ -106,7 +106,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/day", s.day)
 	mux.HandleFunc("GET /api/works", s.works)
 	mux.HandleFunc("GET /api/works/{id}", s.work)
-	mux.HandleFunc("GET /api/works/{id}/pdf", s.workPDF)
+	mux.HandleFunc("GET /api/works/{id}/pdf", s.workFile(render.PDF))
+	mux.HandleFunc("GET /api/works/{id}/midi", s.workFile(render.MIDI))
 	mux.HandleFunc("GET /api/conversation", s.conversation)
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/approvals", s.approvals)
@@ -399,27 +400,33 @@ func (s *Server) work(w http.ResponseWriter, r *http.Request) {
 	s.json(w, workViews([]memory.Work{work}, true)[0])
 }
 
-func (s *Server) workPDF(w http.ResponseWriter, r *http.Request) {
-	id, err := ulid.Parse(r.PathValue("id"))
-	if err != nil {
-		http.Error(w, "bad id", http.StatusBadRequest)
-		return
+func (s *Server) workFile(format string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := ulid.Parse(r.PathValue("id"))
+		if err != nil {
+			http.Error(w, "bad id", http.StatusBadRequest)
+			return
+		}
+		work, ok, err := s.Store.Work(r.Context(), id)
+		if s.failed(w, err) {
+			return
+		}
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		f, err := render.Work(format, work, s.Info.Name)
+		if errors.Is(err, render.ErrNoScore) {
+			http.NotFound(w, r)
+			return
+		}
+		if s.failed(w, err) {
+			return
+		}
+		w.Header().Set("Content-Type", f.Type)
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": f.Name}))
+		w.Write(f.Data)
 	}
-	work, ok, err := s.Store.Work(r.Context(), id)
-	if s.failed(w, err) {
-		return
-	}
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	data, err := pdf.Render(pdf.Doc{Title: work.Title, Author: s.Info.Name, Text: work.Text, At: work.CreatedAt})
-	if s.failed(w, err) {
-		return
-	}
-	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": pdf.FileName(work.Title)}))
-	w.Write(data)
 }
 
 // conversation is the thread with a person, or with no person, everyone's
@@ -951,7 +958,7 @@ func workViews(ws []memory.Work, withText bool) []map[string]any {
 	out := make([]map[string]any, len(ws))
 	for i, w := range ws {
 		v := map[string]any{"id": w.ID.String(), "kind": w.Kind, "title": w.Title, "created_at": w.CreatedAt,
-			"words": wordCount(w.Text), "public": w.Public, "public_by": w.PublicBy}
+			"words": wordCount(w.Text), "public": w.Public, "public_by": w.PublicBy, "has_score": len(w.Score) > 0}
 		if !w.ProjectID.IsZero() {
 			v["project_id"] = w.ProjectID.String()
 		}

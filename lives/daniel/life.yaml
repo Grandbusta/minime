@@ -42,7 +42,7 @@ routine:
 # what it is and what a good one has.
 makes:
   - {kind: lyrics, about: "song lyrics: verses, a hook, the structure of the song"}
-  - {kind: beat_idea, about: "a beat described precisely: tempo, key, drums, bass, the melody and how it builds"}
+  - {kind: beat_idea, about: "a beat described precisely: tempo, key, drums, bass, the melody and how it builds", score: true}
 
 # Who Daniel wants to become. He may add, reword or drop one in his Sunday
 # review, asking {owner} first.

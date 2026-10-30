@@ -36,6 +36,7 @@ type Day struct {
 	ReviewAt       time.Duration // from midnight in its time zone
 	ReviewPrompt   Prompt        // zero: no review
 	LearnPrompt    Prompt        // zero: no learning plans
+	ScorePrompt    Prompt        // zero: music made before scores can't be sent as MIDI
 }
 
 const (
@@ -353,12 +354,15 @@ func (m *Mind) intend(ctx context.Context, i memory.Intention, now time.Time) bo
 
 // activityFormat is what an activity makes: kind is one of the things it
 // makes (its crafts); an ability may file the work under a kind of its own.
+// It asks for a score too if any craft is music.
 func activityFormat(crafts []self.Craft) *system2.Format {
 	kinds := make([]string, len(crafts))
+	music := false
 	for i, c := range crafts {
 		kinds[i] = c.Kind
+		music = music || c.Score
 	}
-	return &system2.Format{Name: "activity", Schema: map[string]any{
+	f := &system2.Format{Name: "activity", Schema: map[string]any{
 		"type": "object", "additionalProperties": false,
 		"required": []string{"title", "kind", "text", "project_notes", "project_done", "remember", "lessons", "ask_for_review", "review_question",
 			"stage_done"},
@@ -376,6 +380,11 @@ func activityFormat(crafts []self.Craft) *system2.Format {
 				"description": "the id of the learning plan whose current stage what you made meets the done when of; empty if none"},
 		},
 	}}
+	if music {
+		f.Schema["required"] = append(f.Schema["required"].([]string), "score")
+		f.Schema["properties"].(map[string]any)["score"] = scoreSchema()
+	}
+	return f
 }
 
 // doActivity does one thing of its own day, unless it is busy talking with
@@ -422,6 +431,7 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	d.Tier, d.SetID, d.Action = decision.TierSystem2, m.Day.ActivityPrompt.Ref, action
 
 	note, project, ok := m.activityNote(ctx, i, what, now)
+	note += m.scoreHelp()
 	plans := ""
 	if action == "activity" { // its own practice, not what it makes for someone
 		plans = m.stagesNote(ctx)
@@ -470,16 +480,17 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	}
 	d.Provider, d.CostUSD = resp.Provider, resp.CostUSD
 	var out struct {
-		Title          string   `json:"title"`
-		Kind           string   `json:"kind"`
-		Text           string   `json:"text"`
-		ProjectNotes   string   `json:"project_notes"`
-		ProjectDone    bool     `json:"project_done"`
-		Remember       []string `json:"remember"`
-		Lessons        []string `json:"lessons"`
-		AskForReview   bool     `json:"ask_for_review"`
-		ReviewQuestion string   `json:"review_question"`
-		StageDone      string   `json:"stage_done"`
+		Title          string          `json:"title"`
+		Kind           string          `json:"kind"`
+		Text           string          `json:"text"`
+		ProjectNotes   string          `json:"project_notes"`
+		ProjectDone    bool            `json:"project_done"`
+		Remember       []string        `json:"remember"`
+		Lessons        []string        `json:"lessons"`
+		AskForReview   bool            `json:"ask_for_review"`
+		ReviewQuestion string          `json:"review_question"`
+		StageDone      string          `json:"stage_done"`
+		Score          json.RawMessage `json:"score"`
 	}
 	if err := json.Unmarshal([]byte(resp.Text), &out); err != nil || strings.TrimSpace(out.Text) == "" {
 		m.finish(ctx, i, memory.IntentionMissed, "nothing came of it", now)
@@ -490,6 +501,7 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	title := orDefault(out.Title, i.Text)
 	w := memory.Work{ID: ulid.Make(), IntentionID: i.ID, ProjectID: i.ProjectID, Kind: orDefault(material.WorkKind, orDefault(out.Kind, "writing")),
 		Title: title, Text: strings.TrimSpace(out.Text), CreatedAt: now.UTC()}
+	w.Score = m.keptScore(w.Kind, out.Score)
 	if project != nil {
 		w.ProjectID = project.ID // a book it just started has a new project
 	}

@@ -13,6 +13,7 @@ require (
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/signintech/gopdf v0.38.3
 	github.com/yuin/goldmark v1.8.7
+	gitlab.com/gomidi/midi/v2 v2.3.24
 	golang.org/x/image v0.47.0
 	golang.org/x/sync v0.24.0
 	gopkg.in/yaml.v3 v3.0.1

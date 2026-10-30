@@ -541,7 +541,8 @@ func (s *Store) SourceText(ctx context.Context, id ulid.ULID) (string, error) {
 	return text, nil
 }
 
-const workColumns = `id, intention_id, project_id, kind, title, text, created_at, public, coalesce(public_by, '')`
+const workColumns = `id, intention_id, project_id, kind, title, text, created_at, public, coalesce(public_by, ''),
+	coalesce(score::text, '')`
 
 // shareableWork is the condition for a work (aliased w) that may ever be
 // public: not its journal, and made for itself, not for someone (a promise).
@@ -550,9 +551,9 @@ const shareableWork = `w.kind NOT IN ('journal', 'review') AND (w.intention_id I
 
 func (s *Store) SaveWork(ctx context.Context, w memory.Work) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO works (id, intention_id, project_id, kind, title, text, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		w.ID.String(), nullULID(w.IntentionID), nullULID(w.ProjectID), w.Kind, w.Title, w.Text, w.CreatedAt)
+		INSERT INTO works (id, intention_id, project_id, kind, title, text, created_at, score)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		w.ID.String(), nullULID(w.IntentionID), nullULID(w.ProjectID), w.Kind, w.Title, w.Text, w.CreatedAt, nullScore(w.Score))
 	if err != nil {
 		return fmt.Errorf("save work: %w", err)
 	}
@@ -646,6 +647,26 @@ func (s *Store) WorksFor(ctx context.Context, person string, limit int) ([]memor
 		ORDER BY w.created_at DESC, w.id DESC LIMIT $3`, memory.SubjectSelf, person, limit)
 }
 
+func (s *Store) SetWorkScore(ctx context.Context, id ulid.ULID, score json.RawMessage) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE works SET score = $2 WHERE id = $1`, id.String(), nullScore(score)); err != nil {
+		return fmt.Errorf("set work score: %w", err)
+	}
+	return nil
+}
+
+// UnscoredWorks returns up to limit works of kinds with no score, newest first.
+func (s *Store) UnscoredWorks(ctx context.Context, kinds []string, limit int) ([]memory.Work, error) {
+	return s.queryWorks(ctx, `SELECT `+workColumns+` FROM works WHERE score IS NULL AND kind = ANY($1)
+		ORDER BY created_at DESC, id DESC LIMIT $2`, kinds, limit)
+}
+
+func nullScore(score json.RawMessage) any {
+	if len(score) == 0 {
+		return nil
+	}
+	return string(score)
+}
+
 func (s *Store) SaveWorkEmbedding(ctx context.Context, id ulid.ULID, v []float32, model string) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE works SET embedding = $2, embedded_with = $3 WHERE id = $1`, id.String(), v, model); err != nil {
 		return fmt.Errorf("save work embedding: %w", err)
@@ -672,12 +693,16 @@ func (s *Store) queryWorksWith(ctx context.Context, embedded bool, sql string, a
 			id                     string
 			intentionID, projectID *string
 		)
-		dest := []any{&id, &intentionID, &projectID, &w.Kind, &w.Title, &w.Text, &w.CreatedAt, &w.Public, &w.PublicBy}
+		var score string
+		dest := []any{&id, &intentionID, &projectID, &w.Kind, &w.Title, &w.Text, &w.CreatedAt, &w.Public, &w.PublicBy, &score}
 		if embedded {
 			dest = append(dest, &w.Embedding, &w.EmbeddedWith, &w.MadeFor)
 		}
 		if err := rows.Scan(dest...); err != nil {
 			return nil, err
+		}
+		if score != "" {
+			w.Score = json.RawMessage(score)
 		}
 		if w.ID, err = ulid.Parse(id); err != nil {
 			return nil, err

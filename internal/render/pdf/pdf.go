@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/signintech/gopdf"
 	"github.com/yuin/goldmark"
@@ -354,28 +353,4 @@ func (w *writer) clean(s string, f font) string {
 		}
 	}
 	return b.String()
-}
-
-// FileName is title as a file name, like "clinic-outreach-plan.pdf".
-func FileName(title string) string {
-	var b strings.Builder
-	dash := false
-	for _, r := range strings.ToLower(title) {
-		if b.Len() >= 60 {
-			break
-		}
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
-			dash = true
-			continue
-		}
-		if dash && b.Len() > 0 {
-			b.WriteByte('-')
-		}
-		b.WriteRune(r)
-		dash = false
-	}
-	if b.Len() == 0 {
-		return "work.pdf"
-	}
-	return b.String() + ".pdf"
 }

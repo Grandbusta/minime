@@ -462,7 +462,7 @@ func newDay(cfg *config.Config) (mind.Day, error) {
 		to   *mind.Prompt
 		path string
 	}{{&day.PlanPrompt, dl.PlanPrompt}, {&day.ActivityPrompt, dl.ActivityPrompt}, {&day.ReviewPrompt, dl.ReviewPrompt},
-		{&day.LearnPrompt, dl.LearnPrompt}} {
+		{&day.LearnPrompt, dl.LearnPrompt}, {&day.ScorePrompt, dl.ScorePrompt}} {
 		if *p.to, err = loadPrompt(p.path); err != nil {
 			return day, err
 		}

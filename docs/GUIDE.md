@@ -34,6 +34,11 @@ em dashes.
   I can print, tonight") is promised like anything else and sent as a PDF at its time.
   Headings, lists and tables are laid out on A4. Every work in the console also has a
   **pdf ↓** link.
+- **MIDI:** music (a craft with `score: true`, like Daniel's beats) is written out note by
+  note as well as in words. Ask for a beat as MIDI and it comes as a `.mid` that opens in
+  GarageBand or any DAW; a beat they ask you to review comes with its `.mid`; and the
+  console has a **midi ↓** link. Beats made before this are scored from their words in
+  the background, one a minute; until one is, it goes as words only.
 - **Their own work:** they see what they've made lately, and the piece you mean in full,
   so they talk about it as it is and never make up its details.
 - **Check-ins:** at the `check_ins` times (11:00 and 18:00), they may ask about something

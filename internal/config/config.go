@@ -119,6 +119,7 @@ type DailyLife struct {
 	ActivityPrompt string  `yaml:"activity_prompt"`
 	ReviewPrompt   string  `yaml:"review_prompt"`
 	LearnPrompt    string  `yaml:"learn_prompt"`
+	ScorePrompt    string  `yaml:"score_prompt"`
 	Web            Web     `yaml:"web"`
 }
 
@@ -275,7 +276,8 @@ func Load(path string) (*Config, error) {
 		DailyLife: DailyLife{Enabled: true, Pace: 1, PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
 			PlanPrompt: "prompts/plan.md", ActivityPrompt: "prompts/activity.md",
 			ReviewAt: "Sun 20:00", ReviewPrompt: "prompts/review.md", LearnPrompt: "prompts/learn.md",
-			Web: Web{Searches: 10, Pages: 15}},
+			ScorePrompt: "prompts/score.md",
+			Web:         Web{Searches: 10, Pages: 15}},
 		Search:   Search{Provider: "openai"},
 		Autonomy: Autonomy{AskExpires: 24 * time.Hour},
 		Judgment: Judgment{Calls: true, AsksPerDay: 3, ReplyWindow: 30 * time.Minute},

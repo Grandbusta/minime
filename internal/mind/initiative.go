@@ -13,6 +13,7 @@ import (
 	"github.com/Grandbusta/minime/internal/memory"
 	"github.com/Grandbusta/minime/internal/perception"
 	"github.com/Grandbusta/minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/render"
 )
 
 // Initiative: the agent speaks first, the way a person does: reminders,
@@ -58,6 +59,7 @@ func (m *Mind) tick(ctx context.Context, now time.Time) {
 	m.doDueIntentions(ctx, now, true)
 	m.preparePromises(ctx, now)
 	m.weeklyReview(ctx, now)
+	m.scoreOldMusic(ctx)
 	if m.toPlan.Swap(false) { // a goal taken on in a chat: its learning plan, now the reply is sent
 		m.EnsurePlans(ctx, now)
 	}
@@ -152,7 +154,7 @@ func (m *Mind) keepPromise(ctx context.Context, i memory.Intention, now time.Tim
 	}
 	if f != nil {
 		s.attachment, s.file = "", f
-		goes = "it goes with your message as a PDF, " + f.name
+		goes = "it goes with your message as a file, " + f.Name
 	}
 	s.note = fmt.Sprintf("You are messaging %s first: on %s you promised to make this for them: %s. You made it; this is "+
 		"it, and %s:\n\n%s\n\nWrite only the one or two short sentences "+
@@ -208,7 +210,7 @@ func (m *Mind) makePromise(ctx context.Context, i memory.Intention, conv memory.
 		works += "\n\nIf what you promised is something you already made (above), send that: keep it as it is, only " +
 			"laid out for how it goes, and don't write a new one. Either way, add nothing about yourself or your work that isn't true."
 	}
-	return m.makeWork(ctx, i, "task", what+fileNote(i)+works+talk, now)
+	return m.makeWork(ctx, i, "task", what+m.fileNote(i)+works+talk, now)
 }
 
 func (m *Mind) promiseTalk(ctx context.Context, conv memory.Conversation, i memory.Intention, who string) string {
@@ -338,7 +340,7 @@ type speech struct {
 	action     string
 	note       string
 	attachment string              // sent after what System 2 wrote, e.g. what it promised; "" if none
-	file       *file               // sent with what System 2 wrote, as its caption; nil if none
+	file       *render.File        // sent with what System 2 wrote, as its caption; nil if none
 	trim       func(string) string // shortens what System 2 wrote; nil: kept as is
 	ref        ulid.ULID
 	approved   bool // the owner already approved it: a follow-up to an approval
@@ -405,7 +407,7 @@ func (m *Mind) speakFirst(ctx context.Context, p perception.Percept, person memo
 		}
 		text := d.Reply
 		if s.file != nil {
-			d.Reply += attachedLine(s.file.name)
+			d.Reply += attachedLine(s.file.Name)
 		}
 		if verdict == action.Ask {
 			d.Gate = decision.GateAsked

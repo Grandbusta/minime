@@ -13,6 +13,7 @@ import (
 	"github.com/Grandbusta/minime/internal/decision"
 	"github.com/Grandbusta/minime/internal/memory"
 	"github.com/Grandbusta/minime/internal/perception"
+	"github.com/Grandbusta/minime/internal/render"
 )
 
 // Approvals: what the autonomy gate makes the agent ask its owner first. An
@@ -249,7 +250,7 @@ func (m *Mind) sendApproved(ctx context.Context, a memory.Approval, now time.Tim
 	}
 	text := a.Text
 	if f != nil {
-		text = strings.TrimSuffix(text, attachedLine(f.name))
+		text = strings.TrimSuffix(text, attachedLine(f.Name))
 	}
 	err = m.send(ctx, p, text, f)
 	d.Outcome = &decision.Outcome{Status: decision.OutcomeOK, Detail: "approved by the owner", At: time.Now().UTC()}
@@ -263,7 +264,7 @@ func (m *Mind) sendApproved(ctx context.Context, a memory.Approval, now time.Tim
 	return err
 }
 
-func (m *Mind) approvedFile(ctx context.Context, a memory.Approval) (*file, error) {
+func (m *Mind) approvedFile(ctx context.Context, a memory.Approval) (*render.File, error) {
 	if a.Kind != perception.KindDelivery || a.Ref.IsZero() {
 		return nil, nil
 	}

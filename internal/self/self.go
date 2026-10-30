@@ -34,6 +34,9 @@ type Life struct {
 type Craft struct {
 	Kind  string `yaml:"kind"` // snake_case; works are filed under it
 	About string `yaml:"about"`
+	// Score is true for music: each one is written out note by note too,
+	// so it can be sent as MIDI.
+	Score bool `yaml:"score"`
 }
 
 var BuiltIn = []Craft{
@@ -47,6 +50,16 @@ var Reserved = []string{"journal", "reading_notes", "review"}
 var kindName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 func (l Life) Crafts() []Craft { return append(append([]Craft{}, BuiltIn...), l.Makes...) }
+
+func (l Life) Scored() []string {
+	var kinds []string
+	for _, c := range l.Makes {
+		if c.Score {
+			kinds = append(kinds, c.Kind)
+		}
+	}
+	return kinds
+}
 
 type Skill struct {
 	Name    string   `yaml:"name"`

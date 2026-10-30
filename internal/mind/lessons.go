@@ -13,6 +13,7 @@ import (
 	"github.com/Grandbusta/minime/internal/memory"
 	"github.com/Grandbusta/minime/internal/perception"
 	"github.com/Grandbusta/minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/render"
 )
 
 // Lessons: specific advice about doing a skill well ("check the error after
@@ -130,7 +131,13 @@ func (m *Mind) askForReview(ctx context.Context, w memory.Work, question string,
 	note := fmt.Sprintf("You are messaging %s first: you just made this, and you'd like their honest eyes on it, the way a learner "+
 		"asks a teacher. It goes right after your message, word for word:\n\n%s\n\nWrite only the one or two short sentences you "+
 		"send with it: what it is, and your question: %s", n.speaker, titled(w), orDefault(question, "what would you do differently?"))
-	if got := m.speakFirst(ctx, p, person, nil, speech{action: "ask_review", note: note, attachment: titled(w), trim: firstParagraph}); got == sent {
+	s := speech{action: "ask_review", note: note, attachment: titled(w), trim: firstParagraph}
+	if f, err := m.makeFile(render.MIDI, w); err != nil { // music, so they can hear it, not only read it
+		m.Log.Warn("making its MIDI failed; asking with the words alone", "work", w.Title, "err", err)
+	} else {
+		s.file = f
+	}
+	if got := m.speakFirst(ctx, p, person, nil, s); got == sent {
 		if err := m.Store.MarkReviewAsked(ctx, w.ID, now.UTC()); err != nil {
 			m.Log.Error("mark review asked", "err", err)
 		}

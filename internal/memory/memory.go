@@ -135,8 +135,9 @@ type Work struct {
 	Title       string
 	Text        string
 	CreatedAt   time.Time
-	Public      *bool  // whether it may go on its public page; nil until decided
-	PublicBy    string // who decided: PublicBySystem1 or PublicByOwner; "" until decided
+	Public      *bool           // whether it may go on its public page; nil until decided
+	PublicBy    string          // who decided: PublicBySystem1 or PublicByOwner; "" until decided
+	Score       json.RawMessage // its notes, for music (render/midi's Score); nil if none
 	// Loaded only by WorksFor. Embedding is nil until embedded; MadeFor is
 	// whom it was made for (SubjectSelf for itself), "" if not for an intention.
 	Embedding    []float32

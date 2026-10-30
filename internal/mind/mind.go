@@ -30,6 +30,7 @@ import (
 	"github.com/Grandbusta/minime/internal/providers/embed"
 	"github.com/Grandbusta/minime/internal/providers/system1"
 	"github.com/Grandbusta/minime/internal/providers/system2"
+	"github.com/Grandbusta/minime/internal/render"
 	"github.com/Grandbusta/minime/internal/search"
 	"github.com/Grandbusta/minime/internal/self"
 )
@@ -113,6 +114,8 @@ type Store interface {
 	SetOutcome(ctx context.Context, id ulid.ULID, outcome, verdict, note, by string, at time.Time) (bool, error)
 	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
 	Work(ctx context.Context, id ulid.ULID) (memory.Work, bool, error)
+	SetWorkScore(ctx context.Context, id ulid.ULID, score json.RawMessage) error
+	UnscoredWorks(ctx context.Context, kinds []string, limit int) ([]memory.Work, error)
 	Intention(ctx context.Context, id ulid.ULID) (memory.Intention, bool, error)
 	WorksFor(ctx context.Context, person string, limit int) ([]memory.Work, error)
 	SaveWorkEmbedding(ctx context.Context, id ulid.ULID, v []float32, model string) error
@@ -199,11 +202,15 @@ type Mind struct {
 	policyMu sync.RWMutex // guards Autonomy: the owner can change it in a chat while its day reads it
 	toPlan   atomic.Bool  // a goal was taken on in a chat: draft its learning plan on the next tick
 
+	scoredOnce  sync.Once
+	scoredKinds []string // the kinds of work that are music, from its life
+
 	// Only the life loop touches these.
-	lastTick time.Time
-	planned  string // the local date ("2006-01-02") its day was last planned for
-	round    int    // the last round of that day it planned (0: the morning plan)
-	reviewed time.Time
+	lastTick   time.Time
+	planned    string // the local date ("2006-01-02") its day was last planned for
+	round      int    // the last round of that day it planned (0: the morning plan)
+	reviewed   time.Time
+	unscorable map[ulid.ULID]bool // music it failed to score; not tried again until a restart
 }
 
 func New(c Config) *Mind {
@@ -308,7 +315,7 @@ func (m *Mind) handle(ctx context.Context, p perception.Percept) {
 	chain := []*decision.Decision{root} // root first; a System 2 hand-off is its child
 	var (
 		reply    string
-		attached *file
+		attached *render.File
 		after    []*decision.Decision // what the reply's answer changed: saved after it
 	)
 	if p.Text == "" {
@@ -344,7 +351,7 @@ func (m *Mind) handle(ctx context.Context, p perception.Percept) {
 	actor := chain[len(chain)-1]
 	actor.Reply = reply
 	if attached != nil {
-		actor.Reply += attachedLine(attached.name)
+		actor.Reply += attachedLine(attached.Name)
 	}
 	actor.Outcome = &decision.Outcome{Status: decision.OutcomeOK}
 	if err := m.send(ctx, p, reply, attached); err != nil {
@@ -612,7 +619,7 @@ func (m *Mind) checkFacts(ctx context.Context, p perception.Percept, d *decision
 }
 
 func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.Person, parent, d *decision.Decision,
-	recent []memory.Exchange, facts []memory.Fact, why string) (string, *file, []*decision.Decision) {
+	recent []memory.Exchange, facts []memory.Fact, why string) (string, *render.File, []*decision.Decision) {
 	d.Tier, d.SetID, d.Action = decision.TierSystem2, m.ReplyPrompt.Ref, "reply"
 	n := m.namesFor(p)
 	note, refs := m.system2Note(parent, why, facts, n)
