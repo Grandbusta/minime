@@ -53,6 +53,8 @@ You need Go, a Telegram bot token from [@BotFather](https://t.me/BotFather), an 
 key, and Postgres (or Docker, and it starts one for you).
 
 ```bash
+git clone https://github.com/Grandbusta/minime.git
+cd minime
 go run ./cmd/minime new
 ```
 
@@ -64,6 +66,10 @@ go run ./cmd/minime
 ```
 
 Every setting, Docker, and setting things up by hand: [docs/SETUP.md](docs/SETUP.md).
+
+**What it costs:** only your OpenAI usage. Their own day is capped by `budget_usd` in
+`living.yaml` ($0.05 a day at a person's pace), and a message to them costs a fraction of
+a cent. On the day the screenshots below were taken, Daniel made 100 decisions for $0.03.
 
 ## Pick a life
 
@@ -121,3 +127,6 @@ Or write your own: a person is a folder of three files. `life.yaml` is who they 
   config, developing.
 - [How it works inside](docs/ARCHITECTURE.md): the two-system mind, memory, the parts and
   how they fit.
+- [What's changed](CHANGELOG.md).
+
+MIT licensed: see [LICENSE](LICENSE).

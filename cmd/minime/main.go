@@ -89,6 +89,9 @@ func run(args []string) error {
 		}
 		cmd = "run"
 	}
+	if _, err := os.Stat(".env"); errors.Is(err, os.ErrNotExist) && os.Getenv("DATABASE_URL") == "" {
+		return errors.New("no one lives here yet: start someone with `go run ./cmd/minime new`")
+	}
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
