@@ -115,6 +115,8 @@ type Store interface {
 	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
 	Work(ctx context.Context, id ulid.ULID) (memory.Work, bool, error)
 	SaveAction(ctx context.Context, a memory.Action) error
+	SeenFrom(ctx context.Context, source string) (bool, error)
+	LastFrom(ctx context.Context, source string) (string, bool, error)
 	SetAction(ctx context.Context, id ulid.ULID, from []string, status, result string, at time.Time) (bool, error)
 	Actions(ctx context.Context, statuses []string, limit int) ([]memory.Action, error)
 	ActionsSince(ctx context.Context, since time.Time) (int, error)
@@ -201,7 +203,9 @@ type Config struct {
 	// proposes a day.
 	Doers         []Doer
 	ActionsPerDay int
-	Calls         Calls
+	// Watchers are tools looked at on a schedule; what's new is perceived.
+	Watchers []Watcher
+	Calls    Calls
 	// Embedder nil: it takes the owner's newest decision of the right type instead.
 	Embedder embed.Embedder
 	Log      *slog.Logger
@@ -223,7 +227,8 @@ type Mind struct {
 	planned    string // the local date ("2006-01-02") its day was last planned for
 	round      int    // the last round of that day it planned (0: the morning plan)
 	reviewed   time.Time
-	unfillable map[ulid.ULID]bool // works whose data it failed to write; not tried again until a restart
+	looked     map[string]time.Time // when each watcher last looked
+	unfillable map[ulid.ULID]bool   // works whose data it failed to write; not tried again until a restart
 }
 
 func New(c Config) *Mind {
@@ -682,7 +687,7 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	m.savePromises(ctx, p, person, resp.Promises, workRefs)
 	m.movePromises(ctx, p, resp.Moves, promised)
 	if p.Speaker != "" && p.Speaker == m.policy().Owner { // only its owner can have it act, for now
-		m.propose(ctx, p, resp.Acts, p.At)
+		m.propose(ctx, p, resp.Acts, p.At, true)
 	}
 	var more []*decision.Decision
 	more = append(more, m.correctFacts(ctx, p, d, refs, resp.Corrections, n)...)

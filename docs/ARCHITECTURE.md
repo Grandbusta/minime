@@ -176,7 +176,8 @@ The clock ticks once a minute, on the minute. Each tick runs, in order (`tick` i
 the slow work of its own day:
 
 1. **Approvals:** deny the ones unanswered for 24 hours; send the ones not yet sent; run
-   the tools that change things that are approved.
+   the tools that change things that are approved; look with the watched tools whose
+   time has come, and notice what's new.
 2. **Calls:** expire the ones unanswered for 24 hours; ask the ones due today.
 3. **Due reminders and promises** whose time has come.
 4. **Check-ins**, when a `check_ins` time passed since the last tick.
@@ -298,6 +299,14 @@ schema and `tools.actions_per_day`, kept in `actions`, and goes through the gate
 approves it (a destructive tool asks anyway), `ask` sends the owner the exact tool,
 arguments and reason. Approving only marks it approved; the next tick runs it, so a reply
 never waits on a tool, and tells the owner what came of it, kept as an exchange.
+
+A watch (`mind.Watcher`, [watch.go](../internal/mind/watch.go)) is a read tool looked at
+on a schedule. Its result is split into items (a JSON list, or the whole text), each kept
+as a percept from `watch:<server.tool>` with its ID, so one seen before is skipped; a
+watch's first look only records what's there. A whole-text result comes with the lines
+added and gone since the last look, so a changed listing or page shows what changed. Each new item, up to five a tick, goes to
+System 2 with [prompts/observe.md](../prompts/observe.md), fenced as untrusted: it may
+remember facts, tell the owner, or propose actions, which always ask.
 
 Books and articles come through [internal/library](../internal/library), which fetches
 only from those two sites and stores each text once (`sources`). Web search and fetching

@@ -333,6 +333,7 @@ tell me what's in it tonight"). Each server is a `name` (snake_case), and either
 | `tools` | The tools it may use, each with what it can do: `read`, or the class the gate checks before using it: `write` (your own things), `external_message` (email, posts), `commit` (book, accept) or `spend`. A tool you don't list isn't offered. |
 | `env` | For a local server: the environment variables it's given, from `.env`. It always gets `PATH` and `HOME`, and never anything else, so your keys stay yours. |
 | `auth_env` | For a remote server: the variable holding its bearer token. |
+| `watch` | Read tools to look at on a schedule, so they notice what's new: each `{tool, args, every}`, with `every` at least `1m`. If the result is JSON, `items` says where the list is (dotted keys, like `messages`) and `id` which field tells items apart; otherwise the whole result is one item, new whenever it changes, shown with what changed since the last look. |
 
 In one activity they can use up to three of a server's tools in a row, each chosen from
 what the last returned: search for a file, then read what it found.
@@ -340,8 +341,14 @@ what the last returned: search for a file, then read what it found.
 A tool that changes things is never used as they reply. They propose it, to you in a
 chat or in their own day, and it runs a minute or so later once allowed: by its class in
 `autonomy.classes` (`write` asks you by default; `external_message` and `spend` are
-forbidden until you change them), and always with your OK on Telegram if the server marks
-it destructive. You see exactly what it would do, and hear what came of it.
+forbidden until you change them). It always needs your OK on Telegram if the server marks
+it destructive, or if what prompted it was something they read rather than your own
+words. You see exactly what it would do, and hear what came of it.
+
+A watched tool is looked at on its schedule. The first look only records what's there;
+after that, each new item is something they notice: most need nothing, but they may
+remember it, tell you, or propose an action (which asks you). Looks don't count against
+`calls_per_day`; `use_tools: forbid` stops them.
 
 A tool the server marks as destructive is refused as `read`, whatever the config says.
 What a tool returns is read as material, never instructions; every call is logged, counted

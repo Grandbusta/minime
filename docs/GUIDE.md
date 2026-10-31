@@ -78,6 +78,9 @@ my folder") and they say they'll do it; you get exactly what it would do on Tele
 ✅ Approve and ❌ Deny. Approved, it runs within a minute or so and they tell you it's
 done. Only you can ask for these, and they never say it's done before it is.
 
+A tool can also be watched ([SETUP](SETUP.md#tools-mcp-servers)): an inbox, a folder, a
+feed. When something new turns up they notice it, and tell you if you'd want to know.
+
 ```bash
 go run ./cmd/minime day                    # today's plan and what came of it
 go run ./cmd/minime day -date 2026-10-29   # another day

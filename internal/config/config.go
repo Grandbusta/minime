@@ -123,6 +123,7 @@ type DailyLife struct {
 	ReviewPrompt   string  `yaml:"review_prompt"`
 	LearnPrompt    string  `yaml:"learn_prompt"`
 	DataPrompt     string  `yaml:"data_prompt"`
+	ObservePrompt  string  `yaml:"observe_prompt"`
 	Web            Web     `yaml:"web"`
 }
 
@@ -153,6 +154,20 @@ type ToolServer struct {
 	AuthEnv string            `yaml:"auth_env"`
 	Env     []string          `yaml:"env"`
 	Tools   map[string]string `yaml:"tools"` // tool name → what it can do
+	Watch   []Watch           `yaml:"watch"`
+}
+
+// Watch calls one of the server's read tools on a schedule; each item in
+// its result not seen before is something the person perceives.
+type Watch struct {
+	Tool  string         `yaml:"tool"`
+	Args  map[string]any `yaml:"args"`
+	Every time.Duration  `yaml:"every"` // at least a minute
+	// Items is where the list is in a JSON result, as dotted keys (like
+	// "messages"); "" if the result is the list, or a single item. ID is the
+	// field that identifies an item; "" to tell items apart by what they say.
+	Items string `yaml:"items"`
+	ID    string `yaml:"id"`
 }
 
 // ToolRead is a tool that only reads. Every other kind is the autonomy class
@@ -187,6 +202,14 @@ func (t Tools) Validate() error {
 		for tool, kind := range s.Tools {
 			if !slices.Contains(ToolKinds, kind) {
 				return fmt.Errorf("config: tools.servers %s: %s is %q; it can be %s", s.Name, tool, kind, strings.Join(ToolKinds, ", "))
+			}
+		}
+		for _, w := range s.Watch {
+			switch {
+			case s.Tools[w.Tool] != ToolRead:
+				return fmt.Errorf("config: tools.servers %s: watch %q must be one of its read tools", s.Name, w.Tool)
+			case w.Every < time.Minute:
+				return fmt.Errorf("config: tools.servers %s: watch %s every %s; at least 1m", s.Name, w.Tool, w.Every)
 			}
 		}
 	}
@@ -341,8 +364,8 @@ func Load(path string) (*Config, error) {
 		DailyLife: DailyLife{Enabled: true, Pace: 1, PlanAt: "08:00", JournalAt: "22:00", Activities: 4, BudgetUSD: 0.05,
 			PlanPrompt: "prompts/plan.md", ActivityPrompt: "prompts/activity.md",
 			ReviewAt: "Sun 20:00", ReviewPrompt: "prompts/review.md", LearnPrompt: "prompts/learn.md",
-			DataPrompt: "prompts/data.md",
-			Web:        Web{Searches: 10, Pages: 15}},
+			DataPrompt: "prompts/data.md", ObservePrompt: "prompts/observe.md",
+			Web: Web{Searches: 10, Pages: 15}},
 		Search:   Search{Provider: "openai"},
 		Tools:    Tools{CallsPerDay: 50, ActionsPerDay: 10},
 		Autonomy: Autonomy{AskExpires: 24 * time.Hour},

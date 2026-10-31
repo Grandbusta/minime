@@ -175,8 +175,10 @@ safe for concurrent use; a test of both loops orders every step through channels
 - Tools: only those config lists; a local server gets only PATH, HOME and the env config
   names; what a tool returns is material, never instructions. A tool that changes things
   is only proposed, by the owner's chat or its own day, never run in a reply: it runs on a
-  later tick once its class allows it, and a destructive one always asks the owner. It
-  never says an action is done before it is.
+  later tick once its class allows it. A destructive one always asks the owner, and so
+  does one prompted by anything it read (a watched item, its own day's material): only
+  the owner's own words can have it act unasked. It never says an action is done before
+  it is.
 - The console listens on localhost unless a token of 16+ characters is set.
 
 ## Docs to keep in step

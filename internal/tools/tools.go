@@ -7,6 +7,8 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +29,7 @@ import (
 	"github.com/Grandbusta/minime/internal/ability"
 	"github.com/Grandbusta/minime/internal/action"
 	"github.com/Grandbusta/minime/internal/config"
+	"github.com/Grandbusta/minime/internal/memory"
 )
 
 const (
@@ -135,10 +138,11 @@ func cut(s string, n int) string {
 // change things (actions); Err says why it has none (it couldn't be reached,
 // or a tool isn't there).
 type Connected struct {
-	Server  *Server
-	Tools   []Tool
-	Actions []Action
-	Err     error
+	Server   *Server
+	Tools    []Tool
+	Actions  []Action
+	Watchers []Watcher
+	Err      error
 }
 
 // Connect reaches every server, keeping those it can: a server it can't
@@ -150,6 +154,9 @@ func Connect(ctx context.Context, cfg config.Tools, limit int, st Store, log *sl
 		s := &Server{Name: sc.Name, transport: transport(sc)}
 		c := Connected{Server: s}
 		c.Tools, c.Actions, c.Err = offered(ctx, s, sc, limit, st)
+		if c.Err == nil {
+			c.Watchers, c.Err = watchers(sc, c.Tools)
+		}
 		if c.Err != nil {
 			log.Warn("tool server not used", "server", sc.Name, "err", c.Err)
 		}
@@ -398,4 +405,93 @@ func orNone(q string) string {
 		return "nothing"
 	}
 	return q
+}
+
+// Watcher looks with one of a server's reading tools on a schedule
+// (config.Watch) and returns what it found, item by item.
+type Watcher struct {
+	tool      Tool
+	args      map[string]any
+	every     time.Duration
+	items, id string
+}
+
+func watchers(sc config.ToolServer, reads []Tool) ([]Watcher, error) {
+	var out []Watcher
+	for _, w := range sc.Watch {
+		i := slices.IndexFunc(reads, func(t Tool) bool { return t.tool.Name == w.Tool })
+		if i < 0 {
+			return nil, fmt.Errorf("%s: watch %s isn't one of its tools", sc.Name, w.Tool)
+		}
+		args := w.Args
+		if args == nil {
+			args = map[string]any{}
+		}
+		if err := reads[i].resolved.Validate(args); err != nil {
+			return nil, fmt.Errorf("%s: watch %s: %w", sc.Name, w.Tool, err)
+		}
+		out = append(out, Watcher{tool: reads[i], args: args, every: w.Every, items: w.Items, id: w.ID})
+	}
+	return out, nil
+}
+
+func (w Watcher) Name() string         { return w.tool.Name() }
+func (w Watcher) Every() time.Duration { return w.every }
+
+// Look calls the tool and splits what it returns into items: their ID is
+// their id field, or else a hash of what they say, so one seen before is
+// known again. Looks are logged but not
+// counted against the day's calls: they run on their own schedule.
+func (w Watcher) Look(ctx context.Context, at time.Time) ([]memory.Watched, error) {
+	text, err := w.tool.server.call(ctx, w.tool.tool.Name, w.args)
+	if logErr := w.tool.store.LogWeb(ctx, "watch", w.Name(), 0, at.UTC()); logErr != nil {
+		return nil, logErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	return split(text, w.items, w.id), nil
+}
+
+// split is text's items: those in the list at path in its JSON, or the whole
+// text as one item if it isn't JSON with a list there.
+func split(text, path, idField string) []memory.Watched {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	whole := []memory.Watched{{ID: hash(text), Text: text, Whole: true}}
+	var v any
+	if json.Unmarshal([]byte(text), &v) != nil {
+		return whole
+	}
+	for _, k := range strings.Split(path, ".") {
+		if k == "" {
+			continue
+		}
+		m, ok := v.(map[string]any)
+		if !ok {
+			return whole
+		}
+		v = m[k]
+	}
+	list, ok := v.([]any)
+	if !ok {
+		return whole
+	}
+	var out []memory.Watched
+	for _, e := range list {
+		raw, _ := json.MarshalIndent(e, "", "  ")
+		item := memory.Watched{ID: hash(string(raw)), Text: string(raw)}
+		if m, ok := e.(map[string]any); ok && idField != "" && m[idField] != nil {
+			item.ID = fmt.Sprint(m[idField])
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func hash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:8])
 }

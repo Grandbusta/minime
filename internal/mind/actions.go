@@ -74,8 +74,10 @@ func (m *Mind) actionsHelp(owner string) string {
 }
 
 // propose saves what it proposes to do: checked against the tool, under the
-// day's cap, and through the gate. A destructive tool always asks.
-func (m *Mind) propose(ctx context.Context, p perception.Percept, acts []system2.Act, now time.Time) {
+// day's cap, and through the gate. A destructive tool always asks, and so
+// does one proposed from what it read rather than its owner's own words
+// (trusted false): text from outside can't make it act unasked.
+func (m *Mind) propose(ctx context.Context, p perception.Percept, acts []system2.Act, now time.Time, trusted bool) {
 	if len(acts) == 0 {
 		return
 	}
@@ -102,7 +104,7 @@ func (m *Mind) propose(ctx context.Context, p perception.Percept, acts []system2
 			continue
 		}
 		verdict := m.policy().Check(d.Class(), "")
-		if verdict == action.Auto && d.Destructive() {
+		if verdict == action.Auto && (d.Destructive() || !trusted) {
 			verdict = action.Ask
 		}
 		a := memory.Action{ID: ulid.Make(), Tool: d.Name(), Class: string(d.Class()), Args: act.Args, Why: act.Why,
@@ -183,14 +185,8 @@ func (m *Mind) runActions(ctx context.Context, now time.Time) {
 	}
 }
 
-// tellDone messages the owner what came of an action: kept as an exchange,
-// so the agent can talk about it after.
+// tellDone tells the owner what came of an action.
 func (m *Mind) tellDone(ctx context.Context, a memory.Action, status, result string, start time.Time) {
-	owner := m.policy().Owner
-	conv, ok := m.conversationWith(ctx, owner)
-	if !ok {
-		return
-	}
 	text := map[string]string{
 		memory.ActionDone:   fmt.Sprintf("✅ Done: %s (%s)", a.Tool, a.Why),
 		memory.ActionFailed: fmt.Sprintf("⚠️ %s didn't work (%s)", a.Tool, a.Why),
@@ -199,19 +195,30 @@ func (m *Mind) tellDone(ctx context.Context, a memory.Action, status, result str
 	if r := strings.TrimSpace(result); r != "" && status != memory.ActionDenied {
 		text += "\n\n" + cutRunes(r, 600)
 	}
-	p := outgoing(conv, m.person(ctx, owner), perception.KindAction, time.Now())
+	m.tellOwner(ctx, perception.KindAction, "tool:"+a.Tool, text, status == memory.ActionDone, start)
+}
+
+// tellOwner messages the owner text as is, kept as an exchange so it can
+// talk about it after.
+func (m *Mind) tellOwner(ctx context.Context, kind, setID, text string, ok bool, start time.Time) {
+	owner := m.policy().Owner
+	conv, found := m.conversationWith(ctx, owner)
+	if !found {
+		return
+	}
+	p := outgoing(conv, m.person(ctx, owner), kind, time.Now())
 	if _, err := m.Store.SavePercept(ctx, p); err != nil {
 		m.Log.Error("save percept", "err", err)
 		return
 	}
-	d := decision.Decision{ID: ulid.Make(), At: start.UTC(), PerceptID: p.ID, Tier: decision.TierReflex, SetID: "tool:" + a.Tool,
-		Action: "act", Reply: text, Gate: decision.GateAuto, Latency: time.Since(start),
-		Outcome: &decision.Outcome{Status: decision.OutcomeOK, Detail: status, At: time.Now().UTC()}}
-	if status != memory.ActionDone {
+	d := decision.Decision{ID: ulid.Make(), At: start.UTC(), PerceptID: p.ID, Tier: decision.TierReflex, SetID: setID,
+		Action: "tell", Reply: text, Gate: decision.GateAuto, Latency: time.Since(start),
+		Outcome: &decision.Outcome{Status: decision.OutcomeOK, At: time.Now().UTC()}}
+	if !ok {
 		d.Outcome.Status = decision.OutcomeFailed
 	}
 	if err := m.Replier.Reply(ctx, p, text); err != nil {
-		m.Log.Warn("telling the owner what came of an action failed", "err", err)
+		m.Log.Warn("telling the owner failed", "err", err)
 	}
 	if err := m.Store.SaveDecision(ctx, d); err != nil {
 		m.Log.Error("save decision", "err", err)

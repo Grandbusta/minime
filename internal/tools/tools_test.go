@@ -162,3 +162,23 @@ func TestToolsThatChangeThings(t *testing.T) {
 		t.Errorf("logged %q", st.logged)
 	}
 }
+
+func TestSplittingWhatAWatchSees(t *testing.T) {
+	mail := `{"messages":[{"id":"m1","from":"ada@x.com","subject":"Re: a 10-minute chat"},{"id":"m2","subject":"Lunch?"}]}`
+	items := split(mail, "messages", "id")
+	if len(items) != 2 || items[0].ID != "m1" || !strings.Contains(items[0].Text, "ada@x.com") {
+		t.Fatalf("items = %+v", items)
+	}
+	if again := split(mail, "messages", ""); again[0].ID == "m1" || again[0].ID != split(mail, "messages", "")[0].ID {
+		t.Errorf("without an id field, items are told apart by a stable hash: %+v", again)
+	}
+	if whole := split("No matches found", "messages", "id"); len(whole) != 1 || whole[0].Text != "No matches found" {
+		t.Errorf("plain text = %+v", whole)
+	}
+	if list := split(`[{"id":1},{"id":2}]`, "", "id"); len(list) != 2 || list[1].ID != "2" {
+		t.Errorf("a bare list = %+v", list)
+	}
+	if none := split("  ", "", ""); len(none) != 0 {
+		t.Errorf("empty = %+v", none)
+	}
+}

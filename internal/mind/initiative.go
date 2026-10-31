@@ -50,6 +50,7 @@ func (m *Mind) tick(ctx context.Context, now time.Time) {
 	m.expireApprovals(ctx, now)
 	m.sendApprovals(ctx)
 	m.runActions(ctx, now)
+	m.watch(ctx, now)
 	m.expireCalls(ctx, now)
 	m.sendCalls(ctx, now)
 	m.doDueIntentions(ctx, now, false)

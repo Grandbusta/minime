@@ -336,6 +336,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	// shown in the console and left out.
 	var toolAbilities []ability.Ability
 	var doers []mind.Doer
+	var watchers []mind.Watcher
 	var toolInfo []console.ToolServer
 	for _, c := range tools.Connect(ctx, cfg.Tools, cfg.Tools.CallsPerDay*cfg.DailyLife.Pace, st, log.With("component", "tools")) {
 		defer c.Server.Close()
@@ -346,6 +347,9 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		for _, t := range c.Tools {
 			toolAbilities = append(toolAbilities, t)
 			info.Tools = append(info.Tools, t.Name())
+		}
+		for _, w := range c.Watchers {
+			watchers = append(watchers, w)
 		}
 		for _, a := range c.Actions {
 			doers = append(doers, a)
@@ -395,7 +399,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		Asker:      tg,
 		Filer:      tg,
 		Formats:    formats,
-		Doers:      doers, ActionsPerDay: cfg.Tools.ActionsPerDay,
+		Doers:      doers, ActionsPerDay: cfg.Tools.ActionsPerDay, Watchers: watchers,
 		Calls:    calls(cfg),
 		Embedder: embedder,
 		Log:      log.With("component", "mind"),
@@ -503,7 +507,7 @@ func newDay(cfg *config.Config) (mind.Day, error) {
 		to   *mind.Prompt
 		path string
 	}{{&day.PlanPrompt, dl.PlanPrompt}, {&day.ActivityPrompt, dl.ActivityPrompt}, {&day.ReviewPrompt, dl.ReviewPrompt},
-		{&day.LearnPrompt, dl.LearnPrompt}, {&day.DataPrompt, dl.DataPrompt}} {
+		{&day.LearnPrompt, dl.LearnPrompt}, {&day.DataPrompt, dl.DataPrompt}, {&day.ObservePrompt, dl.ObservePrompt}} {
 		if *p.to, err = loadPrompt(p.path); err != nil {
 			return day, err
 		}

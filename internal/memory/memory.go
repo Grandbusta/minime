@@ -176,6 +176,16 @@ const (
 	ActionDenied   = "denied" // the owner said no, or didn't answer
 )
 
+// Watched is one thing a watched tool returned: its ID tells it apart from
+// what was seen before.
+type Watched struct {
+	ID   string
+	Text string
+	// Whole is a result that isn't a list: a new one replaces the last, so
+	// what changed is what matters.
+	Whole bool
+}
+
 // KindAction marks an approval as one for an Action (its Ref).
 const KindAction = "action"
 

@@ -377,6 +377,24 @@ func (s *fakeStore) OpenIntentions(_ context.Context, subject, kind string) ([]m
 	}), nil
 }
 
+func (s *fakeStore) LastFrom(_ context.Context, source string) (string, bool, error) {
+	for n := len(s.percepts) - 1; n >= 0; n-- {
+		if s.percepts[n].Source == source {
+			return s.percepts[n].Text, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+func (s *fakeStore) SeenFrom(_ context.Context, source string) (bool, error) {
+	for _, p := range s.percepts {
+		if p.Source == source {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (s *fakeStore) SaveAction(_ context.Context, a memory.Action) error {
 	s.actions = append(s.actions, a)
 	return nil

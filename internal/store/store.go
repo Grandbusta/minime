@@ -1536,6 +1536,28 @@ func (s *Store) LogWeb(ctx context.Context, kind, what string, costUSD float64, 
 	return nil
 }
 
+// LastFrom is the text of the newest percept from source; false if none.
+func (s *Store) LastFrom(ctx context.Context, source string) (string, bool, error) {
+	var text string
+	err := s.pool.QueryRow(ctx, `SELECT text FROM percepts WHERE source = $1 ORDER BY at DESC, id DESC LIMIT 1`, source).Scan(&text)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("last from: %w", err)
+	}
+	return text, true, nil
+}
+
+// SeenFrom is whether any percept from source has been kept.
+func (s *Store) SeenFrom(ctx context.Context, source string) (bool, error) {
+	var seen bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM percepts WHERE source = $1)`, source).Scan(&seen); err != nil {
+		return false, fmt.Errorf("seen from: %w", err)
+	}
+	return seen, nil
+}
+
 func (s *Store) SaveAction(ctx context.Context, a memory.Action) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO actions (id, tool, class, args, why, status, result, percept_id, proposed_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, a.ID.String(), a.Tool, a.Class, a.Args, a.Why, a.Status, a.Result,

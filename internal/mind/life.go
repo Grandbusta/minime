@@ -37,6 +37,7 @@ type Day struct {
 	ReviewPrompt   Prompt        // zero: no review
 	LearnPrompt    Prompt        // zero: no learning plans
 	DataPrompt     Prompt        // zero: what was made before its kind carried data never gets it
+	ObservePrompt  Prompt        // zero: what it watches is only recorded
 }
 
 const (
@@ -556,7 +557,7 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 		for _, a := range out.Act {
 			proposed = append(proposed, system2.Act{Tool: strings.TrimSpace(a.Tool), Args: strings.TrimSpace(a.Args), Why: strings.TrimSpace(a.Why)})
 		}
-		m.propose(ctx, p, proposed, now)
+		m.propose(ctx, p, proposed, now, false) // its day may have read anything
 	}
 	if plans != "" {
 		m.stageDone(ctx, strings.TrimSpace(out.StageDone), w, p.ID, &d.ID, now)
