@@ -27,6 +27,7 @@ const (
 	KindReminder      = "reminder"
 	KindCheckIn       = "check_in"
 	KindDelivery      = "delivery"
+	KindAction        = "action" // what came of a tool it used
 	KindReviewRequest = "review_request"
 )
 

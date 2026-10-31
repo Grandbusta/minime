@@ -355,7 +355,8 @@ func (m *Mind) intend(ctx context.Context, i memory.Intention, now time.Time) bo
 // activityFormat is what an activity makes: kind is one of the things it
 // makes (its crafts); an ability may file the work under a kind of its own.
 // It asks too for each kind of data its works carry (data), by its name.
-func activityFormat(crafts []self.Craft, data map[string]map[string]any) *system2.Format {
+// act adds what it proposes to do with tools that change things.
+func activityFormat(crafts []self.Craft, data map[string]map[string]any, act bool) *system2.Format {
 	kinds := make([]string, len(crafts))
 	for i, c := range crafts {
 		kinds[i] = c.Kind
@@ -381,6 +382,10 @@ func activityFormat(crafts []self.Craft, data map[string]map[string]any) *system
 	for name, schema := range data {
 		f.Schema["required"] = append(f.Schema["required"].([]string), name)
 		f.Schema["properties"].(map[string]any)[name] = schema
+	}
+	if act {
+		f.Schema["required"] = append(f.Schema["required"].([]string), "act")
+		f.Schema["properties"].(map[string]any)["act"] = map[string]any{"type": "array", "items": system2.ActSchema}
 	}
 	return f
 }
@@ -430,6 +435,11 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 
 	note, project, ok := m.activityNote(ctx, i, what, now)
 	note += m.dataHelp()
+	// it may act for its owner in its own day, or in what it makes for them
+	acts := len(m.doers()) > 0 && (i.Subject == memory.SubjectSelf || i.Subject == m.policy().Owner)
+	if acts {
+		note += "\n\n" + m.actionsHelp(orDefault(m.person(ctx, m.policy().Owner).Name, "your owner"))
+	}
 	plans := ""
 	if action == "activity" { // its own practice, not what it makes for someone
 		plans = m.stagesNote(ctx)
@@ -475,7 +485,7 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.lifeInstructions(m.Day.ActivityPrompt),
 		Note:         note,
-		Format:       activityFormat(m.Life.Crafts(), m.dataSchemas()),
+		Format:       activityFormat(m.Life.Crafts(), m.dataSchemas(), acts),
 	})
 	if err != nil {
 		log.Error(action+" failed", "err", err)
@@ -494,6 +504,11 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 		AskForReview   bool     `json:"ask_for_review"`
 		ReviewQuestion string   `json:"review_question"`
 		StageDone      string   `json:"stage_done"`
+		Act            []struct {
+			Tool string `json:"tool"`
+			Args string `json:"args"`
+			Why  string `json:"why"`
+		} `json:"act"`
 	}
 	err = json.Unmarshal([]byte(resp.Text), &out)
 	w := memory.Work{ID: ulid.Make(), IntentionID: i.ID, ProjectID: i.ProjectID, Kind: orDefault(material.WorkKind, orDefault(out.Kind, "writing")),
@@ -536,6 +551,13 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	}
 	d.Reply = title + "\n\n" + w.Text
 	m.finishLife(ctx, d, start, decision.OutcomeOK, fmt.Sprintf("made %s %q", w.Kind, title))
+	if acts {
+		var proposed []system2.Act
+		for _, a := range out.Act {
+			proposed = append(proposed, system2.Act{Tool: strings.TrimSpace(a.Tool), Args: strings.TrimSpace(a.Args), Why: strings.TrimSpace(a.Why)})
+		}
+		m.propose(ctx, p, proposed, now)
+	}
 	if plans != "" {
 		m.stageDone(ctx, strings.TrimSpace(out.StageDone), w, p.ID, &d.ID, now)
 	}

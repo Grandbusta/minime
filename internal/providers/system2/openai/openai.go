@@ -40,7 +40,7 @@ func New(apiKey, model, baseURL string, price pricing.Price, effort string) *Cli
 // replyWithFacts is the Structured Outputs schema used with CollectFacts:
 // strict mode guarantees the output matches it.
 var replyWithFacts = map[string]any{
-	"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises", "permissions", "corrections", "misread", "feedback", "lessons", "tastes", "goals", "send", "moves"},
+	"type": "object", "additionalProperties": false, "required": []string{"reply", "remember", "who_they_are", "reminders", "promises", "permissions", "corrections", "misread", "feedback", "lessons", "tastes", "goals", "send", "moves", "act"},
 	"properties": map[string]any{
 		"reply":        map[string]any{"type": "string"},
 		"who_they_are": map[string]any{"type": "string"},
@@ -67,6 +67,7 @@ var replyWithFacts = map[string]any{
 			},
 		}},
 		"misread": map[string]any{"type": "string"},
+		"act":     map[string]any{"type": "array", "items": system2.ActSchema},
 		"moves": map[string]any{"type": "array", "items": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"promise", "by"},
 			"properties": map[string]any{
@@ -228,6 +229,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		misread    string
 		send       system2.Send
 		moves      []system2.Move
+		acts       []system2.Act
 		feedback   []system2.Feedback
 		lessons    []system2.LessonLearned
 		tastes     []system2.Taste
@@ -266,7 +268,12 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 				Text   string `json:"text"`
 			} `json:"corrections"`
 			Misread string `json:"misread"`
-			Moves   []struct {
+			Act     []struct {
+				Tool string `json:"tool"`
+				Args string `json:"args"`
+				Why  string `json:"why"`
+			} `json:"act"`
+			Moves []struct {
 				Promise string `json:"promise"`
 				By      string `json:"by"`
 			} `json:"moves"`
@@ -326,6 +333,11 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 			}
 		}
 		misread = strings.TrimSpace(out.Misread)
+		for _, a := range out.Act {
+			if tool := strings.TrimSpace(a.Tool); tool != "" {
+				acts = append(acts, system2.Act{Tool: tool, Args: strings.TrimSpace(a.Args), Why: strings.TrimSpace(a.Why)})
+			}
+		}
 		for _, mv := range out.Moves {
 			if ref, by := strings.Trim(strings.TrimSpace(mv.Promise), "[]"), strings.ToLower(strings.TrimSpace(mv.By)); ref != "" && by != "" {
 				moves = append(moves, system2.Move{Promise: ref, By: by})
@@ -388,6 +400,7 @@ func (c *Client) Reason(ctx context.Context, req system2.Request) (system2.Respo
 		Goals:       goals,
 		Send:        send,
 		Moves:       moves,
+		Acts:        acts,
 		Usage: system2.Usage{InputTokens: int(u.InputTokens), OutputTokens: int(u.OutputTokens),
 			ReasoningTokens: int(u.OutputTokensDetails.ReasoningTokens)},
 		CostUSD: c.price.Cost(pricing.Usage{

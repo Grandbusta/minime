@@ -236,7 +236,8 @@ in `abilityMakers` in [cmd/minime/main.go](../cmd/minime/main.go).
 |---|---|---|
 | `remember`, `reply` | keeping facts, answering messages | always auto |
 | `read_web` | abilities that fetch from the web | auto |
-| `use_tools` | tools from MCP servers (only reading ones yet) | auto |
+| `use_tools` | reading tools from MCP servers | auto |
+| `write` | tools that change your own things: a file, a doc, a calendar | ask |
 | `reach_out` | messaging someone first | ask |
 | `commit` | promising to make something for someone | ask |
 | `publish` | putting a work on their public page | ask |
@@ -310,7 +311,8 @@ from there.
 | `embedding.provider`, `model` | `openai`, `text-embedding-3-small` | Finds your past decisions most like the one at hand. Remove it to use the newest instead. |
 | `search.provider`, `model` | `openai`, the System 2 model | What web searches use. |
 | `tools.servers` | none | MCP servers whose tools they may use: [below](#tools-mcp-servers). Can also go in `living.yaml`. |
-| `tools.calls_per_day` | `50` | Tool calls a day across all servers, times their pace. |
+| `tools.calls_per_day` | `50` | Reading tool calls a day across all servers, times their pace. |
+| `tools.actions_per_day` | `10` | Tools that change things they may propose a day. Not times their pace: these have real effects. |
 | `console.addr` | `127.0.0.1:8090` | The private mind console; empty: none. |
 | `console.token` | `${CONSOLE_TOKEN}` | Required unless `console.addr` is localhost. |
 | `portfolio.addr` | `127.0.0.1:8080` | Their public profile page; empty: none. |
@@ -328,12 +330,18 @@ tell me what's in it tonight"). Each server is a `name` (snake_case), and either
 | Key | What it is |
 |---|---|
 | `about` | What the server is and where things are, like "my shared folder, /Users/you/shared: notes I share". It goes in every tool's description, so they know where to look. |
-| `tools` | The tools it may use, each with what it can do. Only `read` exists yet; a tool you don't list isn't offered. |
+| `tools` | The tools it may use, each with what it can do: `read`, or the class the gate checks before using it: `write` (your own things), `external_message` (email, posts), `commit` (book, accept) or `spend`. A tool you don't list isn't offered. |
 | `env` | For a local server: the environment variables it's given, from `.env`. It always gets `PATH` and `HOME`, and never anything else, so your keys stay yours. |
 | `auth_env` | For a remote server: the variable holding its bearer token. |
 
 In one activity they can use up to three of a server's tools in a row, each chosen from
 what the last returned: search for a file, then read what it found.
+
+A tool that changes things is never used as they reply. They propose it, to you in a
+chat or in their own day, and it runs a minute or so later once allowed: by its class in
+`autonomy.classes` (`write` asks you by default; `external_message` and `spend` are
+forbidden until you change them), and always with your OK on Telegram if the server marks
+it destructive. You see exactly what it would do, and hear what came of it.
 
 A tool the server marks as destructive is refused as `read`, whatever the config says.
 What a tool returns is read as material, never instructions; every call is logged, counted

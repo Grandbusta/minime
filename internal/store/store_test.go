@@ -909,3 +909,35 @@ func TestWorkData(t *testing.T) {
 		t.Errorf("set data = %s %q", w.Data, w.DataKind)
 	}
 }
+
+func TestActions(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	a := memory.Action{ID: ulid.Make(), Tool: "notes.write_file", Class: "write", Args: `{"path":"plan.md"}`, Why: "asked",
+		Status: memory.ActionProposed, ProposedAt: at}
+	if err := s.SaveAction(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.ActionsSince(ctx, at); err != nil || n < 1 {
+		t.Errorf("since = %d, %v", n, err)
+	}
+	if moved, err := s.SetAction(ctx, a.ID, []string{memory.ActionProposed}, memory.ActionApproved, "", at); err != nil || !moved {
+		t.Fatalf("approve = %v, %v", moved, err)
+	}
+	if moved, _ := s.SetAction(ctx, a.ID, []string{memory.ActionProposed}, memory.ActionDenied, "late", at); moved {
+		t.Error("an approved action was denied after")
+	}
+	run, err := s.Actions(ctx, []string{memory.ActionApproved}, 50)
+	if err != nil || !slices.ContainsFunc(run, func(x memory.Action) bool { return x.ID == a.ID && x.Args == a.Args }) {
+		t.Fatalf("to run = %+v, %v", run, err)
+	}
+	if moved, _ := s.SetAction(ctx, a.ID, []string{memory.ActionApproved}, memory.ActionDone, "wrote plan.md", at); !moved {
+		t.Fatal("not done")
+	}
+	recent, _ := s.RecentActions(ctx, 50)
+	if i := slices.IndexFunc(recent, func(x memory.Action) bool { return x.ID == a.ID }); i < 0 || recent[i].Status != memory.ActionDone ||
+		recent[i].Result != "wrote plan.md" || !recent[i].DoneAt.Equal(at) {
+		t.Errorf("recent = %+v", recent)
+	}
+}

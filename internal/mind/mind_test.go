@@ -36,6 +36,7 @@ type fakeStore struct {
 	facts       []memory.Fact // newest first
 	people      map[string]memory.Person
 	intentions  []memory.Intention
+	actions     []memory.Action
 	projects    map[ulid.ULID]memory.Project
 	works       []memory.Work
 	spent       float64 // what CostSince returns
@@ -376,6 +377,41 @@ func (s *fakeStore) OpenIntentions(_ context.Context, subject, kind string) ([]m
 	}), nil
 }
 
+func (s *fakeStore) SaveAction(_ context.Context, a memory.Action) error {
+	s.actions = append(s.actions, a)
+	return nil
+}
+
+func (s *fakeStore) SetAction(_ context.Context, id ulid.ULID, from []string, status, result string, at time.Time) (bool, error) {
+	for n := range s.actions {
+		if a := &s.actions[n]; a.ID == id && slices.Contains(from, a.Status) {
+			a.Status, a.Result, a.DoneAt = status, result, at
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *fakeStore) Actions(_ context.Context, statuses []string, limit int) ([]memory.Action, error) {
+	var out []memory.Action
+	for _, a := range s.actions {
+		if slices.Contains(statuses, a.Status) && len(out) < limit {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) ActionsSince(_ context.Context, since time.Time) (int, error) {
+	n := 0
+	for _, a := range s.actions {
+		if !a.ProposedAt.Before(since) {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (s *fakeStore) Work(_ context.Context, id ulid.ULID) (memory.Work, bool, error) {
 	w, ok := find(s.works, func(w memory.Work) bool { return w.ID == id })
 	return w, ok, nil
@@ -645,6 +681,7 @@ type fakeSystem2 struct {
 	goals      []system2.GoalTaken
 	send       system2.Send
 	moves      []system2.Move
+	acts       []system2.Act
 	formats    map[string]string // reply text by Format.Name, for structured requests
 	requests   []system2.Request
 }
@@ -658,7 +695,7 @@ func (f *fakeSystem2) Reason(_ context.Context, req system2.Request) (system2.Re
 		return system2.Response{Provider: "fake2/1", Text: f.formats[req.Format.Name], CostUSD: 0.002}, nil
 	}
 	return system2.Response{Provider: "fake2/1", Text: "a thoughtful reply", Remember: f.remember, WhoTheyAre: f.whoTheyAre,
-		Reminders: f.reminders, Promises: f.promises, Lessons: f.lessons, Feedback: f.feedback, Goals: f.goals, Send: f.send, Moves: f.moves, CostUSD: 0.001}, nil
+		Reminders: f.reminders, Promises: f.promises, Lessons: f.lessons, Feedback: f.feedback, Goals: f.goals, Send: f.send, Moves: f.moves, Acts: f.acts, CostUSD: 0.001}, nil
 }
 
 var testSet = questions.Set{

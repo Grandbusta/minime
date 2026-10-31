@@ -76,7 +76,7 @@ search:
 #     - name: notes
 #       about: "my shared folder, /Users/you/shared-with-daniel: notes I share"
 #       command: [npx, -y, "@modelcontextprotocol/server-filesystem", "/Users/you/shared-with-daniel"]
-#       tools: {read_text_file: read, list_directory: read, search_files: read}
+#       tools: {read_text_file: read, list_directory: read, search_files: read, write_file: write}
 #     - name: drive
 #       url: https://example.com/mcp
 #       auth_env: DRIVE_MCP_TOKEN

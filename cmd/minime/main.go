@@ -335,6 +335,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	// Tools from MCP servers join its abilities; a server it can't reach is
 	// shown in the console and left out.
 	var toolAbilities []ability.Ability
+	var doers []mind.Doer
 	var toolInfo []console.ToolServer
 	for _, c := range tools.Connect(ctx, cfg.Tools, cfg.Tools.CallsPerDay*cfg.DailyLife.Pace, st, log.With("component", "tools")) {
 		defer c.Server.Close()
@@ -345,6 +346,10 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		for _, t := range c.Tools {
 			toolAbilities = append(toolAbilities, t)
 			info.Tools = append(info.Tools, t.Name())
+		}
+		for _, a := range c.Actions {
+			doers = append(doers, a)
+			info.Tools = append(info.Tools, fmt.Sprintf("%s (%s)", a.Name(), a.Class()))
 		}
 		toolInfo = append(toolInfo, info)
 	}
@@ -390,9 +395,10 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		Asker:      tg,
 		Filer:      tg,
 		Formats:    formats,
-		Calls:      calls(cfg),
-		Embedder:   embedder,
-		Log:        log.With("component", "mind"),
+		Doers:      doers, ActionsPerDay: cfg.Tools.ActionsPerDay,
+		Calls:    calls(cfg),
+		Embedder: embedder,
+		Log:      log.With("component", "mind"),
 	})
 
 	log.Info("minime awake", "name", life.Name, "life_story_lines", len(life.Story), "owners", len(cfg.Telegram.OwnerIDs),

@@ -175,7 +175,8 @@ The clock ticks once a minute, on the minute. Each tick runs, in order (`tick` i
 [initiative.go](../internal/mind/initiative.go)), first what someone is waiting for, then
 the slow work of its own day:
 
-1. **Approvals:** deny the ones unanswered for 24 hours; send the ones not yet sent.
+1. **Approvals:** deny the ones unanswered for 24 hours; send the ones not yet sent; run
+   the tools that change things that are approved.
 2. **Calls:** expire the ones unanswered for 24 hours; ask the ones due today.
 3. **Due reminders and promises** whose time has come.
 4. **Check-ins**, when a `check_ins` time passed since the last tick.
@@ -280,13 +281,23 @@ The mind does every other step; an ability never writes anything itself.
 Tools ([internal/tools](../internal/tools)) come from MCP servers, reached with the
 official Go SDK when it starts: a local one as a command (given only `PATH`, `HOME` and
 the variables its config names), a remote one over https. Only the tools the config lists
-are offered, and only reading ones; a tool its server marks as destructive is refused.
+are offered. A reading tool is an ability; a tool its server marks as destructive is
+refused as one.
 Each call has a timeout, connects again once if the connection dropped, and keeps up to
 12,000 characters of the result, fenced like a web page. Calls go in `web_log` (kind
 `tool`) and count against `tools.calls_per_day`; the action class `use_tools` (auto or
 forbid) gates them all. A tool is `ability.Chained`: after its call, System 2 sees what
 came back and may call another of its server's tools, up to three calls in one activity
 (`followUp` in [steps.go](../internal/mind/steps.go)), before it writes.
+
+A tool that changes things is a `mind.Doer`, classed by the autonomy class its config
+gives it (`write`, `external_message`, `commit`, `spend`). It can only be proposed: in
+`act`, in a reply to the owner or in an activity of its own day
+([actions.go](../internal/mind/actions.go)). A proposal is checked against the tool's
+schema and `tools.actions_per_day`, kept in `actions`, and goes through the gate: `auto`
+approves it (a destructive tool asks anyway), `ask` sends the owner the exact tool,
+arguments and reason. Approving only marks it approved; the next tick runs it, so a reply
+never waits on a tool, and tells the owner what came of it, kept as an exchange.
 
 Books and articles come through [internal/library](../internal/library), which fetches
 only from those two sites and stores each text once (`sources`). Web search and fetching

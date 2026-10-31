@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -131,10 +132,11 @@ type Web struct {
 }
 
 // Tools are MCP servers whose tools it may use. Only the tools listed are
-// offered, each with what it can do: for now only "read".
+// offered, each with what it can do (ToolKinds).
 type Tools struct {
-	CallsPerDay int          `yaml:"calls_per_day"` // grows with pace, like the web caps
-	Servers     []ToolServer `yaml:"servers"`
+	CallsPerDay   int          `yaml:"calls_per_day"`   // reading calls; grows with pace, like the web caps
+	ActionsPerDay int          `yaml:"actions_per_day"` // tools that change things: real effects, so not paced
+	Servers       []ToolServer `yaml:"servers"`
 }
 
 type ToolServer struct {
@@ -153,14 +155,18 @@ type ToolServer struct {
 	Tools   map[string]string `yaml:"tools"` // tool name → what it can do
 }
 
-// ToolRead is the one kind of tool there is yet: it only reads.
+// ToolRead is a tool that only reads. Every other kind is the autonomy class
+// the gate checks before it is used.
 const ToolRead = "read"
+
+// ToolKinds are what a tool can do: read, or one of these autonomy classes.
+var ToolKinds = []string{ToolRead, "write", "external_message", "commit", "spend"}
 
 var serverName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 func (t Tools) Validate() error {
-	if t.CallsPerDay < 0 {
-		return errors.New("config: tools.calls_per_day can't be negative")
+	if t.CallsPerDay < 0 || t.ActionsPerDay < 0 {
+		return errors.New("config: tools.calls_per_day and actions_per_day can't be negative")
 	}
 	seen := map[string]bool{}
 	for i, s := range t.Servers {
@@ -179,8 +185,8 @@ func (t Tools) Validate() error {
 		}
 		seen[s.Name] = true
 		for tool, kind := range s.Tools {
-			if kind != ToolRead {
-				return fmt.Errorf("config: tools.servers %s: %s is %q; only read tools can be used yet", s.Name, tool, kind)
+			if !slices.Contains(ToolKinds, kind) {
+				return fmt.Errorf("config: tools.servers %s: %s is %q; it can be %s", s.Name, tool, kind, strings.Join(ToolKinds, ", "))
 			}
 		}
 	}
@@ -338,7 +344,7 @@ func Load(path string) (*Config, error) {
 			DataPrompt: "prompts/data.md",
 			Web:        Web{Searches: 10, Pages: 15}},
 		Search:   Search{Provider: "openai"},
-		Tools:    Tools{CallsPerDay: 50},
+		Tools:    Tools{CallsPerDay: 50, ActionsPerDay: 10},
 		Autonomy: Autonomy{AskExpires: 24 * time.Hour},
 		Judgment: Judgment{Calls: true, AsksPerDay: 3, ReplyWindow: 30 * time.Minute},
 		Log:      Log{Level: "info"},

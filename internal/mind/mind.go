@@ -114,6 +114,10 @@ type Store interface {
 	SetOutcome(ctx context.Context, id ulid.ULID, outcome, verdict, note, by string, at time.Time) (bool, error)
 	IntentionWork(ctx context.Context, intention ulid.ULID) (memory.Work, bool, error)
 	Work(ctx context.Context, id ulid.ULID) (memory.Work, bool, error)
+	SaveAction(ctx context.Context, a memory.Action) error
+	SetAction(ctx context.Context, id ulid.ULID, from []string, status, result string, at time.Time) (bool, error)
+	Actions(ctx context.Context, statuses []string, limit int) ([]memory.Action, error)
+	ActionsSince(ctx context.Context, since time.Time) (int, error)
 	SetWorkData(ctx context.Context, id ulid.ULID, kind string, data json.RawMessage) error
 	WorksMissingData(ctx context.Context, kinds []string, limit int) ([]memory.Work, error)
 	Intention(ctx context.Context, id ulid.ULID) (memory.Intention, bool, error)
@@ -193,7 +197,11 @@ type Config struct {
 	Filer Filer
 	// Formats is the files it can send things as; nil: none.
 	Formats *render.Set
-	Calls   Calls
+	// Doers are tools that change things; ActionsPerDay caps how many it
+	// proposes a day.
+	Doers         []Doer
+	ActionsPerDay int
+	Calls         Calls
 	// Embedder nil: it takes the owner's newest decision of the right type instead.
 	Embedder embed.Embedder
 	Log      *slog.Logger
@@ -202,7 +210,10 @@ type Config struct {
 type Mind struct {
 	Config
 	policyMu sync.RWMutex // guards Autonomy: the owner can change it in a chat while its day reads it
-	toPlan   atomic.Bool  // a goal was taken on in a chat: draft its learning plan on the next tick
+	// sendMu lets one loop at a time send approvals: a chat asks at once, and
+	// a tick sends what's unsent, so both could send the same one.
+	sendMu sync.Mutex
+	toPlan atomic.Bool // a goal was taken on in a chat: draft its learning plan on the next tick
 
 	dataOnce    sync.Once
 	dataFormats map[string]render.DataFormat // what each kind of work it makes carries, from its life; read by both loops
@@ -670,6 +681,9 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 	m.saveReminders(ctx, p, resp.Reminders)
 	m.savePromises(ctx, p, person, resp.Promises, workRefs)
 	m.movePromises(ctx, p, resp.Moves, promised)
+	if p.Speaker != "" && p.Speaker == m.policy().Owner { // only its owner can have it act, for now
+		m.propose(ctx, p, resp.Acts, p.At)
+	}
 	var more []*decision.Decision
 	more = append(more, m.correctFacts(ctx, p, d, refs, resp.Corrections, n)...)
 	more = append(more, m.changePermissions(ctx, p, d, resp.Permissions)...)
@@ -845,7 +859,7 @@ func (m *Mind) instructions(ctx context.Context, person memory.Person, n names) 
 	}
 	return strings.NewReplacer("{name}", n.agent, "{speaker}", n.speaker, "{life_story}", story,
 		"{personality}", personality, "{who_they_are}", m.whoTheyAre(ctx, person, n),
-		"{makes}", m.makesList(), "{abilities}", m.abilitiesList(), "{files}", m.filesHelp(n), "{intents}", strings.Join(m.intents(), ", "),
+		"{makes}", m.makesList(), "{abilities}", m.abilitiesList(), "{files}", m.filesHelp(n), "{actions}", m.actionsFor(person, n), "{intents}", strings.Join(m.intents(), ", "),
 		"{correct_self}", m.correctSelf(person), "{permissions_help}", m.permissionsHelp(person, n),
 		"{feedback_help}", m.feedbackHelp(ctx, person)+m.goalsHelp(ctx, person)).Replace(m.ReplyPrompt.Text)
 }

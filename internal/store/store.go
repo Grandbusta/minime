@@ -1536,6 +1536,79 @@ func (s *Store) LogWeb(ctx context.Context, kind, what string, costUSD float64, 
 	return nil
 }
 
+func (s *Store) SaveAction(ctx context.Context, a memory.Action) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO actions (id, tool, class, args, why, status, result, percept_id, proposed_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, a.ID.String(), a.Tool, a.Class, a.Args, a.Why, a.Status, a.Result,
+		nullULID(a.PerceptID), a.ProposedAt)
+	if err != nil {
+		return fmt.Errorf("save action: %w", err)
+	}
+	return nil
+}
+
+// SetAction moves an action on: only from one of from, so a second tap or a
+// late expiry can't move it again. It reports whether it moved.
+func (s *Store) SetAction(ctx context.Context, id ulid.ULID, from []string, status, result string, at time.Time) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE actions SET status = $3, result = $4,
+		done_at = CASE WHEN $3 IN ('done', 'failed', 'denied') THEN $5::timestamptz ELSE done_at END
+		WHERE id = $1 AND status = ANY($2)`, id.String(), from, status, result, at)
+	if err != nil {
+		return false, fmt.Errorf("set action: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// Actions returns, oldest first, up to limit actions with one of statuses.
+func (s *Store) Actions(ctx context.Context, statuses []string, limit int) ([]memory.Action, error) {
+	return s.queryActions(ctx, `SELECT `+actionColumns+` FROM actions WHERE status = ANY($1) ORDER BY proposed_at, id LIMIT $2`,
+		statuses, limit)
+}
+
+func (s *Store) RecentActions(ctx context.Context, limit int) ([]memory.Action, error) {
+	return s.queryActions(ctx, `SELECT `+actionColumns+` FROM actions ORDER BY proposed_at DESC, id DESC LIMIT $1`, limit)
+}
+
+func (s *Store) ActionsSince(ctx context.Context, since time.Time) (int, error) {
+	var n int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM actions WHERE proposed_at >= $1`, since).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count actions: %w", err)
+	}
+	return n, nil
+}
+
+const actionColumns = `id, tool, class, args, why, status, result, percept_id, proposed_at, done_at`
+
+func (s *Store) queryActions(ctx context.Context, sql string, args ...any) ([]memory.Action, error) {
+	rows, err := s.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query actions: %w", err)
+	}
+	defer rows.Close()
+	var out []memory.Action
+	for rows.Next() {
+		var (
+			a       memory.Action
+			id      string
+			percept *string
+			doneAt  *time.Time
+		)
+		if err := rows.Scan(&id, &a.Tool, &a.Class, &a.Args, &a.Why, &a.Status, &a.Result, &percept, &a.ProposedAt, &doneAt); err != nil {
+			return nil, err
+		}
+		if a.ID, err = ulid.Parse(id); err != nil {
+			return nil, err
+		}
+		if a.PerceptID, err = parseNullULID(percept); err != nil {
+			return nil, err
+		}
+		if doneAt != nil {
+			a.DoneAt = *doneAt
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 type WebEntry struct {
 	What string    `json:"what"`
 	At   time.Time `json:"at"`

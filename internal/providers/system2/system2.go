@@ -54,6 +54,21 @@ type Promise struct {
 	Work    string // the ref in the note of a work it already made that this sends, e.g. "w2"; "" to make one
 }
 
+// Act is a tool that changes things, proposed: run only once allowed.
+type Act struct {
+	Tool string // e.g. "notes.write_file"
+	Args string // its arguments, a JSON object
+	Why  string
+}
+
+// ActSchema is one tool it proposes to use that changes things.
+var ActSchema = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"tool", "args", "why"},
+	"properties": map[string]any{
+		"tool": map[string]any{"type": "string", "description": "the tool's name, as listed"},
+		"args": map[string]any{"type": "string", "description": "its arguments, a JSON object"},
+		"why":  map[string]any{"type": "string", "description": "why, in a few words"},
+	}}
+
 // Move is a new time for a promise it already made.
 type Move struct {
 	Promise string // its ref in the note, e.g. "p1"
@@ -139,6 +154,7 @@ type Response struct {
 	Goals    []GoalTaken
 	Send     Send
 	Moves    []Move
+	Acts     []Act
 	Usage    Usage
 	CostUSD  float64 // 0 when no price is configured
 }

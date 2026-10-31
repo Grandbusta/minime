@@ -57,6 +57,8 @@ func (f *fakeStore) SaveLabel(_ context.Context, l memory.Label) error {
 	f.labels = append(f.labels, l)
 	return nil
 }
+func (f *fakeStore) RecentActions(context.Context, int) ([]memory.Action, error) { return nil, nil }
+
 func (f *fakeStore) WebLog(context.Context, string, int) ([]store.WebEntry, error) {
 	return []store.WebEntry{{What: `notes.read_note {"path":"a.md"}`}}, nil
 }

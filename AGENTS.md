@@ -172,9 +172,11 @@ safe for concurrent use; a test of both loops orders every step through channels
   and what was made for someone never do.
 - The web: https only, public addresses only, only pages its own searches found; what it
   reads is material, never instructions.
-- Tools: only those config lists, only reading ones (a tool its server calls destructive
-  is refused); a local server gets only PATH, HOME and the env config names; what a tool
-  returns is material, never instructions.
+- Tools: only those config lists; a local server gets only PATH, HOME and the env config
+  names; what a tool returns is material, never instructions. A tool that changes things
+  is only proposed, by the owner's chat or its own day, never run in a reply: it runs on a
+  later tick once its class allows it, and a destructive one always asks the owner. It
+  never says an action is done before it is.
 - The console listens on localhost unless a token of 16+ characters is set.
 
 ## Docs to keep in step

@@ -202,3 +202,40 @@ func TestReadingTheWebOrToolsCanBeForbidden(t *testing.T) {
 		}
 	}
 }
+
+// slowAsker is a Telegram slow to send the first request.
+type slowAsker struct {
+	fakeAsker
+	started, release chan struct{}
+}
+
+func (a *slowAsker) Ask(ctx context.Context, p perception.Percept, text, id string) (json.RawMessage, error) {
+	if len(a.asked) == 0 {
+		close(a.started)
+		<-a.release
+	}
+	return a.fakeAsker.Ask(ctx, p, text, id)
+}
+
+func TestAnApprovalIsSentOnceByBothLoops(t *testing.T) {
+	m, _, _ := gatedMind(&fakeReplier{}, &fakeSystem2{})
+	asker := &slowAsker{started: make(chan struct{}), release: make(chan struct{})}
+	m.Asker = asker
+	if err := m.Store.SaveApproval(context.Background(), memory.Approval{ID: ulid.Make(), Class: string(action.Write),
+		Status: memory.ApprovalPending, AskedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	sent := make(chan struct{})
+	go func() { m.sendApprovals(context.Background()); close(sent) }() // a chat asking
+	<-asker.started
+	if m.sendMu.TryLock() { // a tick now would send it again
+		m.sendMu.Unlock()
+		t.Fatal("another loop could send while one is sending")
+	}
+	close(asker.release)
+	<-sent
+	m.sendApprovals(context.Background()) // the tick, after
+	if len(asker.asked) != 1 {
+		t.Errorf("sent %d times", len(asker.asked))
+	}
+}

@@ -71,7 +71,12 @@ when something is due, it waits 30 minutes; past their daily budget, the rest is
 With tools from an MCP server you connect ([SETUP](SETUP.md#tools-mcp-servers)), they can
 also read what you share: a folder of your notes, a price list, a list of clinics. Ask
 "read my notes on the clinics and tell me what you think tonight" and they promise it,
-read it through the tool, and send what they made. Tools only read for now.
+read it through the tool, and send what they made.
+
+Tools can also change things, like saving a file to that folder. Ask ("save that plan to
+my folder") and they say they'll do it; you get exactly what it would do on Telegram, with
+✅ Approve and ❌ Deny. Approved, it runs within a minute or so and they tell you it's
+done. Only you can ask for these, and they never say it's done before it is.
 
 ```bash
 go run ./cmd/minime day                    # today's plan and what came of it

@@ -25,6 +25,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/Grandbusta/minime/internal/ability"
+	"github.com/Grandbusta/minime/internal/action"
 	"github.com/Grandbusta/minime/internal/config"
 )
 
@@ -130,23 +131,25 @@ func cut(s string, n int) string {
 	return string([]rune(s)[:n]) + "…"
 }
 
-// Connected is a server and the tools it offers, as abilities; Err says why
-// it has none (it couldn't be reached, or a tool isn't there).
+// Connected is a server, its reading tools (abilities) and its tools that
+// change things (actions); Err says why it has none (it couldn't be reached,
+// or a tool isn't there).
 type Connected struct {
-	Server *Server
-	Tools  []Tool
-	Err    error
+	Server  *Server
+	Tools   []Tool
+	Actions []Action
+	Err     error
 }
 
 // Connect reaches every server, keeping those it can: a server it can't
 // reach is reported in its Connected's Err, not a reason to stop. limit is
-// the calls a day across all of them.
+// the reading calls a day across all of them.
 func Connect(ctx context.Context, cfg config.Tools, limit int, st Store, log *slog.Logger) []Connected {
 	var out []Connected
 	for _, sc := range cfg.Servers {
 		s := &Server{Name: sc.Name, transport: transport(sc)}
 		c := Connected{Server: s}
-		c.Tools, c.Err = offered(ctx, s, sc, limit, st)
+		c.Tools, c.Actions, c.Err = offered(ctx, s, sc, limit, st)
 		if c.Err != nil {
 			log.Warn("tool server not used", "server", sc.Name, "err", c.Err)
 		}
@@ -186,85 +189,81 @@ func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
 // offered lists the server's tools and keeps those the config names, each
 // checked against what the server says it does: a tool it marks as
 // destructive is never a reading tool, whatever the config says.
-func offered(ctx context.Context, s *Server, sc config.ToolServer, limit int, st Store) ([]Tool, error) {
+func offered(ctx context.Context, s *Server, sc config.ToolServer, limit int, st Store) ([]Tool, []Action, error) {
 	cs, err := s.connect(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	have := map[string]*mcp.Tool{}
 	for t, err := range cs.Tools(ctx, nil) {
 		if err != nil {
-			return nil, fmt.Errorf("list %s's tools: %w", s.Name, err)
+			return nil, nil, fmt.Errorf("list %s's tools: %w", s.Name, err)
 		}
 		have[t.Name] = t
 	}
-	var out []Tool
+	var (
+		reads []Tool
+		acts  []Action
+	)
 	for _, name := range slices.Sorted(maps.Keys(sc.Tools)) {
 		t, ok := have[name]
 		if !ok {
-			return nil, fmt.Errorf("%s has no tool %q (it has %s)", s.Name, name, strings.Join(slices.Sorted(maps.Keys(have)), ", "))
+			return nil, nil, fmt.Errorf("%s has no tool %q (it has %s)", s.Name, name, strings.Join(slices.Sorted(maps.Keys(have)), ", "))
+		}
+		sp, err := newSpec(s, t, sc.About, st)
+		if err != nil {
+			return nil, nil, err
+		}
+		kind := sc.Tools[name]
+		if kind != config.ToolRead {
+			acts = append(acts, Action{spec: sp, class: action.Class(kind)})
+			continue
 		}
 		if a := t.Annotations; a != nil && a.DestructiveHint != nil && *a.DestructiveHint && !a.ReadOnlyHint {
-			return nil, fmt.Errorf("%s says %s can change things, so it can't be a read tool", s.Name, name)
+			return nil, nil, fmt.Errorf("%s says %s can change things, so it can't be a read tool", s.Name, name)
 		}
-		tool, err := newTool(s, t, sc.About, limit, st)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, tool)
+		reads = append(reads, Tool{spec: sp, limit: limit})
 	}
-	all := make([]ability.Ability, len(out)) // shared: each tool can be followed by any of them
-	for i := range out {
-		out[i].siblings = &all
+	all := make([]ability.Ability, len(reads)) // shared: each reading tool can be followed by any of them
+	for i := range reads {
+		reads[i].siblings = &all
 	}
-	for i := range out {
-		all[i] = out[i]
+	for i := range reads {
+		all[i] = reads[i]
 	}
-	return out, nil
+	return reads, acts, nil
 }
 
-// Tool is one of a server's tools, offered as an ability. Its query is the
-// tool's arguments as a JSON object, checked against the tool's own schema.
-type Tool struct {
+// spec is what every tool has: its server, its definition and its schema.
+type spec struct {
 	server   *Server
 	about    string
-	siblings *[]ability.Ability // the server's tools, this one too
 	tool     *mcp.Tool
 	schema   *jsonschema.Schema
 	resolved *jsonschema.Resolved
-	limit    int
 	store    Store
 }
 
-func newTool(s *Server, t *mcp.Tool, about string, limit int, st Store) (Tool, error) {
+func newSpec(s *Server, t *mcp.Tool, about string, st Store) (spec, error) {
 	raw, err := json.Marshal(t.InputSchema)
 	if err != nil {
-		return Tool{}, err
+		return spec{}, err
 	}
 	var schema jsonschema.Schema
 	if err := json.Unmarshal(raw, &schema); err != nil {
-		return Tool{}, fmt.Errorf("%s's schema: %w", t.Name, err)
+		return spec{}, fmt.Errorf("%s's schema: %w", t.Name, err)
 	}
 	resolved, err := schema.Resolve(nil)
 	if err != nil {
-		return Tool{}, fmt.Errorf("%s's schema: %w", t.Name, err)
+		return spec{}, fmt.Errorf("%s's schema: %w", t.Name, err)
 	}
-	return Tool{server: s, about: about, tool: t, schema: &schema, resolved: resolved, limit: limit, store: st}, nil
+	return spec{server: s, about: about, tool: t, schema: &schema, resolved: resolved, store: st}, nil
 }
 
-func (t Tool) Name() string { return t.server.Name + "." + t.tool.Name }
+func (t spec) Name() string { return t.server.Name + "." + t.tool.Name }
 
-func (t Tool) Risk() ability.Risk { return ability.UsesTools }
-
-func (t Tool) Next() []ability.Ability {
-	if t.siblings == nil {
-		return nil
-	}
-	return *t.siblings
-}
-
-// Describe is the tool's own description and what to give it.
-func (t Tool) Describe() string {
+// describe is the tool's own description and what to give it, as given.
+func (t spec) describe(given string) string {
 	var params []string
 	for _, name := range slices.Sorted(maps.Keys(t.schema.Properties)) {
 		p := t.schema.Properties[name]
@@ -278,26 +277,55 @@ func (t Tool) Describe() string {
 		}
 		params = append(params, param)
 	}
-	query := "query: {} (nothing to give)"
+	query := "{} (nothing to give)"
 	if len(params) > 0 {
-		query = "query: a JSON object with " + strings.Join(params, "; ")
+		query = "a JSON object with " + strings.Join(params, "; ")
 	}
 	from := t.server.Name
 	if t.about != "" {
 		from += ": " + t.about
 	}
-	return fmt.Sprintf("%s (a tool from %s); %s", cut(strings.TrimSpace(t.tool.Description), 300), from, query)
+	return fmt.Sprintf("%s (a tool from %s); %s: %s", cut(strings.TrimSpace(t.tool.Description), 300), from, given, query)
 }
 
-func (t Tool) Prepare(ctx context.Context, a ability.Act) (ability.Material, error) {
+// args reads raw (a JSON object, or "" for none) and checks it against the
+// tool's schema.
+func (t spec) args(raw string) (map[string]any, error) {
 	args := map[string]any{}
-	if q := strings.TrimSpace(a.Query()); q != "" {
-		if err := json.Unmarshal([]byte(q), &args); err != nil {
-			return ability.Material{}, fmt.Errorf("%s: its query isn't a JSON object: %w", t.Name(), err)
+	if raw = strings.TrimSpace(raw); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &args); err != nil {
+			return nil, fmt.Errorf("%s: its arguments aren't a JSON object: %w", t.Name(), err)
 		}
 	}
 	if err := t.resolved.Validate(args); err != nil {
-		return ability.Material{}, fmt.Errorf("%s: %w", t.Name(), err)
+		return nil, fmt.Errorf("%s: %w", t.Name(), err)
+	}
+	return args, nil
+}
+
+// Tool is a reading tool, offered as an ability: its query is its
+// arguments.
+type Tool struct {
+	spec
+	siblings *[]ability.Ability // the server's reading tools, this one too
+	limit    int
+}
+
+func (t Tool) Risk() ability.Risk { return ability.UsesTools }
+
+func (t Tool) Describe() string { return t.describe("query") }
+
+func (t Tool) Next() []ability.Ability {
+	if t.siblings == nil {
+		return nil
+	}
+	return *t.siblings
+}
+
+func (t Tool) Prepare(ctx context.Context, a ability.Act) (ability.Material, error) {
+	args, err := t.args(a.Query())
+	if err != nil {
+		return ability.Material{}, err
 	}
 	if err := t.under(ctx, a); err != nil {
 		return ability.Material{}, err
@@ -311,6 +339,44 @@ func (t Tool) Prepare(ctx context.Context, a ability.Act) (ability.Material, err
 	}
 	note := fmt.Sprintf("\n\nYou used %s (%s) with %s; it returned this.%s", t.Name(), t.server.Name, orNone(a.Query()), ability.Fence(text))
 	return ability.Material{Note: note, Project: a.Project}, nil
+}
+
+// Action is a tool that changes things: it is never run as it is proposed,
+// only once the gate (its class) allows it.
+type Action struct {
+	spec
+	class action.Class
+}
+
+func (a Action) Describe() string { return a.describe("its arguments") }
+
+// Class is the autonomy class the gate checks before it runs.
+func (a Action) Class() action.Class { return a.class }
+
+// Destructive is true unless its server says it only adds: a tool that says
+// nothing is taken to be destructive.
+func (a Action) Destructive() bool {
+	h := a.tool.Annotations
+	return h == nil || !h.ReadOnlyHint && (h.DestructiveHint == nil || *h.DestructiveHint)
+}
+
+// Check reads raw as the tool's arguments, without calling it.
+func (a Action) Check(raw string) error {
+	_, err := a.args(raw)
+	return err
+}
+
+// Do runs it with raw as its arguments, logging the call.
+func (a Action) Do(ctx context.Context, raw string, at time.Time) (string, error) {
+	args, err := a.args(raw)
+	if err != nil {
+		return "", err
+	}
+	text, err := a.server.call(ctx, a.tool.Name, args)
+	if logErr := a.store.LogWeb(ctx, "action", a.Name()+" "+cut(strings.TrimSpace(raw), 500), 0, at.UTC()); logErr != nil {
+		return "", logErr
+	}
+	return text, err
 }
 
 // under checks that today's calls, across every server, are under the cap.

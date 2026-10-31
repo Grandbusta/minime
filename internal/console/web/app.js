@@ -616,6 +616,8 @@ async function loadOverview() {
   $("#toolsH").hidden = !(o.tools || []).length;
   $("#tools").innerHTML = (o.tools || []).map((s) => `<div class="appr ${s.error ? "done" : ""}"><div class="appr-top"><b>${esc(s.name)}</b>
       <span>${s.error ? "not connected" : (s.tools || []).length + " tools"}</span></div><p>${esc(s.error || (s.tools || []).join(", "))}</p></div>`).join("")
+    + (o.actions || []).map((a) => `<div class="appr ${a.status === "proposed" ? "" : "done"}"><div class="appr-top"><b>${esc(a.tool)}</b>
+      <span>${esc(a.status)} · ${fmtTime(a.at)}</span></div><p>${esc(a.why)}${a.result ? " · " + esc(a.result) : ""}</p></div>`).join("")
     + (o.tool_calls || []).map((c) => `<div class="appr done"><div class="appr-top"><b>${esc(c.what.split(" ")[0])}</b><span>${fmtTime(c.at)}</span></div>
       <p>${esc(c.what.split(" ").slice(1).join(" ") || "no arguments")}</p></div>`).join("");
   if (o.next) {

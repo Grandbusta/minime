@@ -45,6 +45,7 @@ type Store interface {
 	IntentionsDue(ctx context.Context, from, to time.Time) ([]memory.Intention, error)
 	WorksBetween(ctx context.Context, from, to time.Time) ([]memory.Work, error)
 	WebLog(ctx context.Context, kind string, limit int) ([]store.WebEntry, error)
+	RecentActions(ctx context.Context, limit int) ([]memory.Action, error)
 	RecentWorks(ctx context.Context, limit int) ([]memory.Work, error)
 	Work(ctx context.Context, id ulid.ULID) (memory.Work, bool, error)
 	Conversations(ctx context.Context) ([]memory.Conversation, error)
@@ -208,10 +209,21 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	var calls []store.WebEntry
+	var (
+		calls []store.WebEntry
+		acts  []map[string]any
+	)
 	if len(s.Info.Tools) > 0 {
 		if calls, err = s.Store.WebLog(ctx, "tool", 5); s.failed(w, err) {
 			return
+		}
+		recent, err := s.Store.RecentActions(ctx, 5)
+		if s.failed(w, err) {
+			return
+		}
+		for _, a := range recent {
+			acts = append(acts, map[string]any{"tool": a.Tool, "why": a.Why, "status": a.Status, "result": excerpt(a.Result, 160),
+				"at": a.ProposedAt})
 		}
 	}
 	byDay := make([]map[string]any, len(costs))
@@ -220,7 +232,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	}
 	s.json(w, map[string]any{
 		"name": s.Info.Name, "timezone": s.Info.Zone.String(), "started_at": s.Info.Started, "now": now,
-		"system1": s.Info.System1, "system2": s.Info.System2, "sets": s.Info.Sets, "tools": s.Info.Tools, "tool_calls": calls,
+		"system1": s.Info.System1, "system2": s.Info.System2, "sets": s.Info.Sets, "tools": s.Info.Tools, "tool_calls": calls, "actions": acts,
 		"today": map[string]any{
 			"decisions": vitals.Decisions, "by_tier": vitals.ByTier, "escalations": vitals.Escalations,
 			"cost_usd": vitals.CostUSD, "avg_latency_ms": vitals.AvgLatency.Milliseconds(),

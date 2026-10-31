@@ -41,6 +41,8 @@ func (m *Mind) sendApprovals(ctx context.Context) {
 	if m.Asker == nil || m.policy().Owner == "" {
 		return
 	}
+	m.sendMu.Lock()
+	defer m.sendMu.Unlock()
 	as, err := m.Store.UnsentApprovals(ctx, approvalsPerTick)
 	if err != nil || len(as) == 0 {
 		if err != nil {
@@ -68,6 +70,9 @@ func (m *Mind) sendApprovals(ctx context.Context) {
 }
 
 func (m *Mind) request(ctx context.Context, a memory.Approval) string {
+	if a.Kind == memory.KindAction {
+		return a.Text
+	}
 	who := orDefault(m.person(ctx, a.Person).Name, fallbackName)
 	var ask string
 	switch action.Class(a.Class) {
@@ -167,6 +172,9 @@ func (m *Mind) decide(ctx context.Context, a memory.Approval, status string, per
 }
 
 func (m *Mind) carryOut(ctx context.Context, a memory.Approval, now time.Time) string {
+	if a.Kind == memory.KindAction {
+		return m.approveAction(ctx, a, now)
+	}
 	yes := a.Status == memory.ApprovalApproved
 	why := map[string]string{memory.ApprovalDenied: "the owner said no", memory.ApprovalExpired: "no answer from the owner"}[a.Status]
 	switch action.Class(a.Class) {

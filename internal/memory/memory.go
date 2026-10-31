@@ -153,6 +153,32 @@ func (w Work) Carries(kind string) bool {
 	return kind == "" || kind == w.DataKind && len(w.Data) > 0
 }
 
+// Action is a tool that changes things, proposed by the agent. It runs only
+// once approved: by the gate (auto) or by the owner (ask).
+type Action struct {
+	ID         ulid.ULID
+	Tool       string // "server.tool"
+	Class      string // the autonomy class, e.g. "write"
+	Args       string // its arguments as JSON, checked when proposed
+	Why        string
+	Status     string // ActionProposed, ActionApproved, ActionDone, ActionFailed, ActionDenied
+	Result     string // what the tool said, or why it failed or didn't run
+	PerceptID  ulid.ULID
+	ProposedAt time.Time
+	DoneAt     time.Time
+}
+
+const (
+	ActionProposed = "proposed" // waiting for the owner
+	ActionApproved = "approved" // runs on the next tick
+	ActionDone     = "done"
+	ActionFailed   = "failed"
+	ActionDenied   = "denied" // the owner said no, or didn't answer
+)
+
+// KindAction marks an approval as one for an Action (its Ref).
+const KindAction = "action"
+
 type Approval struct {
 	ID        ulid.ULID
 	Class     string // the action class, e.g. "reach_out"
