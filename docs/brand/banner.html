@@ -6,7 +6,8 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@600&family=Inter:wght@500&display=block">
 <style>
   /* Rendered to banner-dark.png and banner-light.png at 1280x358; ?light for the light one.
-     ?social renders social.png, GitHub's 1280x640 social preview. */
+     ?social renders social.png, GitHub's 1280x640 social preview; ?header renders
+     x-header.png (1500x500, X's header) and ?avatar x-avatar.png (400x400, X's profile picture). */
   :root { --bg: #0c0f0d; --ink: #f2f5f2; --sub: #9aa69e; --green: #2fcb6b; --glow: rgba(47, 203, 107, .35); }
   :root.light { --bg: #f5f8f4; --ink: #0b1f14; --sub: #5b6b61; --green: #19a956; --glow: rgba(47, 203, 107, .28); }
   * { margin: 0; box-sizing: border-box; }
@@ -24,13 +25,27 @@
   :root.social .word { font-size: 136px; }
   :root.social .tag { margin-top: 24px; font-size: 28px; }
   :root.social .sub { margin-top: 22px; max-width: 560px; font-size: 27px; line-height: 1.4; }
+  /* X's header: the profile picture covers the bottom left, so the words sit right of centre. */
+  :root.header, :root.header body { width: 1500px; height: 500px; }
+  :root.header body { justify-content: center; padding: 0 0 0 330px;
+    background: radial-gradient(ellipse at 62% 50%, var(--glow), transparent 45%), var(--bg); }
+  :root.header .mark { display: none; }
+  :root.header .word { font-size: 132px; }
+  :root.header .tag { margin-top: 22px; font-size: 28px; }
+  :root.header .sub { margin-top: 20px; font-size: 27px; }
+  /* X's profile picture: shown as a circle, so Mini sits in it, shoulders at the bottom. */
+  :root.avatar, :root.avatar body { width: 400px; height: 400px; }
+  :root.avatar body { padding: 0; justify-content: center; align-items: flex-end;
+    background: radial-gradient(circle at 50% 42%, var(--glow), transparent 62%), var(--bg); }
+  :root.avatar .mark { width: 330px; height: 330px; margin-bottom: -24px; filter: drop-shadow(0 0 22px var(--glow)); }
+  :root.avatar .text { display: none; }
 </style>
 <script>if (location.search.includes("light")) document.documentElement.classList.add("light");
-if (location.search.includes("social")) document.documentElement.classList.add("social");</script>
+for (const m of ["social", "header", "avatar"]) if (location.search.includes(m)) document.documentElement.classList.add(m);</script>
 </head>
 <body>
   <img class="mark" src="mark.svg" alt="">
-  <div>
+  <div class="text">
     <div class="word">mini<b>me</b></div>
     <div class="tag">Someone, not something</div>
     <div class="sub">An AI person with a life of their own, who learns how you decide.</div>
