@@ -68,6 +68,11 @@ embedding:
 search:
   provider: openai
 
+# Know-how in the Agent Skills format (a folder with a SKILL.md each), read in
+# order; a later one wins on a name. Default: skills, then self/skills.
+# agent_skills:
+#   dirs: [skills, self/skills]
+
 # MCP servers whose tools they may use: only the tools listed, and only tools
 # that read for now. A local server gets PATH, HOME and the env listed, never
 # the rest of the environment. calls_per_day (all servers) grows with pace.

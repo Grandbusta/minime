@@ -34,6 +34,7 @@ import (
 	"github.com/Grandbusta/minime/internal/ability/journal"
 	"github.com/Grandbusta/minime/internal/ability/reading"
 	"github.com/Grandbusta/minime/internal/ability/web"
+	"github.com/Grandbusta/minime/internal/agentskill"
 	"github.com/Grandbusta/minime/internal/channel/telegram"
 	"github.com/Grandbusta/minime/internal/config"
 	"github.com/Grandbusta/minime/internal/console"
@@ -357,6 +358,14 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		}
 		toolInfo = append(toolInfo, info)
 	}
+	skills := agentskill.Load(cfg.SkillDirs(), log.With("component", "skills"))
+	var skillInfo []string
+	if len(skills) > 0 {
+		toolAbilities = append(toolAbilities, agentskill.Use{Skills: skills})
+		for _, s := range skills {
+			skillInfo = append(skillInfo, s.Name+": "+s.Description)
+		}
+	}
 	abilitySet, err := newAbilities(names, depsFor(cfg, st, log), toolAbilities...)
 	if err != nil {
 		return err
@@ -399,7 +408,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		Asker:      tg,
 		Filer:      tg,
 		Formats:    formats,
-		Doers:      doers, ActionsPerDay: cfg.Tools.ActionsPerDay, Watchers: watchers,
+		Doers:      doers, ActionsPerDay: cfg.Tools.ActionsPerDay, Watchers: watchers, Skills: skills,
 		Calls:    calls(cfg),
 		Embedder: embedder,
 		Log:      log.With("component", "mind"),
@@ -421,7 +430,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		sets := []string{incoming.Ref(), followUp.Ref(), lifeArea.Ref(), personCircle.Ref(), factRelevance.Ref(),
 			openThreads.Ref(), replyPrompt.Ref, day.PlanPrompt.Ref, day.ActivityPrompt.Ref}
 		con := &console.Server{Store: st, Formats: formats, Token: cfg.Console.Token, Log: log.With("component", "console"), Info: console.Info{
-			Name: life.Name, Zone: zone, Started: started, Sets: sets, Tools: toolInfo,
+			Name: life.Name, Zone: zone, Started: started, Sets: sets, Tools: toolInfo, Skills: skillInfo,
 			System1: cfg.Decision.Provider.Provider + "/" + orDefault(cfg.Decision.Model, s1openai.DefaultModel),
 			System2: fmt.Sprintf("%s/%s (effort %s)", cfg.Reasoning.Provider.Provider, cfg.Reasoning.Model, orDefault(cfg.Reasoning.Effort, "default")),
 		}}

@@ -37,6 +37,7 @@ type Config struct {
 	Judgment      Judgment      `yaml:"judgment"`
 	Search        Search        `yaml:"search"`
 	Tools         Tools         `yaml:"tools"`
+	AgentSkills   AgentSkills   `yaml:"agent_skills"`
 	// Embedding finds the past decisions most like the one at hand; no
 	// provider: the newest are used instead.
 	Embedding Provider                 `yaml:"embedding"`
@@ -130,6 +131,20 @@ type DailyLife struct {
 type Web struct {
 	Searches int `yaml:"searches_per_day"`
 	Pages    int `yaml:"pages_per_day"`
+}
+
+// AgentSkills are folders of know-how in the Agent Skills format (a
+// SKILL.md each), read from Dirs in order: a later one wins on a name.
+// Empty: the shared skills folder, then the person's own.
+type AgentSkills struct {
+	Dirs []string `yaml:"dirs"`
+}
+
+func (c *Config) SkillDirs() []string {
+	if len(c.AgentSkills.Dirs) > 0 {
+		return c.AgentSkills.Dirs
+	}
+	return []string{"skills", filepath.Join(c.Self.Dir, "skills")}
 }
 
 // Tools are MCP servers whose tools it may use. Only the tools listed are
@@ -402,12 +417,13 @@ func (c *Config) loadLiving() error {
 		return fmt.Errorf("read living: %w", err)
 	}
 	living := struct {
-		Initiative *Initiative `yaml:"initiative"`
-		DailyLife  *DailyLife  `yaml:"daily_life"`
-		Autonomy   *Autonomy   `yaml:"autonomy"`
-		Judgment   *Judgment   `yaml:"judgment"`
-		Tools      *Tools      `yaml:"tools"`
-	}{&c.Initiative, &c.DailyLife, &c.Autonomy, &c.Judgment, &c.Tools}
+		Initiative *Initiative  `yaml:"initiative"`
+		DailyLife  *DailyLife   `yaml:"daily_life"`
+		Autonomy   *Autonomy    `yaml:"autonomy"`
+		Judgment   *Judgment    `yaml:"judgment"`
+		Tools      *Tools       `yaml:"tools"`
+		Skills     *AgentSkills `yaml:"agent_skills"`
+	}{&c.Initiative, &c.DailyLife, &c.Autonomy, &c.Judgment, &c.Tools, &c.AgentSkills}
 	dec := yaml.NewDecoder(strings.NewReader(os.ExpandEnv(string(raw))))
 	dec.KnownFields(true)
 	if err := dec.Decode(&living); err != nil && !errors.Is(err, io.EOF) {

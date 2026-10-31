@@ -23,6 +23,7 @@ import (
 
 	"github.com/Grandbusta/minime/internal/ability"
 	"github.com/Grandbusta/minime/internal/action"
+	"github.com/Grandbusta/minime/internal/agentskill"
 	"github.com/Grandbusta/minime/internal/decision"
 	"github.com/Grandbusta/minime/internal/decision/questions"
 	"github.com/Grandbusta/minime/internal/memory"
@@ -205,7 +206,9 @@ type Config struct {
 	ActionsPerDay int
 	// Watchers are tools looked at on a schedule; what's new is perceived.
 	Watchers []Watcher
-	Calls    Calls
+	// Skills are know-how its owner gave it (agent_skills).
+	Skills []agentskill.Skill
+	Calls  Calls
 	// Embedder nil: it takes the owner's newest decision of the right type instead.
 	Embedder embed.Embedder
 	Log      *slog.Logger
@@ -217,7 +220,11 @@ type Mind struct {
 	// sendMu lets one loop at a time send approvals: a chat asks at once, and
 	// a tick sends what's unsent, so both could send the same one.
 	sendMu sync.Mutex
-	toPlan atomic.Bool // a goal was taken on in a chat: draft its learning plan on the next tick
+	// skillMu guards skillVecs, the skills' descriptions embedded once, by
+	// whichever loop needs them first.
+	skillMu   sync.Mutex
+	skillVecs map[string][]float32
+	toPlan    atomic.Bool // a goal was taken on in a chat: draft its learning plan on the next tick
 
 	dataOnce    sync.Once
 	dataFormats map[string]render.DataFormat // what each kind of work it makes carries, from its life; read by both loops
@@ -650,11 +657,13 @@ func (m *Mind) reason(ctx context.Context, p perception.Percept, person memory.P
 		works, workRefs, embedCost = m.worksNote(ctx, p.Speaker, talkAbout(recent, p.Text))
 	}
 	promises, promised := m.promisesNote(ctx, p, person, n)
+	skill, skillCost := m.skillNote(ctx, talkAbout(recent, p.Text))
+	embedCost += skillCost
 
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.instructions(ctx, person, n),
 		History:      turns(recent),
-		Note: m.now(p.At) + "\n\n" + note + works + promises + m.permissionsNote(p) +
+		Note: m.now(p.At) + "\n\n" + note + works + skill + promises + m.permissionsNote(p) +
 			nameNote(recent, n.speaker),
 		Message:      p.Text,
 		CollectFacts: true,

@@ -43,6 +43,7 @@ Telegram for talking. Always write the name as **minime**, never "mini-me".
 | `ability` (`journal`, `reading`, `web`) | What they can do in their day besides writing. |
 | `library`, `search` | Books (Gutenberg), Wikipedia, the open web, with the safety rules. |
 | `tools` | MCP servers (go-sdk): the reading tools config lists, offered as abilities. |
+| `agentskill` | Skills in the Agent Skills format (`SKILL.md`), loaded from config and given when they fit. |
 | `render` (`pdf`, `docx`, `table`, `calendar`, `midi`, `archive`; `markdown`) | A work made into a file. Each kind is a `render.Format` (a `render.DataFormat` if it's made from data the work carries, like MIDI from a score); a new one is a type plus a line in main. Formats that lay out words read them with `render/markdown`. |
 | `action` | Autonomy: every action is `auto`, `ask` or `forbid`. |
 | `self`, `config`, `setup` | The person's files, the config, and `minime new`. |
@@ -179,6 +180,8 @@ safe for concurrent use; a test of both loops orders every step through channels
   does one prompted by anything it read (a watched item, its own day's material): only
   the owner's own words can have it act unasked. It never says an action is done before
   it is.
+- Skills are trusted like prompts, since the owner installs them, but grant no permission,
+  and their scripts are never run.
 - The console listens on localhost unless a token of 16+ characters is set.
 
 ## Docs to keep in step

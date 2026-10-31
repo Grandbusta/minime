@@ -215,6 +215,7 @@ func (m *Mind) writePlan(ctx context.Context, now, midnight time.Time, round int
 			fmt.Fprintf(&note, "\n- %s: %s", a.Name(), a.Describe())
 		}
 	}
+	note.WriteString(m.skillsList())
 	note.WriteString(m.growthNote(ctx, now))
 	note.WriteString(m.plansNote(ctx, false))
 	note.WriteString(m.foundNote(ctx))
@@ -436,6 +437,8 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 
 	note, project, ok := m.activityNote(ctx, i, what, now)
 	note += m.dataHelp()
+	skill, skillCost := m.skillNote(ctx, i.Text)
+	note += skill
 	// it may act for its owner in its own day, or in what it makes for them
 	acts := len(m.doers()) > 0 && (i.Subject == memory.SubjectSelf || i.Subject == m.policy().Owner)
 	if acts {
@@ -493,7 +496,7 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 		m.finishLife(ctx, d, start, decision.OutcomeFailed, err.Error())
 		return memory.Work{}, false
 	}
-	d.Provider, d.CostUSD = resp.Provider, resp.CostUSD+stepsCost
+	d.Provider, d.CostUSD = resp.Provider, resp.CostUSD+stepsCost+skillCost
 	var out struct {
 		Title          string   `json:"title"`
 		Kind           string   `json:"kind"`

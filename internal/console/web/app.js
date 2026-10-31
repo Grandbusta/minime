@@ -620,6 +620,11 @@ async function loadOverview() {
       <span>${esc(a.status)} · ${fmtTime(a.at)}</span></div><p>${esc(a.why)}${a.result ? " · " + esc(a.result) : ""}</p></div>`).join("")
     + (o.tool_calls || []).map((c) => `<div class="appr done"><div class="appr-top"><b>${esc(c.what.split(" ")[0])}</b><span>${fmtTime(c.at)}</span></div>
       <p>${esc(c.what.split(" ").slice(1).join(" ") || "no arguments")}</p></div>`).join("");
+  $("#skillsH").hidden = !(o.skills || []).length;
+  $("#skills").innerHTML = (o.skills || []).map((s) => {
+    const [name, ...rest] = s.split(": ");
+    return `<div class="appr done"><div class="appr-top"><b>${esc(name)}</b></div><p>${esc(rest.join(": "))}</p></div>`;
+  }).join("");
   if (o.next) {
     const mins = Math.round((new Date(o.next.due_at) - Date.now()) / 60000);
     $("#next").innerHTML = `<time>${fmtTime(o.next.due_at)}</time><span class="in">${mins > 0 ? "in " + ago(mins * 60000) : "due now"} · ${esc(o.next.kind)}</span><p>${esc(o.next.text)}</p>`;

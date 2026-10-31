@@ -83,6 +83,7 @@ const agreementOver = 20
 type Info struct {
 	Name    string
 	Tools   []ToolServer
+	Skills  []string // "name: description"
 	Zone    *time.Location
 	Started time.Time
 	System1 string
@@ -232,7 +233,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	}
 	s.json(w, map[string]any{
 		"name": s.Info.Name, "timezone": s.Info.Zone.String(), "started_at": s.Info.Started, "now": now,
-		"system1": s.Info.System1, "system2": s.Info.System2, "sets": s.Info.Sets, "tools": s.Info.Tools, "tool_calls": calls, "actions": acts,
+		"system1": s.Info.System1, "system2": s.Info.System2, "sets": s.Info.Sets, "tools": s.Info.Tools, "skills": s.Info.Skills, "tool_calls": calls, "actions": acts,
 		"today": map[string]any{
 			"decisions": vitals.Decisions, "by_tier": vitals.ByTier, "escalations": vitals.Escalations,
 			"cost_usd": vitals.CostUSD, "avg_latency_ms": vitals.AvgLatency.Milliseconds(),

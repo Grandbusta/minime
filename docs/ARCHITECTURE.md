@@ -308,6 +308,15 @@ added and gone since the last look, so a changed listing or page shows what chan
 System 2 with [prompts/observe.md](../prompts/observe.md), fenced as untrusted: it may
 remember facts, tell the owner, or propose actions, which always ask.
 
+Skills ([internal/agentskill](../internal/agentskill)) are folders in the Agent Skills
+format, loaded at start from `agent_skills.dirs`; a malformed one is logged and left out.
+Each description is embedded the first time it's needed and kept in memory; the one most
+alike (at least 0.35, `rankAlike`) to a reply's talk or an activity's text has its
+instructions put in the note ([skills.go](../internal/mind/skills.go)). `use_skill` reads a
+skill, or one of its files (only those it lists), as material, and is chained so it can
+read a file after the instructions. Skills are trusted like prompts; they grant nothing and
+their scripts never run.
+
 Books and articles come through [internal/library](../internal/library), which fetches
 only from those two sites and stores each text once (`sources`). Web search and fetching
 are in [internal/search](../internal/search):

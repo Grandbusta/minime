@@ -310,6 +310,7 @@ from there.
 | `daily_life.*_prompt` | `prompts/…` | The prompts for planning, activities, the review and learning plans. |
 | `embedding.provider`, `model` | `openai`, `text-embedding-3-small` | Finds your past decisions most like the one at hand. Remove it to use the newest instead. |
 | `search.provider`, `model` | `openai`, the System 2 model | What web searches use. |
+| `agent_skills.dirs` | `skills`, then `self/skills` | Folders of skills: [below](#skills). |
 | `tools.servers` | none | MCP servers whose tools they may use: [below](#tools-mcp-servers). Can also go in `living.yaml`. |
 | `tools.calls_per_day` | `50` | Reading tool calls a day across all servers, times their pace. |
 | `tools.actions_per_day` | `10` | Tools that change things they may propose a day. Not times their pace: these have real effects. |
@@ -319,6 +320,22 @@ from there.
 | `portfolio.update_at` | `00:00` | When the page is updated, daily, UTC. |
 | `pricing` | OpenAI's rates | USD per million tokens by model, to record what each decision cost. A model missing here is recorded at $0. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. Logs are JSON on stdout. |
+
+### Skills
+
+Skills are know-how you give them, in the open Agent Skills
+format, the same as Claude's: a folder with a `SKILL.md` (a `name` and a `description` in
+its frontmatter, then the instructions) and any files it points to. Put a skill's folder in
+`skills/` (every life) or `self/skills/` (just this one), and restart.
+
+When what they're talking about or doing fits a skill's description, its instructions are
+put in front of them, and they use them in their own words. They can also read any skill,
+or one of its files, with `use_skill`, and see the list when they plan their day. The
+console lists them.
+
+**Only add skills you've read or trust: their instructions are followed.** A skill never
+gives permission to do anything (your `autonomy` still decides), and scripts in it are
+never run.
 
 ### Tools: MCP servers
 
