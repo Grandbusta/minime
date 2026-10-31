@@ -23,7 +23,7 @@ const (
 	Publish         Class = "publish"
 	Dream           Class = "dream"
 	Spend           Class = "spend"            // spend money (later)
-	ExternalMessage Class = "external_message" // email or post outside the chat (later)
+	ExternalMessage Class = "external_message" // email, a post or a DM outside the chat, through a tool
 )
 
 type Verdict string
@@ -44,7 +44,7 @@ func Defaults() map[Class]Verdict {
 	return map[Class]Verdict{
 		Remember: Auto, Reply: Auto, ReadWeb: Auto, UseTools: Auto,
 		ReachOut: Ask, Commit: Ask, Publish: Ask, Dream: Ask, Write: Ask,
-		Spend: Forbid, ExternalMessage: Forbid,
+		ExternalMessage: Ask, Spend: Forbid,
 	}
 }
 

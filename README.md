@@ -101,7 +101,8 @@ Or write your own: a person is a folder of three files. `life.yaml` is who they 
 
 - **Approvals.** Messaging someone first, promising something, publishing a work, changing
   a dream: by default they ask, and you get the exact thing on Telegram with **✅ Approve**
-  and **❌ Deny**. Money and messages outside the chat are forbidden.
+  and **❌ Deny**. Email and posts through a tool you connect ask every time; money is
+  forbidden.
 - **Your judgment.** Your principles, priorities, boundaries and past decisions shape their
   choices. You approve what they learn from, in the console.
 - **Corrections.** "I live in Lekki, not Ikoyi", "forget what I told you about the bank",

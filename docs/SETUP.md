@@ -242,10 +242,11 @@ in `abilityMakers` in [cmd/minime/main.go](../cmd/minime/main.go).
 | `commit` | promising to make something for someone | ask |
 | `publish` | putting a work on their public page | ask |
 | `dream` | adding, rewording or dropping a dream | ask |
-| `spend`, `external_message` | money, and messages outside the chat | forbid |
+| `external_message` | email, posts and DMs outside the chat, through a tool you connect | ask |
+| `spend` | money | forbid |
 
 You can change most of these by telling them ("you can send reminders without asking");
-money and messages outside the chat change only here.
+money and messages outside the chat change only here, never by chat.
 
 ### Learning your judgment
 
@@ -357,8 +358,8 @@ what the last returned: search for a file, then read what it found.
 
 A tool that changes things is never used as they reply. They propose it, to you in a
 chat or in their own day, and it runs a minute or so later once allowed: by its class in
-`autonomy.classes` (`write` asks you by default; `external_message` and `spend` are
-forbidden until you change them). It always needs your OK on Telegram if the server marks
+`autonomy.classes` (`write` and `external_message` ask you by default; `spend` is
+forbidden until you change it). It always needs your OK on Telegram if the server marks
 it destructive, or if what prompted it was something they read rather than your own
 words. You see exactly what it would do, and hear what came of it.
 

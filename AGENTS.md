@@ -167,8 +167,9 @@ safe for concurrent use; a test of both loops orders every step through channels
 ## Safety rules that must always hold
 
 - What reaches other people, commits to them, goes public or changes a dream asks the
-  owner first by default; money and messages outside the chat are forbidden and change
-  only in the config. Silence is no: an unanswered request is denied.
+  owner first by default; so do messages outside the chat (email, posts), and money is
+  forbidden. Both change only in the config, never by chat. Silence is no: an unanswered
+  request is denied.
 - Only facts about the person can reach the public page; facts about people, the journal
   and what was made for someone never do.
 - The web: https only, public addresses only, only pages its own searches found; what it

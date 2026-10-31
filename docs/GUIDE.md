@@ -133,7 +133,8 @@ their own (`auto`), ask you first (`ask`), or never (`forbid`):
 | `commit` | promising to make something for someone | ask |
 | `publish` | putting a work on their public page | ask |
 | `dream` | adding, rewording or dropping a dream | ask |
-| `spend`, `external_message` | money, and messages outside the chat | forbid |
+| `external_message` | email, posts and DMs outside the chat, through a tool you connect | ask |
+| `spend` | money | forbid |
 
 Anything only for you (a reminder you asked for, a promise to you) never needs your OK.
 When they ask, you get the exact message, promise or work on Telegram with **✅ Approve**

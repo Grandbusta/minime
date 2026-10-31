@@ -431,7 +431,8 @@ Every action belongs to a class ([internal/action](../internal/action)): `rememb
 the config, overlaid by rules the owner set in chat (`autonomy_rules`, kept across
 restarts). Fixed rules: anything only for the owner is `auto` unless forbidden; `remember`
 and `reply` are always `auto`; forbid always wins; chat can change `reach_out`, `commit`,
-`publish`, `read_web` and `dream`, never money or the outside world.
+`publish`, `read_web` and `dream`, never money or the outside world. By default
+`external_message` asks and `spend` is forbidden.
 
 `ask` saves an **approval** (`approvals`) with exactly what it would do: the message
 (`reach_out`), the promise, whose intention waits as `awaiting` (`commit`), the work
@@ -536,7 +537,8 @@ it needs nothing; anywhere else, a token.
 - **Only the owner is heard.** The Telegram sensor drops everyone not in
   `telegram.owner_ids`; button taps count only from the owner.
 - **The gate.** Anything that reaches other people, the public page or the person's dreams
-  passes the autonomy gate; money and messages outside the chat are forbidden.
+  passes the autonomy gate; messages outside the chat ask every time by default, and money
+  is forbidden.
 - **What it reads is never instructions.** Book passages, articles and web pages are fenced
   as material. Web reading is limited to its own search results, public https addresses,
   and daily caps.
