@@ -67,6 +67,21 @@ embedding:
 search:
   provider: openai
 
+# MCP servers whose tools they may use: only the tools listed, and only tools
+# that read for now. A local server gets PATH, HOME and the env listed, never
+# the rest of the environment. calls_per_day (all servers) grows with pace.
+# tools:
+#   calls_per_day: 50
+#   servers:
+#     - name: notes
+#       about: "my shared folder, /Users/you/shared-with-daniel: notes I share"
+#       command: [npx, -y, "@modelcontextprotocol/server-filesystem", "/Users/you/shared-with-daniel"]
+#       tools: {read_text_file: read, list_directory: read, search_files: read}
+#     - name: drive
+#       url: https://example.com/mcp
+#       auth_env: DRIVE_MCP_TOKEN
+#       tools: {search: read}
+
 # Who approves what the person asks first: default, the first of
 # telegram.owner_ids. What they may do is in self/living.yaml.
 # autonomy:

@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,7 @@ type Config struct {
 	Autonomy      Autonomy      `yaml:"autonomy"`
 	Judgment      Judgment      `yaml:"judgment"`
 	Search        Search        `yaml:"search"`
+	Tools         Tools         `yaml:"tools"`
 	// Embedding finds the past decisions most like the one at hand; no
 	// provider: the newest are used instead.
 	Embedding Provider                 `yaml:"embedding"`
@@ -126,6 +128,63 @@ type DailyLife struct {
 type Web struct {
 	Searches int `yaml:"searches_per_day"`
 	Pages    int `yaml:"pages_per_day"`
+}
+
+// Tools are MCP servers whose tools it may use. Only the tools listed are
+// offered, each with what it can do: for now only "read".
+type Tools struct {
+	CallsPerDay int          `yaml:"calls_per_day"` // grows with pace, like the web caps
+	Servers     []ToolServer `yaml:"servers"`
+}
+
+type ToolServer struct {
+	Name string `yaml:"name"`
+	// About says what it is and where things are, for the planner, like
+	// "Busta's shared folder, /Users/busta/shared: notes he shares".
+	About string `yaml:"about"`
+	// Command runs a local server; URL reaches a remote one. Exactly one.
+	Command []string `yaml:"command"`
+	URL     string   `yaml:"url"`
+	// AuthEnv names the environment variable holding a remote server's
+	// bearer token. Env names the variables a local server is given, besides
+	// PATH and HOME: it never sees the rest of the environment.
+	AuthEnv string            `yaml:"auth_env"`
+	Env     []string          `yaml:"env"`
+	Tools   map[string]string `yaml:"tools"` // tool name → what it can do
+}
+
+// ToolRead is the one kind of tool there is yet: it only reads.
+const ToolRead = "read"
+
+var serverName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+func (t Tools) Validate() error {
+	if t.CallsPerDay < 0 {
+		return errors.New("config: tools.calls_per_day can't be negative")
+	}
+	seen := map[string]bool{}
+	for i, s := range t.Servers {
+		switch {
+		case !serverName.MatchString(s.Name):
+			return fmt.Errorf("config: tools.servers[%d]: name %q must be snake_case, like notes", i, s.Name)
+		case seen[s.Name]:
+			return fmt.Errorf("config: tools.servers: two servers named %q", s.Name)
+		case (len(s.Command) == 0) == (s.URL == ""):
+			return fmt.Errorf("config: tools.servers %s: give a command or a url, not both", s.Name)
+		case s.URL != "" && !strings.HasPrefix(s.URL, "https://") && !strings.HasPrefix(s.URL, "http://localhost") &&
+			!strings.HasPrefix(s.URL, "http://127.0.0.1"):
+			return fmt.Errorf("config: tools.servers %s: url must be https (or http on localhost)", s.Name)
+		case len(s.Tools) == 0:
+			return fmt.Errorf("config: tools.servers %s: list the tools it may use", s.Name)
+		}
+		seen[s.Name] = true
+		for tool, kind := range s.Tools {
+			if kind != ToolRead {
+				return fmt.Errorf("config: tools.servers %s: %s is %q; only read tools can be used yet", s.Name, tool, kind)
+			}
+		}
+	}
+	return nil
 }
 
 // Search with the openai provider uses the System 2 key (reasoning.api_key).
@@ -279,6 +338,7 @@ func Load(path string) (*Config, error) {
 			DataPrompt: "prompts/data.md",
 			Web:        Web{Searches: 10, Pages: 15}},
 		Search:   Search{Provider: "openai"},
+		Tools:    Tools{CallsPerDay: 50},
 		Autonomy: Autonomy{AskExpires: 24 * time.Hour},
 		Judgment: Judgment{Calls: true, AsksPerDay: 3, ReplyWindow: 30 * time.Minute},
 		Log:      Log{Level: "info"},
@@ -317,7 +377,8 @@ func (c *Config) loadLiving() error {
 		DailyLife  *DailyLife  `yaml:"daily_life"`
 		Autonomy   *Autonomy   `yaml:"autonomy"`
 		Judgment   *Judgment   `yaml:"judgment"`
-	}{&c.Initiative, &c.DailyLife, &c.Autonomy, &c.Judgment}
+		Tools      *Tools      `yaml:"tools"`
+	}{&c.Initiative, &c.DailyLife, &c.Autonomy, &c.Judgment, &c.Tools}
 	dec := yaml.NewDecoder(strings.NewReader(os.ExpandEnv(string(raw))))
 	dec.KnownFields(true)
 	if err := dec.Decode(&living); err != nil && !errors.Is(err, io.EOF) {
@@ -368,5 +429,5 @@ func (c *Config) ValidateAgent() error {
 			return errors.New("config: daily_life.activities must be at least 1 and budget_usd not negative")
 		}
 	}
-	return nil
+	return c.Tools.Validate()
 }

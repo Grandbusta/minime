@@ -68,6 +68,11 @@ they did becomes facts about themselves, so they can tell you about it. If you'r
 when something is due, it waits 30 minutes; past their daily budget, the rest is missed. At
 `journal_at` (22:00) they write a journal entry.
 
+With tools from an MCP server you connect ([SETUP](SETUP.md#tools-mcp-servers)), they can
+also read what you share: a folder of your notes, a price list, a list of clinics. Ask
+"read my notes on the clinics and tell me what you think tonight" and they promise it,
+read it through the tool, and send what they made. Tools only read for now.
+
 ```bash
 go run ./cmd/minime day                    # today's plan and what came of it
 go run ./cmd/minime day -date 2026-10-29   # another day

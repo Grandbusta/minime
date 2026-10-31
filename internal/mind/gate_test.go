@@ -8,6 +8,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"github.com/Grandbusta/minime/internal/ability"
 	"github.com/Grandbusta/minime/internal/action"
 	"github.com/Grandbusta/minime/internal/memory"
 	"github.com/Grandbusta/minime/internal/perception"
@@ -186,16 +187,18 @@ func TestPublishingIsDecidedByTheOwner(t *testing.T) {
 	}
 }
 
-func TestReadingTheWebCanBeForbidden(t *testing.T) {
-	look := &fakeAbility{name: "look_up", describe: "look it up", found: map[string]string{"x": "y"}}
-	m, s, _ := abilityMind(look)
-	m.Autonomy = action.Policy{Owner: owner, Classes: map[action.Class]action.Verdict{action.ReadWeb: action.Forbid}}
-	if len(m.plannable()) != 0 {
-		t.Errorf("plannable = %v", m.plannable())
-	}
-	s.intentions = []memory.Intention{activity("Look x up", "look_up", "x")}
-	m.tick(context.Background(), at(29, 10, 0))
-	if got := s.intentions[0]; got.Status != memory.IntentionMissed || len(look.acts) != 0 {
-		t.Errorf("intention %+v, %d acts", got, len(look.acts))
+func TestReadingTheWebOrToolsCanBeForbidden(t *testing.T) {
+	for class, risk := range map[action.Class]ability.Risk{action.ReadWeb: ability.ReadsWeb, action.UseTools: ability.UsesTools} {
+		look := &fakeAbility{name: "look_up", describe: "look it up", found: map[string]string{"x": "y"}, risk: risk}
+		m, s, _ := abilityMind(look)
+		m.Autonomy = action.Policy{Owner: owner, Classes: map[action.Class]action.Verdict{class: action.Forbid}}
+		if len(m.plannable()) != 0 {
+			t.Errorf("%s: plannable = %v", class, m.plannable())
+		}
+		s.intentions = []memory.Intention{activity("Look x up", "look_up", "x")}
+		m.tick(context.Background(), at(29, 10, 0))
+		if got := s.intentions[0]; got.Status != memory.IntentionMissed || len(look.acts) != 0 {
+			t.Errorf("%s: intention %+v, %d acts", class, got, len(look.acts))
+		}
 	}
 }

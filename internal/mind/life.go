@@ -466,6 +466,12 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 		note += material.Note
 		project = material.Project
 	}
+	var stepsCost float64
+	if ch, ok := ab.(ability.Chained); ok {
+		var more string
+		more, stepsCost = m.followUp(ctx, i, note, ch, project, now)
+		note += more
+	}
 	resp, err := m.System2.Reason(ctx, system2.Request{
 		Instructions: m.lifeInstructions(m.Day.ActivityPrompt),
 		Note:         note,
@@ -476,7 +482,7 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 		m.finishLife(ctx, d, start, decision.OutcomeFailed, err.Error())
 		return memory.Work{}, false
 	}
-	d.Provider, d.CostUSD = resp.Provider, resp.CostUSD
+	d.Provider, d.CostUSD = resp.Provider, resp.CostUSD+stepsCost
 	var out struct {
 		Title          string   `json:"title"`
 		Kind           string   `json:"kind"`
@@ -535,7 +541,7 @@ func (m *Mind) makeWork(ctx context.Context, i memory.Intention, action, what st
 	}
 	m.scoreWork(ctx, w, p.ID, &d.ID)
 	source := memory.LessonFromSelf
-	if ab != nil && ab.Risk() == ability.ReadsWeb {
+	if ab != nil && ab.Risk() != ability.Private { // what it read was someone else's
 		source = memory.LessonFromOthers
 	}
 	var skills []string
@@ -606,7 +612,13 @@ func (m *Mind) overBudget(ctx context.Context, now time.Time) bool {
 // allowed reports whether the autonomy policy lets it use an ability: one
 // that reads the web needs read_web.
 func (m *Mind) allowed(a ability.Ability) bool {
-	return a.Risk() != ability.ReadsWeb || m.policy().Check(action.ReadWeb, "") != action.Forbid
+	switch a.Risk() {
+	case ability.ReadsWeb:
+		return m.policy().Check(action.ReadWeb, "") != action.Forbid
+	case ability.UsesTools:
+		return m.policy().Check(action.UseTools, "") != action.Forbid
+	}
+	return true
 }
 
 func (m *Mind) plannable() []ability.Ability {

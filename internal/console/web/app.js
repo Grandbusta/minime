@@ -613,6 +613,11 @@ async function loadOverview() {
     `<div style="height:${Math.max(2, (d.cost_usd / maxC) * 100)}%" data-t="${esc(d.day)} · ${money(d.cost_usd)} · ${d.decisions} decisions"></div>`).join("")
     : `<div class="empty">no cost yet</div>`;
   $("#barsAxis").innerHTML = days.length ? `<span>${esc(days[0].day.slice(5))}</span><span>max ${money(maxC)}</span><span>${esc(days[days.length - 1].day.slice(5))}</span>` : "";
+  $("#toolsH").hidden = !(o.tools || []).length;
+  $("#tools").innerHTML = (o.tools || []).map((s) => `<div class="appr ${s.error ? "done" : ""}"><div class="appr-top"><b>${esc(s.name)}</b>
+      <span>${s.error ? "not connected" : (s.tools || []).length + " tools"}</span></div><p>${esc(s.error || (s.tools || []).join(", "))}</p></div>`).join("")
+    + (o.tool_calls || []).map((c) => `<div class="appr done"><div class="appr-top"><b>${esc(c.what.split(" ")[0])}</b><span>${fmtTime(c.at)}</span></div>
+      <p>${esc(c.what.split(" ").slice(1).join(" ") || "no arguments")}</p></div>`).join("");
   if (o.next) {
     const mins = Math.round((new Date(o.next.due_at) - Date.now()) / 60000);
     $("#next").innerHTML = `<time>${fmtTime(o.next.due_at)}</time><span class="in">${mins > 0 ? "in " + ago(mins * 60000) : "due now"} · ${esc(o.next.kind)}</span><p>${esc(o.next.text)}</p>`;

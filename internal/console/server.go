@@ -44,6 +44,7 @@ type Store interface {
 	AllProjects(ctx context.Context, limit int) ([]memory.Project, error)
 	IntentionsDue(ctx context.Context, from, to time.Time) ([]memory.Intention, error)
 	WorksBetween(ctx context.Context, from, to time.Time) ([]memory.Work, error)
+	WebLog(ctx context.Context, kind string, limit int) ([]store.WebEntry, error)
 	RecentWorks(ctx context.Context, limit int) ([]memory.Work, error)
 	Work(ctx context.Context, id ulid.ULID) (memory.Work, bool, error)
 	Conversations(ctx context.Context) ([]memory.Conversation, error)
@@ -80,11 +81,19 @@ const agreementOver = 20
 
 type Info struct {
 	Name    string
+	Tools   []ToolServer
 	Zone    *time.Location
 	Started time.Time
 	System1 string
 	System2 string
 	Sets    []string
+}
+
+// ToolServer is an MCP server it was given: the tools it offers, or why none.
+type ToolServer struct {
+	Name  string   `json:"name"`
+	Tools []string `json:"tools"`
+	Err   string   `json:"error,omitempty"`
 }
 
 type Server struct {
@@ -199,13 +208,19 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	var calls []store.WebEntry
+	if len(s.Info.Tools) > 0 {
+		if calls, err = s.Store.WebLog(ctx, "tool", 5); s.failed(w, err) {
+			return
+		}
+	}
 	byDay := make([]map[string]any, len(costs))
 	for i, c := range costs {
 		byDay[i] = map[string]any{"day": c.Day, "cost_usd": c.CostUSD, "decisions": c.Count}
 	}
 	s.json(w, map[string]any{
 		"name": s.Info.Name, "timezone": s.Info.Zone.String(), "started_at": s.Info.Started, "now": now,
-		"system1": s.Info.System1, "system2": s.Info.System2, "sets": s.Info.Sets,
+		"system1": s.Info.System1, "system2": s.Info.System2, "sets": s.Info.Sets, "tools": s.Info.Tools, "tool_calls": calls,
 		"today": map[string]any{
 			"decisions": vitals.Decisions, "by_tier": vitals.ByTier, "escalations": vitals.Escalations,
 			"cost_usd": vitals.CostUSD, "avg_latency_ms": vitals.AvgLatency.Milliseconds(),

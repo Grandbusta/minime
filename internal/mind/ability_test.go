@@ -19,11 +19,17 @@ type fakeAbility struct {
 	describe string
 	found    map[string]string
 	acts     []ability.Act
+	risk     ability.Risk // zero: ReadsWeb
 }
 
-func (f *fakeAbility) Name() string       { return f.name }
-func (f *fakeAbility) Describe() string   { return f.describe }
-func (f *fakeAbility) Risk() ability.Risk { return ability.ReadsWeb }
+func (f *fakeAbility) Name() string     { return f.name }
+func (f *fakeAbility) Describe() string { return f.describe }
+func (f *fakeAbility) Risk() ability.Risk {
+	if f.risk == ability.Private {
+		return ability.ReadsWeb
+	}
+	return f.risk
+}
 
 func (f *fakeAbility) Prepare(_ context.Context, a ability.Act) (ability.Material, error) {
 	f.acts = append(f.acts, a)

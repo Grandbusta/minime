@@ -26,12 +26,20 @@ type Continuer interface {
 	Continues(p memory.Project) bool
 }
 
+// Chained is an ability that can be followed, in the same activity, by
+// another call to the abilities Next returns (a tool, then another from its
+// server: search, then read what it found).
+type Chained interface {
+	Next() []Ability
+}
+
 // Risk is what an ability can affect, for the autonomy gate to check.
 type Risk int
 
 const (
 	Private Risk = iota
 	ReadsWeb
+	UsesTools // reads through a tool from an MCP server
 )
 
 func (r Risk) String() string {
@@ -40,6 +48,8 @@ func (r Risk) String() string {
 		return "private"
 	case ReadsWeb:
 		return "reads_web"
+	case UsesTools:
+		return "uses_tools"
 	}
 	return "unknown"
 }

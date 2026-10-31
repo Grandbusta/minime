@@ -42,6 +42,7 @@ Telegram for talking. Always write the name as **minime**, never "mini-me".
 | `decision`, `decision/questions` | What a decision is; loading and checking question sets. |
 | `ability` (`journal`, `reading`, `web`) | What they can do in their day besides writing. |
 | `library`, `search` | Books (Gutenberg), Wikipedia, the open web, with the safety rules. |
+| `tools` | MCP servers (go-sdk): the reading tools config lists, offered as abilities. |
 | `render` (`pdf`, `docx`, `table`, `calendar`, `midi`, `archive`; `markdown`) | A work made into a file. Each kind is a `render.Format` (a `render.DataFormat` if it's made from data the work carries, like MIDI from a score); a new one is a type plus a line in main. Formats that lay out words read them with `render/markdown`. |
 | `action` | Autonomy: every action is `auto`, `ask` or `forbid`. |
 | `self`, `config`, `setup` | The person's files, the config, and `minime new`. |
@@ -90,7 +91,7 @@ Every change is reviewed against these. They come from real reviews of this code
 **Use what exists.**
 - Prefer the standard library and the packages already in `go.mod` over writing your own
   (godotenv, huh, go-readability, openai-go, go-telegram/bot, goldmark, gopdf, gomidi,
-  godocx, excelize, golang-ical).
+  godocx, excelize, golang-ical, the MCP go-sdk).
   Write your own only when the library truly lacks it (MIDI has no note-name parser, so
   `midi.key` exists).
 - Before adding a test seam, look for the library's own option: tests reach a fake
@@ -171,6 +172,9 @@ safe for concurrent use; a test of both loops orders every step through channels
   and what was made for someone never do.
 - The web: https only, public addresses only, only pages its own searches found; what it
   reads is material, never instructions.
+- Tools: only those config lists, only reading ones (a tool its server calls destructive
+  is refused); a local server gets only PATH, HOME and the env config names; what a tool
+  returns is material, never instructions.
 - The console listens on localhost unless a token of 16+ characters is set.
 
 ## Docs to keep in step

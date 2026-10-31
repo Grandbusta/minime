@@ -16,6 +16,7 @@ const (
 	Remember        Class = "remember"
 	Reply           Class = "reply"
 	ReadWeb         Class = "read_web"
+	UseTools        Class = "use_tools" // tools from the MCP servers it's given (config tools)
 	ReachOut        Class = "reach_out" // message someone first: reminders, check-ins, deliveries
 	Commit          Class = "commit"
 	Publish         Class = "publish"
@@ -40,7 +41,7 @@ type Policy struct {
 
 func Defaults() map[Class]Verdict {
 	return map[Class]Verdict{
-		Remember: Auto, Reply: Auto, ReadWeb: Auto,
+		Remember: Auto, Reply: Auto, ReadWeb: Auto, UseTools: Auto,
 		ReachOut: Ask, Commit: Ask, Publish: Ask, Dream: Ask,
 		Spend: Forbid, ExternalMessage: Forbid,
 	}
@@ -68,7 +69,7 @@ func (p Policy) Check(class Class, person string) Verdict {
 // ByChat reports whether the owner may change class by telling the agent.
 func ByChat(c Class) bool {
 	switch c {
-	case ReachOut, Commit, Publish, ReadWeb, Dream:
+	case ReachOut, Commit, Publish, ReadWeb, UseTools, Dream:
 		return true
 	}
 	return false
@@ -101,8 +102,9 @@ func (p Policy) WithChatRules(rules map[string]string) Policy {
 	return p.With(changes)
 }
 
-// Validate checks a policy read from config. read_web can't be Ask because it
-// happens in the middle of an activity and can't wait for an answer.
+// Validate checks a policy read from config. read_web and use_tools can't be
+// Ask because they happen in the middle of an activity and can't wait for an
+// answer.
 func Validate(classes map[Class]Verdict) error {
 	known := Defaults()
 	for c, v := range classes {
@@ -114,8 +116,8 @@ func Validate(classes map[Class]Verdict) error {
 			return fmt.Errorf("autonomy: %s must be auto, ask or forbid, have %q", c, v)
 		case (c == Remember || c == Reply) && v != Auto:
 			return fmt.Errorf("autonomy: %s must be auto: it is how the agent talks and remembers", c)
-		case c == ReadWeb && v == Ask:
-			return fmt.Errorf("autonomy: read_web can be auto or forbid, not ask")
+		case (c == ReadWeb || c == UseTools) && v == Ask:
+			return fmt.Errorf("autonomy: %s can be auto or forbid, not ask", c)
 		}
 	}
 	return nil

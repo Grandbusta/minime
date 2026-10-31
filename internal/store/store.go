@@ -1536,6 +1536,20 @@ func (s *Store) LogWeb(ctx context.Context, kind, what string, costUSD float64, 
 	return nil
 }
 
+type WebEntry struct {
+	What string    `json:"what"`
+	At   time.Time `json:"at"`
+}
+
+// WebLog returns the last limit entries of kind, newest first.
+func (s *Store) WebLog(ctx context.Context, kind string, limit int) ([]WebEntry, error) {
+	rows, err := s.pool.Query(ctx, `SELECT what, at FROM web_log WHERE kind = $1 ORDER BY at DESC LIMIT $2`, kind, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query web log: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowToStructByPos[WebEntry])
+}
+
 func (s *Store) WebSince(ctx context.Context, kind string, since time.Time) (int, error) {
 	var n int
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM web_log WHERE kind = $1 AND at >= $2`, kind, since).Scan(&n); err != nil {

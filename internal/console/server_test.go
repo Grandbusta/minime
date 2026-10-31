@@ -57,6 +57,10 @@ func (f *fakeStore) SaveLabel(_ context.Context, l memory.Label) error {
 	f.labels = append(f.labels, l)
 	return nil
 }
+func (f *fakeStore) WebLog(context.Context, string, int) ([]store.WebEntry, error) {
+	return []store.WebEntry{{What: `notes.read_note {"path":"a.md"}`}}, nil
+}
+
 func (f *fakeStore) Work(context.Context, ulid.ULID) (memory.Work, bool, error) {
 	return memory.Work{ID: ulid.Make(), Kind: "lyrics", Title: "Verse", Text: "Rain on the roof", Data: f.score, DataKind: "score"}, true, nil
 }

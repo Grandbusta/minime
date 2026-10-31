@@ -236,6 +236,7 @@ in `abilityMakers` in [cmd/minime/main.go](../cmd/minime/main.go).
 |---|---|---|
 | `remember`, `reply` | keeping facts, answering messages | always auto |
 | `read_web` | abilities that fetch from the web | auto |
+| `use_tools` | tools from MCP servers (only reading ones yet) | auto |
 | `reach_out` | messaging someone first | ask |
 | `commit` | promising to make something for someone | ask |
 | `publish` | putting a work on their public page | ask |
@@ -308,12 +309,37 @@ from there.
 | `daily_life.*_prompt` | `prompts/…` | The prompts for planning, activities, the review and learning plans. |
 | `embedding.provider`, `model` | `openai`, `text-embedding-3-small` | Finds your past decisions most like the one at hand. Remove it to use the newest instead. |
 | `search.provider`, `model` | `openai`, the System 2 model | What web searches use. |
+| `tools.servers` | none | MCP servers whose tools they may use: [below](#tools-mcp-servers). Can also go in `living.yaml`. |
+| `tools.calls_per_day` | `50` | Tool calls a day across all servers, times their pace. |
 | `console.addr` | `127.0.0.1:8090` | The private mind console; empty: none. |
 | `console.token` | `${CONSOLE_TOKEN}` | Required unless `console.addr` is localhost. |
 | `portfolio.addr` | `127.0.0.1:8080` | Their public profile page; empty: none. |
 | `portfolio.update_at` | `00:00` | When the page is updated, daily, UTC. |
 | `pricing` | OpenAI's rates | USD per million tokens by model, to record what each decision cost. A model missing here is recorded at $0. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. Logs are JSON on stdout. |
+
+### Tools: MCP servers
+
+They can use tools from [MCP](https://modelcontextprotocol.io) servers you connect: in their
+day, in a learning plan, or for something they promised you ("read my notes folder and
+tell me what's in it tonight"). Each server is a `name` (snake_case), and either a
+`command` that starts a local server or the `url` of a remote one (https).
+
+| Key | What it is |
+|---|---|
+| `about` | What the server is and where things are, like "my shared folder, /Users/you/shared: notes I share". It goes in every tool's description, so they know where to look. |
+| `tools` | The tools it may use, each with what it can do. Only `read` exists yet; a tool you don't list isn't offered. |
+| `env` | For a local server: the environment variables it's given, from `.env`. It always gets `PATH` and `HOME`, and never anything else, so your keys stay yours. |
+| `auth_env` | For a remote server: the variable holding its bearer token. |
+
+In one activity they can use up to three of a server's tools in a row, each chosen from
+what the last returned: search for a file, then read what it found.
+
+A tool the server marks as destructive is refused as `read`, whatever the config says.
+What a tool returns is read as material, never instructions; every call is logged, counted
+against `calls_per_day`, and shown in the console. A server it can't reach at start is
+shown in the console and left out; they start without it. `use_tools: forbid` in
+`autonomy.classes` stops them using any.
 
 Providers are switchable: System 1, System 2, embeddings and search each pick theirs here.
 A new one is a package and a `case` in [cmd/minime/main.go](../cmd/minime/main.go).

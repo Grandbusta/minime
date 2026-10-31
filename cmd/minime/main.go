@@ -62,6 +62,7 @@ import (
 	"github.com/Grandbusta/minime/internal/search"
 	"github.com/Grandbusta/minime/internal/self"
 	"github.com/Grandbusta/minime/internal/store"
+	"github.com/Grandbusta/minime/internal/tools"
 )
 
 func main() {
@@ -331,7 +332,23 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 	if err != nil {
 		return err
 	}
-	abilitySet, err := newAbilities(names, depsFor(cfg, st, log))
+	// Tools from MCP servers join its abilities; a server it can't reach is
+	// shown in the console and left out.
+	var toolAbilities []ability.Ability
+	var toolInfo []console.ToolServer
+	for _, c := range tools.Connect(ctx, cfg.Tools, cfg.Tools.CallsPerDay*cfg.DailyLife.Pace, st, log.With("component", "tools")) {
+		defer c.Server.Close()
+		info := console.ToolServer{Name: c.Server.Name}
+		if c.Err != nil {
+			info.Err = c.Err.Error()
+		}
+		for _, t := range c.Tools {
+			toolAbilities = append(toolAbilities, t)
+			info.Tools = append(info.Tools, t.Name())
+		}
+		toolInfo = append(toolInfo, info)
+	}
+	abilitySet, err := newAbilities(names, depsFor(cfg, st, log), toolAbilities...)
 	if err != nil {
 		return err
 	}
@@ -394,7 +411,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		sets := []string{incoming.Ref(), followUp.Ref(), lifeArea.Ref(), personCircle.Ref(), factRelevance.Ref(),
 			openThreads.Ref(), replyPrompt.Ref, day.PlanPrompt.Ref, day.ActivityPrompt.Ref}
 		con := &console.Server{Store: st, Formats: formats, Token: cfg.Console.Token, Log: log.With("component", "console"), Info: console.Info{
-			Name: life.Name, Zone: zone, Started: started, Sets: sets,
+			Name: life.Name, Zone: zone, Started: started, Sets: sets, Tools: toolInfo,
 			System1: cfg.Decision.Provider.Provider + "/" + orDefault(cfg.Decision.Model, s1openai.DefaultModel),
 			System2: fmt.Sprintf("%s/%s (effort %s)", cfg.Reasoning.Provider.Provider, cfg.Reasoning.Model, orDefault(cfg.Reasoning.Effort, "default")),
 		}}
@@ -916,7 +933,8 @@ func depsFor(cfg *config.Config, st *store.Store, log *slog.Logger) abilityDeps 
 		web: web.Limits{Searches: cfg.DailyLife.Web.Searches * cfg.DailyLife.Pace, Pages: cfg.DailyLife.Web.Pages * cfg.DailyLife.Pace}, log: log}
 }
 
-func newAbilities(names []string, d abilityDeps) (*ability.Set, error) {
+// newAbilities also adds extra, the tools from MCP servers.
+func newAbilities(names []string, d abilityDeps, extra ...ability.Ability) (*ability.Set, error) {
 	var client *library.Client
 	lib := func() *library.Client { // one client, made only if an ability reads
 		if client == nil {
@@ -958,5 +976,5 @@ func newAbilities(names []string, d abilityDeps) (*ability.Set, error) {
 			abilities = append(abilities, a)
 		}
 	}
-	return ability.NewSet(abilities...), nil
+	return ability.NewSet(append(abilities, extra...)...), nil
 }

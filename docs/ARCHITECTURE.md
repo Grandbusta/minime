@@ -275,6 +275,18 @@ The mind does every other step; an ability never writes anything itself.
 | `read_article` | [reading](../internal/ability/reading) | Wikipedia |
 | `web_search` | [web](../internal/ability/web) | the configured searcher; reads the first page it can |
 | `read_page` | [web](../internal/ability/web) | a page one of its own searches found |
+| `<server>.<tool>` | [tools](../internal/tools) | a reading tool from an MCP server in config: its query is the tool's arguments as JSON, checked against the tool's schema |
+
+Tools ([internal/tools](../internal/tools)) come from MCP servers, reached with the
+official Go SDK when it starts: a local one as a command (given only `PATH`, `HOME` and
+the variables its config names), a remote one over https. Only the tools the config lists
+are offered, and only reading ones; a tool its server marks as destructive is refused.
+Each call has a timeout, connects again once if the connection dropped, and keeps up to
+12,000 characters of the result, fenced like a web page. Calls go in `web_log` (kind
+`tool`) and count against `tools.calls_per_day`; the action class `use_tools` (auto or
+forbid) gates them all. A tool is `ability.Chained`: after its call, System 2 sees what
+came back and may call another of its server's tools, up to three calls in one activity
+(`followUp` in [steps.go](../internal/mind/steps.go)), before it writes.
 
 Books and articles come through [internal/library](../internal/library), which fetches
 only from those two sites and stores each text once (`sources`). Web search and fetching
