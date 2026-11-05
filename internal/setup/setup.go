@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"strconv"
 	"strings"
@@ -49,9 +50,12 @@ type Setup struct {
 	Ask Prompter
 	Out io.Writer
 
+	// Files has Lives, the folder of lives to start from, and Example, what
+	// a new .env is written from. Env is on disk.
+	Files   fs.FS
 	Lives   string
-	Env     string
 	Example string
+	Env     string
 
 	BotName      BotName
 	FirstMessage FirstMessage
@@ -131,7 +135,7 @@ func (s *Setup) Run(ctx context.Context) (Result, error) {
 }
 
 func (s *Setup) pickLife() (self.Template, error) {
-	ts, err := self.Templates(s.Lives)
+	ts, err := self.Templates(s.Files, s.Lives)
 	if err != nil {
 		return self.Template{}, err
 	}
@@ -267,8 +271,8 @@ func (s *Setup) writeEnv(env map[string]string, whose string) error {
 			return err
 		}
 	}
-	raw, err := os.ReadFile(s.Example)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	raw, err := fs.ReadFile(s.Files, s.Example)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	text := string(raw)

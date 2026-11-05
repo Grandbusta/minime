@@ -27,7 +27,9 @@ Telegram for talking. Always write the name as **minime**, never "mini-me".
 | `prompts/*.md` | Everything System 2 is told, as templates. |
 | `decisions/*.yaml` | System 1's question sets, versioned (`incoming_message@1`). |
 | `docs/` | Users' docs, the brand, screenshots. |
+| `minime.go` | Builds `configs/`, `prompts/`, `decisions/`, `lives/` and `.env.example` into the binary (`minime.Files`); a file on disk at the same path wins. Read them only through it. |
 | `deploy/Dockerfile` | One person in one container (no compose). |
+| `.github/workflows/release.yml` | A `v*` tag: binaries on a draft release, the image on `ghcr.io` as that tag; publishing the release moves `:latest` to it. |
 
 ### Packages (`internal/`)
 

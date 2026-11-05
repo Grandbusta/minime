@@ -105,7 +105,9 @@ their `living` over it.
   wins over a stored one. Never in a prompt, a log, an export or the console.
 - **[configs/minime.yaml](../configs/minime.yaml)** ([internal/config](../internal/config)):
   the machinery every person shares: providers, the database, Telegram, prompts,
-  addresses, pricing. `${VAR}` is filled from the environment, where their secrets are by
+  addresses, pricing. It, the prompts, the question sets and the lives are built into the
+  binary ([minime.go](../minime.go), `minime.Files`), a file on disk at the same path
+  winning, so one binary with `DATABASE_URL` and `MINIME_KEY` runs a person. `${VAR}` is filled from the environment, where their secrets are by
   then.
 
 ## A message, step by step

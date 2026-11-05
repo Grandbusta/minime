@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Grandbusta/minime"
 	"github.com/Grandbusta/minime/internal/channel/telegram"
 	"github.com/Grandbusta/minime/internal/memory"
 	"github.com/Grandbusta/minime/internal/person"
@@ -22,7 +23,7 @@ import (
 // newPerson returns whether to run the person now. This process's
 // environment then has the new .env, and nothing from the one before.
 func newPerson(ctx context.Context) (bool, error) {
-	s := &setup.Setup{Ask: setup.Terminal{}, Out: os.Stdout, Lives: "lives", Env: ".env", Example: ".env.example",
+	s := &setup.Setup{Ask: setup.Terminal{}, Out: os.Stdout, Files: minime.Files, Lives: "lives", Example: ".env.example", Env: ".env",
 		BotName: telegram.BotName, FirstMessage: telegram.FirstMessage, Database: databaseWhose, Save: saveNew}
 	if _, err := exec.LookPath("docker"); err == nil {
 		s.Postgres = dockerPostgres
@@ -42,7 +43,7 @@ func newPerson(ctx context.Context) (bool, error) {
 		os.Setenv(k, v)
 	}
 	if !res.Start {
-		fmt.Printf("\nStart %s whenever you like with: go run ./cmd/minime\n", res.Name)
+		fmt.Printf("\nStart %s whenever you like with: minime\n", res.Name)
 	}
 	return res.Start, nil
 }

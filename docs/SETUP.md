@@ -18,11 +18,22 @@ see the [README](../README.md); for living with them day to day, [GUIDE.md](GUID
 
 ## Quick start
 
-You need Go 1.27+, a Telegram account, and an OpenAI API key with access to the Decisions
-API. A Postgres database helps, but `minime new` can start one for you with Docker.
+You need a Telegram account and an OpenAI API key with access to the Decisions API. A
+Postgres database helps, but `minime new` can start one for you with Docker.
+
+minime is one file: download it for your system from the
+[latest release](https://github.com/Grandbusta/minime/releases/latest), or build it with
+Go 1.27+:
 
 ```bash
-go run ./cmd/minime new
+go install github.com/Grandbusta/minime/cmd/minime@latest
+```
+
+Everything every person shares (the config, prompts, question sets and lives) is built into
+it. Then, in a folder for them (their `.env` is written there):
+
+```bash
+minime new
 ```
 
 It asks, then puts them in their own database and starts them:
@@ -41,7 +52,7 @@ and their keys (bot token, OpenAI key, console token) are all in it, the keys se
 only has two lines: `DATABASE_URL`, where they live, and `MINIME_KEY`, which opens their
 keys. Keep both safe and together: a copy of the database alone holds no working key.
 
-After that, `go run ./cmd/minime` starts them again. Starting someone new when someone
+After that, `minime` starts them again. Starting someone new when someone
 already lives in the database `.env` points to leaves them as they are and moves their
 `.env` to `.env.<name>`: `cp .env.<name> .env` brings them back.
 
@@ -62,7 +73,7 @@ Without `minime new`: put `DATABASE_URL` and `MINIME_KEY` (`openssl rand -hex 32
    the value without showing it:
 
    ```bash
-   go run ./cmd/minime secret set TELEGRAM_BOT_TOKEN
+   minime secret set TELEGRAM_BOT_TOKEN
    ```
 
    and the same for `TELEGRAM_OWNER_ID`, `OPENAI_API_KEY` and `OPENAI_MODEL`.
@@ -71,13 +82,13 @@ Without `minime new`: put `DATABASE_URL` and `MINIME_KEY` (`openssl rand -hex 32
    `life.yaml`, `living.yaml`, `judgment.yaml` and `skills/` go into their database:
 
    ```bash
-   go run ./cmd/minime self import mylife/
+   minime self import mylife/
    ```
 
-4. **Start them**, from the repository root (the config and `.env` are read from there):
+4. **Start them**, from the folder with their `.env`:
 
    ```bash
-   go run ./cmd/minime
+   minime
    ```
 
    You'll see `minime awake`.
@@ -87,17 +98,15 @@ Without `minime new`: put `DATABASE_URL` and `MINIME_KEY` (`openssl rand -hex 32
 
 ## Running with Docker
 
-One person per container. The image has the config, prompts, question sets and lives; the
-person is their database, reached with the two lines in their `.env`. Nothing about them is
-in the image.
+One person per container. Each release publishes an image for amd64 and arm64,
+`ghcr.io/grandbusta/minime`; the person is their database, reached with the two lines in
+their `.env`, so nothing about them is in the image.
 
 ```bash
-docker build -f deploy/Dockerfile -t minime .
+docker run -d --name daniel --restart always --env-file .env -p 127.0.0.1:8090:8090 -p 8080:8080 ghcr.io/grandbusta/minime
 ```
 
-```bash
-docker run -d --name daniel --restart always --env-file .env -p 127.0.0.1:8090:8090 -p 8080:8080 minime
-```
+To build it yourself, from the source: `docker build -f deploy/Dockerfile -t minime .`
 
 ```bash
 docker logs -f daniel
@@ -161,7 +170,9 @@ kept as a new version, so you can go back:
 
 Changes apply the next time they start.
 
-The rest is the same for everyone:
+The rest is the same for everyone, and built into minime. A file or folder at the same
+path in the folder where you run it is used instead, so you can change one without a
+rebuild (copy it from the source first); `-config` points at another config:
 
 | File | What's in it |
 |---|---|
@@ -362,7 +373,7 @@ its frontmatter, then the instructions) and any files it points to. Each person 
 own, in their database:
 
 ```bash
-go run ./cmd/minime skill add path/to/cold-email
+minime skill add path/to/cold-email
 ```
 
 `minime skill list` shows theirs and `minime skill remove <name>` takes one away; changes
@@ -473,9 +484,16 @@ loads for every relation it allows.
 
 ## Developing
 
+From the source, `go run ./cmd/minime` is `minime`, and reads the shared files from the
+checkout, so changes to a prompt or the config apply without a rebuild.
+
 ```bash
 go test ./...
 ```
+
+A tag like `v0.3.0` runs the release workflow: binaries for Linux, macOS and Windows on a
+draft release, and the image on `ghcr.io` as `:v0.3.0`. Write the release's notes and
+publish it: only then does `:latest` move to it (a pre-release leaves it where it was).
 
 The store tests run only when `MINIME_TEST_DATABASE_URL` points at a disposable database:
 they write test rows, so never point it at a real one.

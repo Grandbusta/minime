@@ -1,15 +1,16 @@
 package self
 
 import (
-	"github.com/Grandbusta/minime/internal/config"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
+
+	"github.com/Grandbusta/minime/internal/config"
 )
 
 func TestLives(t *testing.T) {
-	ts, err := Templates("../../lives")
+	ts, err := Templates(os.DirFS("../.."), "lives")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,9 +64,7 @@ func TestLives(t *testing.T) {
 // living checks a person's living.yaml is read over the config.
 func living(t *testing.T, doc []byte, l Life) {
 	t.Helper()
-	cfgPath := filepath.Join(t.TempDir(), "minime.yaml")
-	os.WriteFile(cfgPath, []byte("database:\n  url: postgres://x\n"), 0o600)
-	cfg, err := config.Load(cfgPath, doc)
+	cfg, err := config.Load(fstest.MapFS{"minime.yaml": {Data: []byte("database:\n  url: postgres://x\n")}}, "minime.yaml", doc)
 	if err != nil {
 		t.Fatalf("%s: %v", l.Name, err)
 	}
@@ -85,7 +84,7 @@ func living(t *testing.T, doc []byte, l Life) {
 }
 
 func TestRenderRefuses(t *testing.T) {
-	tmpl, err := LoadTemplate("../../lives/daniel")
+	tmpl, err := LoadTemplate(os.DirFS("../.."), "lives/daniel")
 	if err != nil {
 		t.Fatal(err)
 	}

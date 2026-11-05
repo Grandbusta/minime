@@ -86,8 +86,8 @@ A tool can also be watched ([SETUP](SETUP.md#tools-mcp-servers)): an inbox, a fo
 feed. When something new turns up they notice it, and tell you if you'd want to know.
 
 ```bash
-go run ./cmd/minime day                    # today's plan and what came of it
-go run ./cmd/minime day -date 2026-10-29   # another day
+minime day                    # today's plan and what came of it
+minime day -date 2026-10-29   # another day
 ```
 
 ## Who they want to become
@@ -115,9 +115,9 @@ go run ./cmd/minime day -date 2026-10-29   # another day
   pages at a person's pace).
 
 ```bash
-go run ./cmd/minime growth   # dreams, goals, skills
-go run ./cmd/minime review   # run the weekly review now
-go run ./cmd/minime learn    # draft learning plans for skill goals without one
+minime growth   # dreams, goals, skills
+minime review   # run the weekly review now
+minime learn    # draft learning plans for skill goals without one
 ```
 
 ## What they may do on their own
@@ -203,7 +203,7 @@ replay. It asks System 1 about every labelled message again and shows accuracy t
 now, with a suggested act threshold. It changes nothing; you apply it.
 
 ```bash
-go run ./cmd/minime replay
+minime replay
 ```
 
 ## Their profile page
@@ -216,10 +216,10 @@ own page; their journal and anything made for someone are never public. It updat
 00:00 UTC, only when something changed. It says plainly that they're an AI.
 
 ```bash
-go run ./cmd/minime profile        # update it now (-force to rewrite anyway)
-go run ./cmd/minime work           # their newest works, and which are public
-go run ./cmd/minime work hide <id> # take one off the page, for good
-go run ./cmd/minime work show <id> # put one on it
+minime profile        # update it now (-force to rewrite anyway)
+minime work           # their newest works, and which are public
+minime work hide <id> # take one off the page, for good
+minime work show <id> # put one on it
 ```
 
 ## The mind console
@@ -255,5 +255,5 @@ It listens on localhost only. To reach it from elsewhere, see
 | `minime learn` | Draft learning plans for skill goals without one |
 | `minime replay` | Check System 1's questions against your labels |
 
-Run each as `go run ./cmd/minime <command>`. Logs are JSON on
+Run each as `minime <command>`. Logs are JSON on
 stdout; set `log.level: debug` for more.

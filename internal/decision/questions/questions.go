@@ -5,8 +5,8 @@ package questions
 import (
 	"bytes"
 	"fmt"
-	"os"
-	"path/filepath"
+	"io/fs"
+	"path"
 	"sort"
 
 	"gopkg.in/yaml.v3"
@@ -37,8 +37,9 @@ type Thresholds struct {
 
 func (s Set) Ref() string { return fmt.Sprintf("%s@%d", s.ID, s.Version) }
 
-func LoadDir(dir string) (map[string]Set, error) {
-	paths, err := filepath.Glob(filepath.Join(dir, "*.yaml"))
+// LoadDir loads every *.yaml in dir, in fsys.
+func LoadDir(fsys fs.FS, dir string) (map[string]Set, error) {
+	paths, err := fs.Glob(fsys, path.Join(dir, "*.yaml"))
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +48,7 @@ func LoadDir(dir string) (map[string]Set, error) {
 	}
 	sets := make(map[string]Set, len(paths))
 	for _, p := range paths {
-		s, err := LoadFile(p)
+		s, err := load(fsys, p)
 		if err != nil {
 			return nil, err
 		}
@@ -59,8 +60,8 @@ func LoadDir(dir string) (map[string]Set, error) {
 	return sets, nil
 }
 
-func LoadFile(path string) (Set, error) {
-	raw, err := os.ReadFile(path)
+func load(fsys fs.FS, path string) (Set, error) {
+	raw, err := fs.ReadFile(fsys, path)
 	if err != nil {
 		return Set{}, err
 	}

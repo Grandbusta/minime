@@ -1,5 +1,7 @@
 # Never in the image: secrets, the person's own folder, and build leftovers.
 .env
+.env.*
+!.env.example
 self/
 .git
 /minime

@@ -50,19 +50,18 @@ type saved struct {
 func newSetup(t *testing.T, answers string) (*Setup, *bytes.Buffer, string, *saved) {
 	t.Helper()
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, ".env.example"), []byte("# Where they live.\nDATABASE_URL=\n# The key to their secrets.\nMINIME_KEY=\n"), 0o600)
 	out, got := &bytes.Buffer{}, &saved{}
 	save := func(_ context.Context, url, key string, files map[string][]byte, secrets map[string]string) error {
 		*got = saved{url, key, files, secrets}
 		return nil
 	}
-	return &Setup{Ask: &script{in: bufio.NewReader(strings.NewReader(answers)), out: out}, Out: out, Lives: "../../lives",
-		Env: filepath.Join(dir, ".env"), Example: filepath.Join(dir, ".env.example"), BotName: fakeBotName, FirstMessage: fakeFirstMessage,
+	return &Setup{Ask: &script{in: bufio.NewReader(strings.NewReader(answers)), out: out}, Out: out, Files: os.DirFS("../.."), Lives: "lives",
+		Example: ".env.example", Env: filepath.Join(dir, ".env"), BotName: fakeBotName, FirstMessage: fakeFirstMessage,
 		Database: fakeDatabase, Save: save, Now: func() time.Time { return time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC) }}, out, dir, got
 }
 
 func TestStartingMei(t *testing.T) {
-	ts, _ := self.Templates("../../lives")
+	ts, _ := self.Templates(os.DirFS("../.."), "lives")
 	mei, rel := 0, 0
 	for i, tm := range ts {
 		if tm.Key == "mei" {
@@ -109,7 +108,7 @@ func TestStartingMei(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(vars) != 2 || vars["DATABASE_URL"] != "postgres://meis" || vars["MINIME_KEY"] != got.key || !strings.Contains(string(raw), "# Where they live.") {
+	if len(vars) != 2 || vars["DATABASE_URL"] != "postgres://meis" || vars["MINIME_KEY"] != got.key || !strings.Contains(string(raw), "# Their Postgres, password included.") {
 		t.Errorf(".env =\n%s", raw)
 	}
 	if old, _ := os.ReadFile(filepath.Join(dir, ".env.elsa")); string(old) != elsas {

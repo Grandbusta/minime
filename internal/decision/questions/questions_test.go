@@ -1,11 +1,12 @@
 package questions
 
 import (
+	"os"
 	"testing"
 )
 
 func TestShippedSetsAreValid(t *testing.T) {
-	sets, err := LoadDir("../../../decisions")
+	sets, err := LoadDir(os.DirFS("../../.."), "decisions")
 	if err != nil {
 		t.Fatal(err)
 	}

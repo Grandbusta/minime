@@ -18,6 +18,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/oklog/ulid/v2"
 
+	"github.com/Grandbusta/minime"
 	"github.com/Grandbusta/minime/internal/agentskill"
 	"github.com/Grandbusta/minime/internal/config"
 	"github.com/Grandbusta/minime/internal/memory"
@@ -221,7 +222,7 @@ func checkLiving(ctx context.Context, st *store.Store, key secret.Key, cfgPath s
 	if _, err := person.Env(ctx, st, key); err != nil {
 		return err
 	}
-	cfg, err := config.Load(cfgPath, living)
+	cfg, err := config.Load(minime.Files, cfgPath, living)
 	if err != nil {
 		return err
 	}

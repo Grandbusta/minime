@@ -18,6 +18,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"os"
@@ -35,6 +36,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/Grandbusta/minime"
 	"github.com/Grandbusta/minime/internal/ability"
 	"github.com/Grandbusta/minime/internal/ability/journal"
 	"github.com/Grandbusta/minime/internal/ability/reading"
@@ -123,7 +125,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(*cfgPath, p.Living)
+	cfg, err := config.Load(minime.Files, *cfgPath, p.Living)
 	if err != nil {
 		return err
 	}
@@ -192,7 +194,7 @@ func runAgent(ctx context.Context, cfg *config.Config, p person.Person, st *stor
 	if err != nil {
 		return err
 	}
-	sets, err := questions.LoadDir(cfg.Decision.QuestionSets)
+	sets, err := questions.LoadDir(minime.Files, cfg.Decision.QuestionSets)
 	if err != nil {
 		return err
 	}
@@ -421,7 +423,7 @@ func updateProfile(ctx context.Context, cfg *config.Config, life self.Life, st *
 	if err != nil {
 		return err
 	}
-	sets, err := questions.LoadDir(cfg.Decision.QuestionSets)
+	sets, err := questions.LoadDir(minime.Files, cfg.Decision.QuestionSets)
 	if err != nil {
 		return err
 	}
@@ -590,7 +592,7 @@ func runReplay(ctx context.Context, cfg *config.Config, st *store.Store, n int, 
 	if err != nil {
 		return err
 	}
-	sets, err := questions.LoadDir(cfg.Decision.QuestionSets)
+	sets, err := questions.LoadDir(minime.Files, cfg.Decision.QuestionSets)
 	if err != nil {
 		return err
 	}
@@ -766,7 +768,7 @@ func checkLifeAreaSet(s questions.Set) error {
 // loadPrompt's ref is the file name plus a short hash of the text, so every
 // edit shows up as a new version in the decision log.
 func loadPrompt(path string) (mind.Prompt, error) {
-	text, err := os.ReadFile(path)
+	text, err := fs.ReadFile(minime.Files, path)
 	if err != nil {
 		return mind.Prompt{}, fmt.Errorf("read prompt: %w", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"regexp"
@@ -334,10 +335,11 @@ type Log struct {
 	Level string `yaml:"level"`
 }
 
-// Load reads the file at path, then the person's living (living.yaml; nil
-// if none) over it, expanding ${VAR} references from the environment.
-func Load(path string, living []byte) (*Config, error) {
-	raw, err := os.ReadFile(path)
+// Load reads the file at path in fsys, then the person's living
+// (living.yaml; nil if none) over it, expanding ${VAR} references from the
+// environment.
+func Load(fsys fs.FS, path string, living []byte) (*Config, error) {
+	raw, err := fs.ReadFile(fsys, path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}

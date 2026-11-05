@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
+	"io/fs"
+	"path"
 	"slices"
 	"strings"
 
@@ -15,8 +15,9 @@ import (
 // Template is a folder laid out like a person's own, with {owner},
 // {relation}, {account} and {circle} filled in for whoever starts it.
 type Template struct {
-	Key       string   `yaml:"-"` // its directory's name
-	Dir       string   `yaml:"-"`
+	Key       string `yaml:"-"` // its directory's name
+	Dir       string `yaml:"-"` // in files
+	files     fs.FS
 	Name      string   `yaml:"name"`
 	About     string   `yaml:"about"`
 	Relations []string `yaml:"relations"`
@@ -30,8 +31,9 @@ type Owner struct {
 	Account  string
 }
 
-func Templates(dir string) ([]Template, error) {
-	entries, err := os.ReadDir(dir)
+// Templates are the lives in dir, in files.
+func Templates(files fs.FS, dir string) ([]Template, error) {
+	entries, err := fs.ReadDir(files, dir)
 	if err != nil {
 		return nil, fmt.Errorf("read templates: %w", err)
 	}
@@ -40,7 +42,7 @@ func Templates(dir string) ([]Template, error) {
 		if !e.IsDir() {
 			continue
 		}
-		t, err := LoadTemplate(filepath.Join(dir, e.Name()))
+		t, err := LoadTemplate(files, path.Join(dir, e.Name()))
 		if err != nil {
 			return nil, err
 		}
@@ -49,8 +51,8 @@ func Templates(dir string) ([]Template, error) {
 	return out, nil
 }
 
-func LoadTemplate(dir string) (Template, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, "template.yaml"))
+func LoadTemplate(files fs.FS, dir string) (Template, error) {
+	raw, err := fs.ReadFile(files, path.Join(dir, "template.yaml"))
 	if err != nil {
 		return Template{}, fmt.Errorf("read template: %w", err)
 	}
@@ -60,13 +62,13 @@ func LoadTemplate(dir string) (Template, error) {
 	if err := dec.Decode(&t); err != nil {
 		return Template{}, fmt.Errorf("%s/template.yaml: %w", dir, err)
 	}
-	t.Key, t.Dir, t.Name, t.About = filepath.Base(dir), dir, strings.TrimSpace(t.Name), strings.TrimSpace(t.About)
+	t.Key, t.Dir, t.files, t.Name, t.About = path.Base(dir), dir, files, strings.TrimSpace(t.Name), strings.TrimSpace(t.About)
 	t.Relations = nonEmpty(t.Relations)
 	if t.Name == "" || t.About == "" || len(t.Relations) == 0 {
 		return Template{}, fmt.Errorf("%s/template.yaml: needs a name, about and at least one relation", dir)
 	}
 	for _, f := range Files {
-		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+		if _, err := fs.Stat(files, path.Join(dir, f)); err != nil {
 			return Template{}, fmt.Errorf("%s: %s is missing", dir, f)
 		}
 	}
@@ -88,7 +90,7 @@ func (t Template) Render(o Owner) (map[string][]byte, error) {
 	fill := strings.NewReplacer("{owner}", o.Name, "{relation}", o.Relation, "{account}", o.Account, "{circle}", CircleOf(o.Relation))
 	out := map[string][]byte{}
 	for _, f := range Files {
-		raw, err := os.ReadFile(filepath.Join(t.Dir, f))
+		raw, err := fs.ReadFile(t.files, path.Join(t.Dir, f))
 		if err != nil {
 			return nil, fmt.Errorf("read template: %w", err)
 		}
