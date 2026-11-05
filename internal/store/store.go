@@ -48,20 +48,30 @@ func Open(ctx context.Context, url string) (*Store, error) {
 }
 
 func migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	dir, err := fs.Sub(migrations, "migrations")
+	p, done, err := migrator(pool)
 	if err != nil {
 		return err
 	}
-	db := stdlib.OpenDBFromPool(pool)
-	defer db.Close()
-	p, err := goose.NewProvider(goose.DialectPostgres, db, dir)
-	if err != nil {
-		return fmt.Errorf("migrations: %w", err)
-	}
+	defer done()
 	if _, err := p.Up(ctx); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	return nil
+}
+
+// migrator's done closes what it opened, not the pool.
+func migrator(pool *pgxpool.Pool) (*goose.Provider, func(), error) {
+	dir, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		return nil, nil, err
+	}
+	db := stdlib.OpenDBFromPool(pool)
+	p, err := goose.NewProvider(goose.DialectPostgres, db, dir)
+	if err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("migrations: %w", err)
+	}
+	return p, func() { db.Close() }, nil
 }
 
 func (s *Store) Close() { s.pool.Close() }

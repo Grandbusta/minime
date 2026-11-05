@@ -71,7 +71,8 @@ the key to their secrets) and starts them. After that:
 minime
 ```
 
-Every setting, Docker, and setting things up by hand: [docs/SETUP.md](docs/SETUP.md).
+If something's wrong, `minime doctor` says what; `minime backup` keeps everything about
+them in one file. Every setting, Docker, and setting things up by hand: [docs/SETUP.md](docs/SETUP.md).
 
 **What it costs:** only your OpenAI usage. Their own day is capped by `budget_usd` in
 `living.yaml` ($0.05 a day at a person's pace), and a message to them costs a fraction of

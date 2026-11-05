@@ -9,6 +9,9 @@
 //	minime self export|import|edit|history|rollback  their life, living and judgment, as YAML
 //	minime secret list|set|unset|rekey   their keys, sealed in their database
 //	minime skill list|add|remove         the know-how they've been given
+//	minime doctor [-config path]         check everything they need to run
+//	minime backup [file]                 everything about them, to one file
+//	minime restore <file>                into a new, empty database
 package main
 
 import (
@@ -108,6 +111,14 @@ func run(args []string) error {
 		cmd = "run"
 	}
 
+	switch cmd {
+	case "backup":
+		return backup(ctx, fs.Args(), os.Stdout)
+	case "restore":
+		return restore(ctx, fs.Args(), os.Stdout)
+	case "doctor":
+		return doctor(ctx, *cfgPath, os.Stdout)
+	}
 	st, key, err := openStore(ctx)
 	if err != nil {
 		return err
@@ -183,7 +194,7 @@ func run(args []string) error {
 	case "work":
 		return works(ctx, st, fs.Args(), *limit, os.Stdout)
 	default:
-		return fmt.Errorf("unknown command %q (want new, run, decisions, profile, day, work, growth, review, learn, replay, self, secret or skill)", cmd)
+		return fmt.Errorf("unknown command %q (want new, run, decisions, profile, day, work, growth, review, learn, replay, self, secret, skill, doctor, backup or restore)", cmd)
 	}
 }
 
@@ -501,6 +512,8 @@ func growthMind(cfg *config.Config, life self.Life, st *store.Store, log *slog.L
 		Calls: calls(cfg), Embedder: newEmbedder(cfg, log), Log: log.With("component", "mind")}), nil
 }
 
+const embedModel = "text-embedding-3-small"
+
 func newEmbedder(cfg *config.Config, log *slog.Logger) embed.Embedder {
 	e := cfg.Embedding
 	switch e.Provider {
@@ -511,8 +524,8 @@ func newEmbedder(cfg *config.Config, log *slog.Logger) embed.Embedder {
 		if key == "" {
 			key = cfg.Reasoning.APIKey
 		}
-		return embedopenai.New(key, orDefault(e.Model, "text-embedding-3-small"), e.BaseURL, priceFor(orDefault(e.Model, "text-embedding-3-small"),
-			cfg.Pricing, log))
+		model := orDefault(e.Model, embedModel)
+		return embedopenai.New(key, model, e.BaseURL, priceFor(model, cfg.Pricing, log))
 	default:
 		log.Warn("unknown embedding provider; taking the newest decisions instead", "provider", e.Provider)
 		return nil

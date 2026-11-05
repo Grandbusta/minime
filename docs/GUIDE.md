@@ -254,6 +254,9 @@ It listens on localhost only. To reach it from elsewhere, see
 | `minime review` | Run the weekly review now |
 | `minime learn` | Draft learning plans for skill goals without one |
 | `minime replay` | Check System 1's questions against your labels |
+| `minime doctor` | Check everything they need to run, and say what's wrong |
+| `minime backup [file]` | Everything about them, as they are now, to one file |
+| `minime restore <file>` | Bring them back into a new, empty database |
 
 Run each as `minime <command>`. Logs are JSON on
 stdout; set `log.level: debug` for more.

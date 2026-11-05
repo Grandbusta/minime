@@ -469,6 +469,43 @@ A secret set in the environment too wins over the stored one, so a container or 
 override one without touching the database. Lose `MINIME_KEY` and only the secrets are
 gone, not the person: set them again.
 
+## Checking and backing up
+
+When something's wrong, start here:
+
+```bash
+minime doctor
+```
+
+It checks everything they need to run, one line each, and goes on past a problem where it
+can: the database, that `MINIME_KEY` opens their secrets, the config with its prompts and
+question sets, that their OpenAI key reaches each model, the bot token, that each owner
+has pressed Start in the bot (so it can message you), and each tool server. It changes
+nothing but bringing the database up to date, and exits with an error if anything is
+wrong. In Docker: `docker exec daniel /minime doctor`.
+
+A person is their database, so a backup is everything in it:
+
+```bash
+minime backup
+```
+
+It writes `minime-<name>-<date>.zip` here (or the file you name), readable only by you,
+as they are at one moment, so they can keep running while it's made. Their secrets are
+in it sealed: keep `MINIME_KEY` safe too, and apart from the backup, or they can't be
+opened. Without the key a backup still brings back everything but the secrets.
+
+To bring them back, make a new, empty database, point `DATABASE_URL` at it and:
+
+```bash
+minime restore minime-<name>-<date>.zip
+```
+
+It only restores into a database with nothing in it, so it never mixes two people or
+writes over anyone. A backup from an older minime is brought up to date after it's
+loaded; one from a newer minime needs that one. Then run `minime doctor` with the
+`MINIME_KEY` they had.
+
 ## Making your own life
 
 Each life in [lives](../lives) is a folder with `template.yaml` (who they are in a line,

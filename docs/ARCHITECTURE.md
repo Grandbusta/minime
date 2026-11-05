@@ -110,6 +110,16 @@ their `living` over it.
   winning, so one binary with `DATABASE_URL` and `MINIME_KEY` runs a person. `${VAR}` is filled from the environment, where their secrets are by
   then.
 
+Since the database is the person, a backup is the database
+([internal/store/backup.go](../internal/store/backup.go)): a zip of every table as CSV,
+read in one repeatable-read transaction so it's one moment, with `backup.json` saying
+whose it is, the migration it was made at and each table's columns and rows, in an order
+that loads without breaking a foreign key. `Restore` takes only an empty database: it
+migrates it to the backup's version, loads every table in one transaction (checking the
+row counts), sets serial columns to follow on, then migrates the rest of the way. Secrets
+travel sealed. `minime doctor` checks each thing a run needs, in order, without starting
+the person.
+
 ## A message, step by step
 
 When the owner sends "I have an interview on Friday, wish me luck", this is what happens
