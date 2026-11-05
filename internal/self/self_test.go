@@ -1,22 +1,9 @@
 package self
 
-import (
-	"os"
-	"path/filepath"
-	"testing"
-)
-
-func write(t *testing.T, body string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "life.yaml")
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
+import "testing"
 
 func TestLoad(t *testing.T) {
-	l, err := Load(write(t, "name: Tobi\nstory:\n  - Tobi is 29 years old.\n  - '  '\n  - Tobi is a Catholic.\n"))
+	l, err := ParseLife([]byte("name: Tobi\nstory:\n  - Tobi is 29 years old.\n  - '  '\n  - Tobi is a Catholic.\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,14 +18,14 @@ func TestLoadRequiresAStory(t *testing.T) {
 		"no story":       "name: Tobi\n",
 		"unknown key":    "name: Tobi\nstory: [x]\nage: 3\n",
 	} {
-		if _, err := Load(write(t, body)); err == nil {
+		if _, err := ParseLife([]byte(body)); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
 	}
 }
 
 func TestFamily(t *testing.T) {
-	l, err := Load(write(t, `
+	l, err := ParseLife([]byte(`
 name: Tobi
 story: [Tobi is 29.]
 family:
@@ -57,7 +44,7 @@ family:
 		"no name":        "  - {relation: cousin}\n",
 		"shared account": "  - {name: Sam, relation: father, account: a}\n  - {name: Bo, relation: uncle, account: a}\n",
 	} {
-		if _, err := Load(write(t, "name: Tobi\nstory: [x]\nfamily:\n"+family)); err == nil {
+		if _, err := ParseLife([]byte("name: Tobi\nstory: [x]\nfamily:\n" + family)); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
 	}

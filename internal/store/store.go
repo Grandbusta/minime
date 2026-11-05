@@ -2188,19 +2188,3 @@ func (s *Store) Whose(ctx context.Context) (string, bool, error) {
 	}
 	return name, true, nil
 }
-
-// Claim makes the database name's memory, the first time; after that only
-// name may use it (ErrNotTheirs otherwise, naming whose it is).
-func (s *Store) Claim(ctx context.Context, name string, at time.Time) error {
-	if _, err := s.pool.Exec(ctx, `INSERT INTO whose (name, since) VALUES ($1, $2) ON CONFLICT DO NOTHING`, name, at); err != nil {
-		return fmt.Errorf("claim: %w", err)
-	}
-	whose, _, err := s.Whose(ctx)
-	if err != nil {
-		return err
-	}
-	if whose != name {
-		return fmt.Errorf("%w: %s's, not %s's; give %s their own database", ErrNotTheirs, whose, name, name)
-	}
-	return nil
-}

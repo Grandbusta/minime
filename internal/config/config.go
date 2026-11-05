@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -22,7 +20,6 @@ import (
 )
 
 type Config struct {
-	Self          Self          `yaml:"self"`
 	Database      Database      `yaml:"database"`
 	Telegram      Telegram      `yaml:"telegram"`
 	Decision      Decision      `yaml:"decision"`  // System 1
@@ -37,7 +34,6 @@ type Config struct {
 	Judgment      Judgment      `yaml:"judgment"`
 	Search        Search        `yaml:"search"`
 	Tools         Tools         `yaml:"tools"`
-	AgentSkills   AgentSkills   `yaml:"agent_skills"`
 	// Embedding finds the past decisions most like the one at hand; no
 	// provider: the newest are used instead.
 	Embedding Provider                 `yaml:"embedding"`
@@ -131,20 +127,6 @@ type DailyLife struct {
 type Web struct {
 	Searches int `yaml:"searches_per_day"`
 	Pages    int `yaml:"pages_per_day"`
-}
-
-// AgentSkills are folders of know-how in the Agent Skills format (a
-// SKILL.md each), read from Dirs in order: a later one wins on a name.
-// Empty: the shared skills folder, then the person's own.
-type AgentSkills struct {
-	Dirs []string `yaml:"dirs"`
-}
-
-func (c *Config) SkillDirs() []string {
-	if len(c.AgentSkills.Dirs) > 0 {
-		return c.AgentSkills.Dirs
-	}
-	return []string{"skills", filepath.Join(c.Self.Dir, "skills")}
 }
 
 // Tools are MCP servers whose tools it may use. Only the tools listed are
@@ -320,15 +302,6 @@ type WorkingMemory struct {
 	Window time.Duration `yaml:"window"`
 }
 
-// Self is the person's folder, laid out like each life in lives/.
-type Self struct {
-	Dir string `yaml:"dir"`
-}
-
-func (s Self) LifeFile() string     { return filepath.Join(s.Dir, "life.yaml") }
-func (s Self) LivingFile() string   { return filepath.Join(s.Dir, "living.yaml") }
-func (s Self) JudgmentFile() string { return filepath.Join(s.Dir, "judgment.yaml") }
-
 type Database struct {
 	URL string `yaml:"url"`
 }
@@ -361,14 +334,14 @@ type Log struct {
 	Level string `yaml:"level"`
 }
 
-// Load reads the file at path, expanding ${VAR} references from the environment.
-func Load(path string) (*Config, error) {
+// Load reads the file at path, then the person's living (living.yaml; nil
+// if none) over it, expanding ${VAR} references from the environment.
+func Load(path string, living []byte) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 	cfg := &Config{
-		Self:          Self{Dir: "self"},
 		Telegram:      Telegram{PollTimeoutSeconds: 30},
 		Decision:      Decision{QuestionSets: "decisions"},
 		Reasoning:     Reasoning{Prompt: "prompts/reply.md", Effort: "low"},
@@ -390,7 +363,7 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal([]byte(os.ExpandEnv(string(raw))), cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
-	if err := cfg.loadLiving(); err != nil {
+	if err := cfg.loadLiving(living); err != nil {
 		return nil, err
 	}
 	// The environment wins: in a container these must be all addresses, not localhost.
@@ -406,28 +379,18 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// loadLiving reads living.yaml over the defaults and the config file. A
-// missing file leaves them as they are.
-func (c *Config) loadLiving() error {
-	raw, err := os.ReadFile(c.Self.LivingFile())
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read living: %w", err)
-	}
+func (c *Config) loadLiving(raw []byte) error {
 	living := struct {
-		Initiative *Initiative  `yaml:"initiative"`
-		DailyLife  *DailyLife   `yaml:"daily_life"`
-		Autonomy   *Autonomy    `yaml:"autonomy"`
-		Judgment   *Judgment    `yaml:"judgment"`
-		Tools      *Tools       `yaml:"tools"`
-		Skills     *AgentSkills `yaml:"agent_skills"`
-	}{&c.Initiative, &c.DailyLife, &c.Autonomy, &c.Judgment, &c.Tools, &c.AgentSkills}
+		Initiative *Initiative `yaml:"initiative"`
+		DailyLife  *DailyLife  `yaml:"daily_life"`
+		Autonomy   *Autonomy   `yaml:"autonomy"`
+		Judgment   *Judgment   `yaml:"judgment"`
+		Tools      *Tools      `yaml:"tools"`
+	}{&c.Initiative, &c.DailyLife, &c.Autonomy, &c.Judgment, &c.Tools}
 	dec := yaml.NewDecoder(strings.NewReader(os.ExpandEnv(string(raw))))
 	dec.KnownFields(true)
 	if err := dec.Decode(&living); err != nil && !errors.Is(err, io.EOF) {
-		return fmt.Errorf("%s: %w", c.Self.LivingFile(), err)
+		return fmt.Errorf("living: %w", err)
 	}
 	return nil
 }

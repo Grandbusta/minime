@@ -1,6 +1,7 @@
 # One person in one container. Build from the repository root:
 #   docker build -f deploy/Dockerfile -t minime .
-# Their folder (self/) is mounted, never baked in; secrets come from .env.
+# The person is their database: run it with DATABASE_URL and MINIME_KEY
+# (--env-file .env). Nothing about them is in the image.
 FROM golang:1.27 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -11,7 +12,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/minime ./cmd/minim
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/minime /app/minime
-# What every person needs: the config, the prompts, the question sets, and
+# What every person shares: the config, the prompts, the question sets, and
 # the lives they can start from. Paths in the config are relative to /app.
 COPY configs ./configs
 COPY prompts ./prompts

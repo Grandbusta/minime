@@ -1,9 +1,14 @@
-// Command minime runs the agent.
+// Command minime runs the agent. The person is their database
+// (DATABASE_URL), their secrets opened with MINIME_KEY.
 //
+//	minime new                           start someone, in their own database
 //	minime [run] [-config path]          run the agent
 //	minime decisions [-n 20] [-config path]  show the latest decisions
 //	minime profile [-force] [-config path]   update the profile page now
 //	minime day [-date YYYY-MM-DD] [-config path]  what it planned and made that day
+//	minime self export|import|edit|history|rollback  their life, living and judgment, as YAML
+//	minime secret list|set|unset|rekey   their keys, sealed in their database
+//	minime skill list|add|remove         the know-how they've been given
 package main
 
 import (
@@ -44,6 +49,7 @@ import (
 	"github.com/Grandbusta/minime/internal/memory"
 	"github.com/Grandbusta/minime/internal/mind"
 	"github.com/Grandbusta/minime/internal/perception"
+	"github.com/Grandbusta/minime/internal/person"
 	"github.com/Grandbusta/minime/internal/portfolio"
 	"github.com/Grandbusta/minime/internal/pricing"
 	"github.com/Grandbusta/minime/internal/providers/embed"
@@ -86,164 +92,101 @@ func run(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	// Secrets from .env, unless the environment already has them.
+	// DATABASE_URL and MINIME_KEY from .env, unless the environment already has them.
 	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf(".env: %w", err)
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	if cmd == "new" {
-		start, err := newPerson(context.Background())
+		start, err := newPerson(ctx)
 		if err != nil || !start {
 			return err
 		}
 		cmd = "run"
 	}
-	if _, err := os.Stat(".env"); errors.Is(err, os.ErrNotExist) && os.Getenv("DATABASE_URL") == "" {
-		return errors.New("no one lives here yet: start someone with `go run ./cmd/minime new`")
-	}
 
-	cfg, err := config.Load(*cfgPath)
+	st, key, err := openStore(ctx)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	switch cmd {
+	case "self":
+		return selfCommand(ctx, st, key, *cfgPath, fs.Args(), os.Stdout)
+	case "secret":
+		return secretCommand(ctx, st, key, fs.Args(), os.Stdout)
+	case "skill":
+		return skillCommand(ctx, st, fs.Args(), os.Stdout)
+	}
+	p, err := person.Load(ctx, st, key)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(*cfgPath, p.Living)
 	if err != nil {
 		return err
 	}
 	if cfg.Initiative.Timezone == "" {
-		if life, err := self.Load(cfg.Self.LifeFile()); err == nil {
-			cfg.Initiative.Timezone = life.Timezone
-		}
+		cfg.Initiative.Timezone = p.Life.Timezone
 	}
 	log, err := newLogger(cfg.Log.Level)
 	if err != nil {
 		return err
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	if len(p.FromEnv) > 0 {
+		log.Info("the environment sets some of their secrets too, and wins", "names", p.FromEnv)
+	}
+	for _, u := range p.Unreadable {
+		log.Warn("a skill left out", "skill", u)
+	}
 
 	switch cmd {
 	case "run":
 		if err := cfg.ValidateAgent(); err != nil {
 			return err
 		}
-		// Without a life story it does not start, and the database is not touched.
-		life, err := self.Load(cfg.Self.LifeFile())
-		if errors.Is(err, os.ErrNotExist) {
-			return errors.New("no one lives here yet: start someone with `go run ./cmd/minime new`")
-		}
-		if err != nil {
-			return err
-		}
-		st, err := store.Open(ctx, cfg.Database.URL)
-		if err != nil {
-			return err
-		}
-		defer st.Close()
-		if err := st.Claim(ctx, life.Name, time.Now().UTC()); err != nil {
-			return err
-		}
-		return runAgent(ctx, cfg, life, st, log)
+		return runAgent(ctx, cfg, p, st, log)
 	case "decisions":
-		st, err := store.Open(ctx, cfg.Database.URL)
-		if err != nil {
-			return err
-		}
-		defer st.Close()
 		return printDecisions(ctx, st, *limit)
 	case "profile":
 		if err := cfg.ValidateAgent(); err != nil {
 			return err
 		}
-		life, err := self.Load(cfg.Self.LifeFile())
-		if err != nil {
-			return err
-		}
-		st, err := store.Open(ctx, cfg.Database.URL)
-		if err != nil {
-			return err
-		}
-		defer st.Close()
-		if err := st.Claim(ctx, life.Name, time.Now().UTC()); err != nil {
-			return err
-		}
-		return updateProfile(ctx, cfg, life, st, *force, log)
+		return updateProfile(ctx, cfg, p.Life, st, *force, log)
 	case "day":
 		zone, err := cfg.Initiative.Zone()
 		if err != nil {
 			return err
 		}
-		st, err := store.Open(ctx, cfg.Database.URL)
-		if err != nil {
-			return err
-		}
-		defer st.Close()
 		return printDay(ctx, st, zone, *date)
 	case "review":
 		if err := cfg.ValidateAgent(); err != nil {
 			return err
 		}
-		life, err := self.Load(cfg.Self.LifeFile())
-		if err != nil {
-			return err
-		}
-		st, err := store.Open(ctx, cfg.Database.URL)
-		if err != nil {
-			return err
-		}
-		defer st.Close()
-		if err := st.Claim(ctx, life.Name, time.Now().UTC()); err != nil {
-			return err
-		}
-		return runReview(ctx, cfg, life, st, log)
+		return runReview(ctx, cfg, p.Life, st, log)
 	case "growth":
 		zone, err := cfg.Initiative.Zone()
 		if err != nil {
 			return err
 		}
-		st, err := store.Open(ctx, cfg.Database.URL)
-		if err != nil {
-			return err
-		}
-		defer st.Close()
 		return printGrowth(ctx, st, zone, os.Stdout)
 	case "learn":
 		if err := cfg.ValidateAgent(); err != nil {
 			return err
 		}
-		life, err := self.Load(cfg.Self.LifeFile())
-		if err != nil {
-			return err
-		}
-		st, err := store.Open(ctx, cfg.Database.URL)
-		if err != nil {
-			return err
-		}
-		defer st.Close()
-		if err := st.Claim(ctx, life.Name, time.Now().UTC()); err != nil {
-			return err
-		}
-		return runLearn(ctx, cfg, life, st, log)
+		return runLearn(ctx, cfg, p.Life, st, log)
 	case "replay":
-		st, err := store.Open(ctx, cfg.Database.URL)
-		if err != nil {
-			return err
-		}
-		defer st.Close()
 		return runReplay(ctx, cfg, st, *limit, log)
 	case "work":
-		st, err := store.Open(ctx, cfg.Database.URL)
-		if err != nil {
-			return err
-		}
-		defer st.Close()
 		return works(ctx, st, fs.Args(), *limit, os.Stdout)
 	default:
-		return fmt.Errorf("unknown command %q (want new, run, decisions, profile, day, work, growth, review, learn or replay)", cmd)
+		return fmt.Errorf("unknown command %q (want new, run, decisions, profile, day, work, growth, review, learn, replay, self, secret or skill)", cmd)
 	}
 }
 
-func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store.Store, log *slog.Logger) error {
-	judgment, err := self.LoadJudgment(cfg.Self.JudgmentFile())
-	if err != nil {
-		return err
-	}
+func runAgent(ctx context.Context, cfg *config.Config, p person.Person, st *store.Store, log *slog.Logger) error {
+	life := p.Life
 	embedder := newEmbedder(cfg, log)
 	s1, err := newDecisionModel(cfg.Decision.Provider, cfg.Pricing, log)
 	if err != nil {
@@ -358,7 +301,7 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		}
 		toolInfo = append(toolInfo, info)
 	}
-	skills := agentskill.Load(cfg.SkillDirs(), log.With("component", "skills"))
+	skills := p.Skills
 	var skillInfo []string
 	if len(skills) > 0 {
 		toolAbilities = append(toolAbilities, agentskill.Use{Skills: skills})
@@ -387,14 +330,14 @@ func runAgent(ctx context.Context, cfg *config.Config, life self.Life, st *store
 		midi.Format{}, archive.Format{})
 	for _, c := range life.Makes {
 		if _, ok := formats.Data(c.Data); c.Data != "" && !ok {
-			return fmt.Errorf("%s: makes %q carries data %q, which no file is made from (%s)", cfg.Self.LifeFile(), c.Kind, c.Data,
+			return fmt.Errorf("life: makes %q carries data %q, which no file is made from (%s)", c.Kind, c.Data,
 				strings.Join(formats.DataKinds(), ", "))
 		}
 	}
 
 	m := mind.New(mind.Config{
 		Life:     life,
-		Judgment: judgment,
+		Judgment: p.Judgment,
 		Percepts: percepts, Store: st, Replier: tg,
 		System1: s1, System2: s2, Incoming: incoming, FollowUp: followUp, LifeArea: lifeArea, ReplyPrompt: replyPrompt,
 		PersonCircle:  personCircle,

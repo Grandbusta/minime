@@ -10,12 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -25,60 +23,62 @@ import (
 
 const (
 	maxFiles    = 100
-	maxFileSize = 50_000 // bytes of a file it reads
+	maxStored   = 2 << 20 // bytes of one file kept
+	maxFileSize = 50_000  // bytes of a file it reads
 )
 
 type Skill struct {
 	Name        string
 	Description string
 	Body        string
-	Dir         string
-	Files       []string // its other files, relative to Dir, slash-separated
+	// Files are all of it by slash-separated path, SKILL.md included.
+	Files map[string][]byte
 }
 
 var name = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
-// Load reads every skill in dirs, in order: a skill named like one before it
-// replaces it. A folder that isn't a skill is logged and left out; a missing
-// dir is no skills.
-func Load(dirs []string, log *slog.Logger) []Skill {
-	byName := map[string]Skill{}
-	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
+// FromDir reads a skill's folder, which must be named like the skill.
+func FromDir(dir string) (Skill, error) {
+	files := map[string][]byte{}
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
 		}
+		if d.Type()&fs.ModeSymlink != 0 { // never a way out of the folder
+			return nil
+		}
+		if len(files) == maxFiles {
+			return fmt.Errorf("more than %d files", maxFiles)
+		}
+		raw, err := os.ReadFile(p)
 		if err != nil {
-			log.Warn("reading skills failed", "dir", dir, "err", err)
-			continue
+			return err
 		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			s, err := load(filepath.Join(dir, e.Name()))
-			if errors.Is(err, fs.ErrNotExist) {
-				continue // a folder without a SKILL.md
-			}
-			if err != nil {
-				log.Warn("skill left out", "dir", filepath.Join(dir, e.Name()), "err", err)
-				continue
-			}
-			byName[s.Name] = s
+		if len(raw) > maxStored {
+			return fmt.Errorf("%s is over %d bytes", p, maxStored)
 		}
-	}
-	out := make([]Skill, 0, len(byName))
-	for _, s := range byName {
-		out = append(out, s)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
-}
-
-func load(dir string) (Skill, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+		rel, _ := filepath.Rel(dir, p)
+		files[filepath.ToSlash(rel)] = raw
+		return nil
+	})
 	if err != nil {
 		return Skill{}, err
+	}
+	s, err := Parse(files)
+	if err != nil {
+		return Skill{}, err
+	}
+	if s.Name != filepath.Base(dir) {
+		return Skill{}, fmt.Errorf("name %q must match its folder, %q", s.Name, filepath.Base(dir))
+	}
+	return s, nil
+}
+
+// Parse makes a skill of its files; fs.ErrNotExist if there's no SKILL.md.
+func Parse(files map[string][]byte) (Skill, error) {
+	raw, ok := files["SKILL.md"]
+	if !ok {
+		return Skill{}, fmt.Errorf("SKILL.md: %w", fs.ErrNotExist)
 	}
 	front, body, ok := frontmatter(raw)
 	if !ok {
@@ -95,26 +95,22 @@ func load(dir string) (Skill, error) {
 	switch {
 	case !name.MatchString(meta.Name) || len(meta.Name) > 64:
 		return Skill{}, fmt.Errorf("name %q must be lowercase words joined by hyphens, at most 64 characters", meta.Name)
-	case meta.Name != filepath.Base(dir):
-		return Skill{}, fmt.Errorf("name %q must match its folder, %q", meta.Name, filepath.Base(dir))
 	case meta.Description == "" || utf8.RuneCountInString(meta.Description) > 1024:
 		return Skill{}, errors.New("description is required, at most 1024 characters")
 	}
-	s := Skill{Name: meta.Name, Description: meta.Description, Body: strings.TrimSpace(string(body)), Dir: dir}
-	err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || len(s.Files) == maxFiles {
-			return err
+	return Skill{Name: meta.Name, Description: meta.Description, Body: strings.TrimSpace(string(body)), Files: files}, nil
+}
+
+// Others are its files besides SKILL.md, sorted.
+func (s Skill) Others() []string {
+	var out []string
+	for f := range s.Files {
+		if f != "SKILL.md" {
+			out = append(out, f)
 		}
-		if d.Type()&fs.ModeSymlink != 0 { // never a way out of the folder
-			return nil
-		}
-		rel, _ := filepath.Rel(dir, p)
-		if rel = filepath.ToSlash(rel); rel != "SKILL.md" {
-			s.Files = append(s.Files, rel)
-		}
-		return nil
-	})
-	return s, err
+	}
+	sort.Strings(out)
+	return out
 }
 
 // frontmatter splits a file that starts with a --- line into what's
@@ -136,15 +132,12 @@ func frontmatter(raw []byte) (front, body []byte, ok bool) {
 	return front, body, true
 }
 
-// Read is one of its files: only those listed, so nothing outside it.
+// Read is one of its files besides SKILL.md.
 func (s Skill) Read(file string) (string, error) {
 	file = path.Clean(strings.TrimPrefix(strings.TrimSpace(file), "./"))
-	if !slices.Contains(s.Files, file) {
-		return "", fmt.Errorf("%s has no file %q (it has %s)", s.Name, file, strings.Join(s.Files, ", "))
-	}
-	raw, err := os.ReadFile(filepath.Join(s.Dir, filepath.FromSlash(file)))
-	if err != nil {
-		return "", err
+	raw, ok := s.Files[file]
+	if !ok || file == "SKILL.md" {
+		return "", fmt.Errorf("%s has no file %q (it has %s)", s.Name, file, strings.Join(s.Others(), ", "))
 	}
 	if len(raw) > maxFileSize {
 		raw = raw[:maxFileSize]

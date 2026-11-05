@@ -12,15 +12,18 @@ import (
 	"time"
 
 	"github.com/Grandbusta/minime/internal/channel/telegram"
+	"github.com/Grandbusta/minime/internal/memory"
+	"github.com/Grandbusta/minime/internal/person"
+	"github.com/Grandbusta/minime/internal/secret"
 	"github.com/Grandbusta/minime/internal/setup"
 	"github.com/Grandbusta/minime/internal/store"
 )
 
-// newPerson returns whether to run the person now. What it wrote to .env is
-// set in this process's environment too.
+// newPerson returns whether to run the person now. This process's
+// environment then has the new .env, and nothing from the one before.
 func newPerson(ctx context.Context) (bool, error) {
-	s := &setup.Setup{Ask: setup.Terminal{}, Out: os.Stdout, Lives: "lives", Self: "self", Env: ".env", Example: ".env.example",
-		BotName: telegram.BotName, FirstMessage: telegram.FirstMessage, Database: databaseWhose}
+	s := &setup.Setup{Ask: setup.Terminal{}, Out: os.Stdout, Lives: "lives", Env: ".env", Example: ".env.example",
+		BotName: telegram.BotName, FirstMessage: telegram.FirstMessage, Database: databaseWhose, Save: saveNew}
 	if _, err := exec.LookPath("docker"); err == nil {
 		s.Postgres = dockerPostgres
 	}
@@ -31,6 +34,9 @@ func newPerson(ctx context.Context) (bool, error) {
 	}
 	if err != nil {
 		return false, err
+	}
+	for _, k := range res.Dropped {
+		os.Unsetenv(k)
 	}
 	for k, v := range res.Env {
 		os.Setenv(k, v)
@@ -51,6 +57,23 @@ func databaseWhose(ctx context.Context, url string) (string, error) {
 	defer st.Close()
 	whose, _, err := st.Whose(ctx)
 	return whose, err
+}
+
+func saveNew(ctx context.Context, url, key string, files map[string][]byte, secrets map[string]string) error {
+	k, err := secret.ParseKey(key)
+	if err != nil {
+		return err
+	}
+	st, err := store.Open(ctx, url)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	name, ok, err := person.Start(ctx, st, k, files, secrets, nil, memory.SelfNew, time.Now().UTC())
+	if err == nil && !ok {
+		err = fmt.Errorf("someone already lives in that database; %s needs their own", name)
+	}
+	return err
 }
 
 func dockerPostgres(ctx context.Context, name string) (string, error) {

@@ -39,7 +39,7 @@ working_memory:
   window: 90m
 `)
 
-	cfg, err := Load(path)
+	cfg, err := Load(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,13 +87,13 @@ working_memory:
 }
 
 func TestLoadRequiresDatabaseURL(t *testing.T) {
-	if _, err := Load(writeConfig(t, "telegram:\n  token: abc\n")); err == nil {
+	if _, err := Load(writeConfig(t, "telegram:\n  token: abc\n"), nil); err == nil {
 		t.Fatal("expected error for missing database.url")
 	}
 }
 
 func TestValidateAgentRequiresToken(t *testing.T) {
-	cfg, err := Load(writeConfig(t, "database:\n  url: postgres://x\n"))
+	cfg, err := Load(writeConfig(t, "database:\n  url: postgres://x\n"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestValidateAgentRequiresToken(t *testing.T) {
 }
 
 func TestPolicy(t *testing.T) {
-	cfg, err := Load(writeConfig(t, "database: {url: x}\ntelegram:\n  owner_ids: [42, 7]\nautonomy:\n  classes: {publish: auto}\n"))
+	cfg, err := Load(writeConfig(t, "database: {url: x}\ntelegram:\n  owner_ids: [42, 7]\nautonomy:\n  classes: {publish: auto}\n"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestPolicy(t *testing.T) {
 	}
 	for _, body := range []string{"autonomy:\n  classes: {reply: forbid}\n", "autonomy:\n  classes: {fly: auto}\n",
 		"autonomy:\n  ask_expires: -1h\n"} {
-		cfg, err := Load(writeConfig(t, "database: {url: x}\n"+body))
+		cfg, err := Load(writeConfig(t, "database: {url: x}\n"+body), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +129,7 @@ func TestPolicy(t *testing.T) {
 func TestShippedConfigPolicy(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://x")
 	t.Setenv("TELEGRAM_OWNER_ID", "42")
-	cfg, err := Load("../../configs/minime.yaml")
+	cfg, err := Load("../../configs/minime.yaml", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,10 +143,9 @@ func TestShippedConfigPolicy(t *testing.T) {
 }
 
 func TestLiving(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := writeConfig(t, "self:\n  dir: "+dir+"\ndatabase:\n  url: postgres://x\ninitiative:\n  check_ins: [\"11:00\"]\n  quiet: 2h\n"+
+	cfgPath := writeConfig(t, "database:\n  url: postgres://x\ninitiative:\n  check_ins: [\"11:00\"]\n  quiet: 2h\n"+
 		"daily_life:\n  plan_at: \"06:00\"\n  plan_prompt: prompts/mine.md\n")
-	os.WriteFile(filepath.Join(dir, "living.yaml"), []byte(`initiative:
+	cfg, err := Load(cfgPath, []byte(`initiative:
   check_ins: ["10:00", "17:00"]
 daily_life:
   plan_at: "08:30"
@@ -155,8 +154,7 @@ autonomy:
   classes: {publish: auto}
 judgment:
   asks_per_day: 1
-`), 0o600)
-	cfg, err := Load(cfgPath)
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,8 +162,7 @@ judgment:
 		cfg.DailyLife.PlanPrompt != "prompts/mine.md" || cfg.Autonomy.Classes["publish"] != "auto" || cfg.Judgment.AsksPerDay != 1 {
 		t.Errorf("with living: %+v %+v %+v %+v", cfg.Initiative, cfg.DailyLife, cfg.Autonomy, cfg.Judgment)
 	}
-	os.WriteFile(filepath.Join(dir, "living.yaml"), []byte("database:\n  url: postgres://elsewhere\n"), 0o600)
-	if _, err := Load(cfgPath); err == nil {
-		t.Error("living.yaml set the database; want an error")
+	if _, err := Load(cfgPath, []byte("database:\n  url: postgres://elsewhere\n")); err == nil {
+		t.Error("living set the database; want an error")
 	}
 }

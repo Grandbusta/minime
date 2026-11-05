@@ -556,3 +556,37 @@ type Conversation struct {
 	Payload      json.RawMessage // the channel's details from their last message, used to address a message
 	LastActivity time.Time
 }
+
+// SelfVersion is one version of a section of the person (their life, how
+// they live, their owner's judgment), as YAML; the newest is the one used.
+type SelfVersion struct {
+	ID      ulid.ULID
+	Section string // SectionLife, SectionLiving, SectionJudgment
+	Doc     string
+	Source  string // SelfImported, SelfNew, SelfEdited, SelfRolledBack
+	At      time.Time
+}
+
+const (
+	SectionLife     = "life"
+	SectionLiving   = "living"
+	SectionJudgment = "judgment"
+)
+
+var Sections = []string{SectionLife, SectionLiving, SectionJudgment}
+
+const (
+	SelfImported   = "import" // from files: their old self/ folder, or minime self import
+	SelfNew        = "new"    // minime new
+	SelfEdited     = "edit"
+	SelfRolledBack = "rollback"
+)
+
+// AgentSkill is a skill as stored: every file in it by its slash-separated
+// path, SKILL.md included.
+type AgentSkill struct {
+	Name        string
+	Description string
+	Files       map[string][]byte
+	AddedAt     time.Time
+}

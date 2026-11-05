@@ -75,28 +75,38 @@ taken on in a chat needs a learning plan.
 
 ## Who the person is
 
-The person is a folder, self/, with three files; the code has nothing about them.
+The person is their database; the code has nothing about them. `DATABASE_URL` says where
+it is and `MINIME_KEY` opens their secrets; nothing else about them is outside it
+([internal/person](../internal/person)). Their three sections are YAML, each edit a new
+version (`self_versions`; the newest is used); `minime new` writes the first from one of
+the templates in [lives](../lives), all at once (`person.Start`). Every command starts the
+same way: open the database, put their secrets in the process's
+environment where it doesn't set them already (`person.Env`), then read the config with
+their `living` over it.
 
-- **self/life.yaml** ([internal/self](../internal/self)): name, time zone, story,
-  personality, routine, what they make, dreams, starting skills, family. It's written from
-  one of the templates in [lives](../lives) with the owner filled in, and never committed. The story,
+- **life** ([internal/self](../internal/self)): name, time zone, story,
+  personality, routine, what they make, dreams, starting skills, family. The story,
   personality and routine are in every System 2 instruction: a person always knows who they
   are. On start, the family is copied into memory as people in the *family* circle
   (`bornKnowing`), and dreams and skills into growth (`bornWanting`), each only the first
   time; after that, memory wins.
-- **self/judgment.yaml** ([example](../self/README.md)): the owner's past decisions (cases) and
+- **judgment**: the owner's past decisions (cases) and
   principles. Seeded on start as *proposed*, once per case key and principle text
   (`seedJudgment`), so edits and rejections stay.
 - **Embeddings** ([internal/providers/embed](../internal/providers/embed)): your approved
   decisions as vectors, stored with them, so the ones most like a decision at hand go into
   the note (`similarCases`). Switchable like System 1 and 2; without one, the newest.
-- **self/living.yaml** ([internal/config](../internal/config)): how they live: check-in
-  times, the day's times and budget, abilities and web caps, autonomy, judgment calls. Read
-  over the config's defaults, with the same keys.
+- **living** ([internal/config](../internal/config)): how they live: check-in
+  times, the day's times and budget, abilities and web caps, autonomy, judgment calls,
+  tools. Read over the config's defaults, with the same keys.
+- **Secrets** ([internal/secret](../internal/secret)): their bot token, owner ID, OpenAI key
+  and model, console token, and what their tools name, each sealed with AES-GCM under
+  `MINIME_KEY` (bound to its name) before it reaches the `secrets` table. The environment
+  wins over a stored one. Never in a prompt, a log, an export or the console.
 - **[configs/minime.yaml](../configs/minime.yaml)** ([internal/config](../internal/config)):
-  the machinery: providers, the database, Telegram, prompts, addresses, pricing, and
-  `self.dir`, the person's folder.
-  `${VAR}` is filled from the environment; secrets only ever come from there.
+  the machinery every person shares: providers, the database, Telegram, prompts,
+  addresses, pricing. `${VAR}` is filled from the environment, where their secrets are by
+  then.
 
 ## A message, step by step
 
@@ -308,8 +318,9 @@ added and gone since the last look, so a changed listing or page shows what chan
 System 2 with [prompts/observe.md](../prompts/observe.md), fenced as untrusted: it may
 remember facts, tell the owner, or propose actions, which always ask.
 
-Skills ([internal/agentskill](../internal/agentskill)) are folders in the Agent Skills
-format, loaded at start from `agent_skills.dirs`; a malformed one is logged and left out.
+Skills ([internal/agentskill](../internal/agentskill)) are in the Agent Skills format, each
+stored whole in their database (`agent_skills`, every file as bytes) by `minime skill add`,
+and loaded at start; one that doesn't read is logged and left out.
 Each description is embedded the first time it's needed and kept in memory; the one most
 alike (at least 0.35, `rankAlike`) to a reply's talk or an activity's text has its
 instructions put in the note ([skills.go](../internal/mind/skills.go)). `use_skill` reads a
@@ -584,11 +595,12 @@ internal/
   portfolio/             the profile page: writer and server
   console/               the mind console: API, live stream, web/
   replay/                labelled messages re-asked
-  self/                  life.yaml and judgment.yaml
+  self/                  reading and checking a life and a judgment
+  person/                the person from their database: loading and starting them
+  secret/                sealing secrets with MINIME_KEY
   config/ pricing/
 decisions/               System 1's question sets
 prompts/                 System 2's instructions
-self/                    who the person is, and how the owner decides
 configs/                 the config
 deploy/                  Dockerfile: one person per container
 ```

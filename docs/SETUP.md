@@ -12,7 +12,7 @@ see the [README](../README.md); for living with them day to day, [GUIDE.md](GUID
 - [living.yaml: how they live](#livingyaml-how-they-live)
 - [judgment.yaml: how you decide](#judgmentyaml-how-you-decide)
 - [configs/minime.yaml: the machinery](#configsminimeyaml-the-machinery)
-- [.env and the environment](#env-and-the-environment)
+- [.env, secrets and the environment](#env-secrets-and-the-environment)
 - [Making your own life](#making-your-own-life)
 - [Developing](#developing)
 
@@ -25,42 +25,62 @@ API. A Postgres database helps, but `minime new` can start one for you with Dock
 go run ./cmd/minime new
 ```
 
-It asks, then writes `.env` and `self/`, and starts them:
+It asks, then puts them in their own database and starts them:
 
 1. **Which life:** one of the five in [lives](../lives).
 2. **Your bot token:** make a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and
    paste its token. It checks it and shows the bot's name.
 3. **Your OpenAI key and model** (`gpt-6-luna` by default).
 4. **A Postgres URL**, or it starts one on this machine with Docker. It won't use a
-   database that holds another person's memory.
+   database where someone already lives.
 5. **You:** message your bot once, so it knows it's you, then say what they should call
    you and who you are to them (their father, mentor, friend...).
 
-After that, `go run ./cmd/minime` starts them again. Starting someone new when someone
-already lives in `self/` moves their files to `self/previous/`; their memory stays in
-their database.
+**A person is their database.** Their life, how they live, your judgment, their skills
+and their keys (bot token, OpenAI key, console token) are all in it, the keys sealed. `.env`
+only has two lines: `DATABASE_URL`, where they live, and `MINIME_KEY`, which opens their
+keys. Keep both safe and together: a copy of the database alone holds no working key.
 
-Each person needs their own database and their own bot. Telegram allows one poller per
+After that, `go run ./cmd/minime` starts them again. Starting someone new when someone
+already lives in the database `.env` points to leaves them as they are and moves their
+`.env` to `.env.<name>`: `cp .env.<name> .env` brings them back.
+
+Each person needs their own database, their own bot and their own OpenAI key (a project
+key with a spend limit keeps a leak small). Telegram allows one poller per
 bot, so a second copy on the same bot gets `409 Conflict` errors.
 
 ## Setting up by hand
 
-1. **Give them a life.** Copy one of the lives in [lives](../lives) to `self/` and put
-   yourself in it (see [Making your own life](#making-your-own-life)), or write your own
-   `self/life.yaml`.
-2. **Create a bot.** Message [@BotFather](https://t.me/BotFather), send `/newbot`, and copy
+Without `minime new`: put `DATABASE_URL` and `MINIME_KEY` (`openssl rand -hex 32`) in
+`.env`, then give them their keys and a life.
+
+1. **Create a bot.** Message [@BotFather](https://t.me/BotFather), send `/newbot`, and copy
    the token. Then send your bot any message and open
-   `https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates`: your user ID is the
-   number in `"from":{"id":...}`.
-3. **Fill in `.env`:** `cp .env.example .env`, then set the values in
-   [.env and the environment](#env-and-the-environment).
+   `https://api.telegram.org/bot<token>/getUpdates`: your user ID is the number in
+   `"from":{"id":...}`.
+2. **Give them their keys** ([below](#env-secrets-and-the-environment)); each asks for
+   the value without showing it:
+
+   ```bash
+   go run ./cmd/minime secret set TELEGRAM_BOT_TOKEN
+   ```
+
+   and the same for `TELEGRAM_OWNER_ID`, `OPENAI_API_KEY` and `OPENAI_MODEL`.
+3. **Give them a life.** Copy a life from [lives](../lives) to a folder and put yourself
+   in it (see [Making your own life](#making-your-own-life)), then import it; its
+   `life.yaml`, `living.yaml`, `judgment.yaml` and `skills/` go into their database:
+
+   ```bash
+   go run ./cmd/minime self import mylife/
+   ```
+
 4. **Start them**, from the repository root (the config and `.env` are read from there):
 
    ```bash
    go run ./cmd/minime
    ```
 
-   On first start it creates its tables; you'll see `minime awake`.
+   You'll see `minime awake`.
 5. **Talk to them** on Telegram, open the console at
    [http://127.0.0.1:8090/](http://127.0.0.1:8090/) and their profile page at
    [http://127.0.0.1:8080/](http://127.0.0.1:8080/).
@@ -68,15 +88,15 @@ bot, so a second copy on the same bot gets `409 Conflict` errors.
 ## Running with Docker
 
 One person per container. The image has the config, prompts, question sets and lives; the
-person's folder (`self/`) is mounted, and secrets come from `.env`. Neither is ever in the
-image.
+person is their database, reached with the two lines in their `.env`. Nothing about them is
+in the image.
 
 ```bash
 docker build -f deploy/Dockerfile -t minime .
 ```
 
 ```bash
-docker run -d --name daniel --restart always --env-file .env -v "$PWD/self:/app/self:ro" -p 127.0.0.1:8090:8090 -p 8080:8080 minime
+docker run -d --name daniel --restart always --env-file .env -p 127.0.0.1:8090:8090 -p 8080:8080 minime
 ```
 
 ```bash
@@ -88,8 +108,8 @@ your conversations, your judgment) and can change some of it. On your own machin
 listens on `127.0.0.1`, which nothing else can reach. Inside a container it has to listen
 on all addresses (`MINIME_CONSOLE_ADDR`) so `-p` can reach it, and it can't tell whether
 you published it as `-p 127.0.0.1:8090:8090` (only this machine) or `-p 8090:8090` (anyone
-who can reach it), so it won't start without `CONSOLE_TOKEN` (16+ characters, e.g.
-`openssl rand -hex 24`). Open it once as `http://localhost:8090/?token=<CONSOLE_TOKEN>`
+who can reach it), so it won't start without a console token (16+ characters; `minime new` makes one, and
+`minime secret list` shows its start). Open it once as `http://localhost:8090/?token=<token>`
 and the browser remembers it. On a Linux server you can skip the token with
 `--network host` and `-e MINIME_CONSOLE_ADDR=127.0.0.1:8090` (instead of `-p`).
 
@@ -118,25 +138,39 @@ where Postgres runs:
 
 ## The files
 
-A person is a folder with three files. Yours is `self/`, which stays on your machine and is
-never committed; each life in [lives](../lives) is one too, plus a `template.yaml`.
+A person has three sections, kept in their database as YAML. Each life in
+[lives](../lives) is a folder of them as files, plus a `template.yaml`.
 
-| File | What's in it |
+| Section | What's in it |
 |---|---|
-| [life.yaml](#lifeyaml-who-they-are) | Who they are: their name, where they live, their story, personality, routine, what they make, dreams, starting skills and family. |
-| [living.yaml](#livingyaml-how-they-live) | How they live: their pace, their days, check-ins, abilities, budget, what they may do without asking you, and how often they ask what you'd choose. |
-| [judgment.yaml](#judgmentyaml-how-you-decide) | How you decide (optional): your priorities, boundaries, principles and past decisions. |
+| [life](#lifeyaml-who-they-are) | Who they are: their name, where they live, their story, personality, routine, what they make, dreams, starting skills and family. |
+| [living](#livingyaml-how-they-live) | How they live: their pace, their days, check-ins, abilities, budget, tools, what they may do without asking you, and how often they ask what you'd choose. |
+| [judgment](#judgmentyaml-how-you-decide) | How you decide (optional): your priorities, boundaries, principles and past decisions. |
+
+Change them with `minime self`. Every change is checked the way it is when they start, and
+kept as a new version, so you can go back:
+
+| Command | What it does |
+|---|---|
+| `minime self edit <section>` | Opens it in `$EDITOR`; saved only if it checks out. |
+| `minime self export <section>` | Prints it. |
+| `minime self export <folder>` | Writes all three and their skills to a new folder, laid out like a life in `lives/`. Never their keys. |
+| `minime self import <file\|folder>` | Takes a `life.yaml`, `living.yaml` or `judgment.yaml`, or a folder of them (with `skills/`). |
+| `minime self history <section>` | Its versions, newest (in use) first. |
+| `minime self rollback <section> <version>` | Makes an earlier version the one in use. |
+
+Changes apply the next time they start.
 
 The rest is the same for everyone:
 
 | File | What's in it |
 |---|---|
-| [configs/minime.yaml](#configsminimeyaml-the-machinery) | Models, the database, Telegram, prompts, addresses, pricing, and where the person's folder is. |
-| [.env](#env-and-the-environment) | Secrets and accounts. Never committed. |
-| [prompts/](../prompts), [decisions/](../decisions) | System 2's instructions and System 1's questions, written for anyone and filled in from the person's files. You shouldn't need to edit them. |
+| [configs/minime.yaml](#configsminimeyaml-the-machinery) | Models, Telegram, prompts, addresses, pricing. |
+| [.env](#env-secrets-and-the-environment) | Where their database is, and the key to their secrets. Never committed. |
+| [prompts/](../prompts), [decisions/](../decisions) | System 2's instructions and System 1's questions, written for anyone and filled in from the person. You shouldn't need to edit them. |
 
-`living.yaml` is read over the defaults below with the same keys, so you set only what you
-change. A missing `living.yaml` means every default.
+`living` is read over the defaults below with the same keys, so you set only what you
+change. An empty `living` means every default.
 
 ## life.yaml: who they are
 
@@ -290,12 +324,11 @@ cases:
 
 ## configs/minime.yaml: the machinery
 
-The same for everyone; `${VAR}` is filled from the environment, and secrets only ever come
-from there.
+The same for everyone; `${VAR}` is filled from the environment, or else from the person's
+secrets.
 
 | Key | As shipped | What it is |
 |---|---|---|
-| `self.dir` | `self` | The person's folder. |
 | `database.url` | (required) | `${DATABASE_URL}`. |
 | `telegram.token` | (required) | `${TELEGRAM_BOT_TOKEN}`. |
 | `telegram.owner_ids` | none | `[${TELEGRAM_OWNER_ID}]`: only these may talk to them. Empty: every message is ignored and the sender's ID is logged. |
@@ -311,8 +344,7 @@ from there.
 | `daily_life.*_prompt` | `prompts/…` | The prompts for planning, activities, the review and learning plans. |
 | `embedding.provider`, `model` | `openai`, `text-embedding-3-small` | Finds your past decisions most like the one at hand. Remove it to use the newest instead. |
 | `search.provider`, `model` | `openai`, the System 2 model | What web searches use. |
-| `agent_skills.dirs` | `skills`, then `self/skills` | Folders of skills: [below](#skills). |
-| `tools.servers` | none | MCP servers whose tools they may use: [below](#tools-mcp-servers). Can also go in `living.yaml`. |
+| `tools.servers` | none | MCP servers whose tools they may use: [below](#tools-mcp-servers). Usually in their `living`. |
 | `tools.calls_per_day` | `50` | Reading tool calls a day across all servers, times their pace. |
 | `tools.actions_per_day` | `10` | Tools that change things they may propose a day. Not times their pace: these have real effects. |
 | `console.addr` | `127.0.0.1:8090` | The private mind console; empty: none. |
@@ -326,8 +358,15 @@ from there.
 
 Skills are know-how you give them, in the open Agent Skills
 format, the same as Claude's: a folder with a `SKILL.md` (a `name` and a `description` in
-its frontmatter, then the instructions) and any files it points to. Put a skill's folder in
-`skills/` (every life) or `self/skills/` (just this one), and restart.
+its frontmatter, then the instructions) and any files it points to. Each person has their
+own, in their database:
+
+```bash
+go run ./cmd/minime skill add path/to/cold-email
+```
+
+`minime skill list` shows theirs and `minime skill remove <name>` takes one away; changes
+apply when they next start. Adding a skill with a name they have replaces it.
 
 When what they're talking about or doing fits a skill's description, its instructions are
 put in front of them, and they use them in their own words. They can also read any skill,
@@ -336,7 +375,7 @@ console lists them.
 
 **Only add skills you've read or trust: their instructions are followed.** A skill never
 gives permission to do anything (your `autonomy` still decides), and scripts in it are
-never run.
+stored with it but never run.
 
 ### Tools: MCP servers
 
@@ -377,33 +416,55 @@ shown in the console and left out; they start without it. `use_tools: forbid` in
 Providers are switchable: System 1, System 2, embeddings and search each pick theirs here.
 A new one is a package and a `case` in [cmd/minime/main.go](../cmd/minime/main.go).
 
-## .env and the environment
+## .env, secrets and the environment
 
-minime reads `.env` from the repository root itself; anything already set in the
-environment (or passed with Docker's `--env-file`) wins. Values with characters like `$`,
-`&` or `#` go in single quotes. `minime new` writes it for you.
+`.env` says where the person is; everything else about them is in their database. minime
+reads `.env` from the repository root itself; anything already set in the environment (or
+passed with Docker's `--env-file`) wins. Values with characters like `$`, `&` or `#` go in
+single quotes. `minime new` writes it for you.
 
 | Variable | What it is |
 |---|---|
-| `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather). |
-| `TELEGRAM_OWNER_ID` | Your Telegram user ID. Only you can talk to them. |
 | `DATABASE_URL` | Their Postgres, password included, e.g. `postgres://user:password@host:5432/minime?sslmode=require`. One database per person. |
-| `OPENAI_API_KEY` | Used by System 1, System 2, embeddings and web search. |
-| `OPENAI_MODEL` | The model System 2 reasons with, e.g. `gpt-6-luna`. |
-| `CONSOLE_TOKEN` | The console's token, 16+ characters: needed anywhere but localhost. |
+| `MINIME_KEY` | Opens their secrets: 64 hex characters (`openssl rand -hex 32`). Keep it safe, and with `DATABASE_URL`. |
 | `MINIME_CONSOLE_ADDR` | Overrides `console.addr` (the Docker image sets `:8090`). |
 | `MINIME_PROFILE_ADDR` | Overrides `portfolio.addr` (the Docker image sets `:8080`). |
 | `MINIME_TEST_DATABASE_URL` | Only for the store tests: a disposable database. |
+
+Their secrets are in their database, each sealed with `MINIME_KEY` (AES-GCM) before it's
+stored, so a copy of the database, a backup or a dump, holds nothing that works without
+the key. They're never shown to System 2, written to logs, or exported, and the console
+only shows that one is set.
+
+| Secret | What it is |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather). |
+| `TELEGRAM_OWNER_ID` | Your Telegram user ID. Only you can talk to them. |
+| `OPENAI_API_KEY` | Theirs, used by System 1, System 2, embeddings and web search. |
+| `OPENAI_MODEL` | The model System 2 reasons with, e.g. `gpt-6-luna`. |
+| `CONSOLE_TOKEN` | The console's token, 16+ characters: needed anywhere but localhost. |
+| any other | What their tool servers name in `env` or `auth_env`, like `DRIVE_MCP_TOKEN`. |
+
+| Command | What it does |
+|---|---|
+| `minime secret list` | Each one and whether it's set (`sk-…a1b2`), never enough to use it. |
+| `minime secret set <NAME>` | Asks for the value without showing it, or reads it from a pipe. |
+| `minime secret unset <NAME>` | Removes it. |
+| `minime secret rekey` | Seals them all with a new key, and puts it in `.env` (or shows it once, for wherever they run). The old key opens nothing after. |
+
+A secret set in the environment too wins over the stored one, so a container or CI can
+override one without touching the database. Lose `MINIME_KEY` and only the secrets are
+gone, not the person: set them again.
 
 ## Making your own life
 
 Each life in [lives](../lives) is a folder with `template.yaml` (who they are in a line,
 and who you may be to them) and the three files, with `{owner}`, `{relation}`, `{account}`
 and `{circle}` where you go. `minime new` fills them in. To do it by hand, copy the three
-files to `self/` and put in your name, who you are to them (one of the template's
+files to a folder, put in your name, who you are to them (one of the template's
 `relations`), your account (`telegram:<your user id>`) and the circle you're from
-(`family`; `friend` for a friend; `school` for a mentor). After that it's their life: edit
-it as you like.
+(`family`; `friend` for a friend; `school` for a mentor), and `minime self import` it.
+After that it's their life: `minime self edit life` as you like.
 
 To write a new life, add a folder to `lives/` the same way. The tests check that every life
 loads for every relation it allows.

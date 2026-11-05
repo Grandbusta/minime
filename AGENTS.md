@@ -22,9 +22,8 @@ Telegram for talking. Always write the name as **minime**, never "mini-me".
 | Path | What it is |
 |---|---|
 | `cmd/minime` | The binary: wiring, `minime new`, and the commands (`day`, `growth`, `work`, `replay`, ...). |
-| `configs/minime.yaml` | The machinery: models, prompts, ports. Secrets come from `.env`. |
+| `configs/minime.yaml` | The machinery every person shares: models, prompts, ports. `${VAR}`s come from the environment and the person's secrets. |
 | `lives/<name>/` | The five ready lives: `life.yaml` (who), `living.yaml` (how they live), `judgment.yaml` (how the owner decides). |
-| `self/` | The running person's own three files. Private: gitignored, never committed. |
 | `prompts/*.md` | Everything System 2 is told, as templates. |
 | `decisions/*.yaml` | System 1's question sets, versioned (`incoming_message@1`). |
 | `docs/` | Users' docs, the brand, screenshots. |
@@ -43,10 +42,12 @@ Telegram for talking. Always write the name as **minime**, never "mini-me".
 | `ability` (`journal`, `reading`, `web`) | What they can do in their day besides writing. |
 | `library`, `search` | Books (Gutenberg), Wikipedia, the open web, with the safety rules. |
 | `tools` | MCP servers (go-sdk): the reading tools config lists, offered as abilities. |
-| `agentskill` | Skills in the Agent Skills format (`SKILL.md`), loaded from config and given when they fit. |
+| `agentskill` | Skills in the Agent Skills format (`SKILL.md`), stored in the person's database and given when they fit. |
 | `render` (`pdf`, `docx`, `table`, `calendar`, `midi`, `archive`; `markdown`) | A work made into a file. Each kind is a `render.Format` (a `render.DataFormat` if it's made from data the work carries, like MIDI from a score); a new one is a type plus a line in main. Formats that lay out words read them with `render/markdown`. |
 | `action` | Autonomy: every action is `auto`, `ask` or `forbid`. |
-| `self`, `config`, `setup` | The person's files, the config, and `minime new`. |
+| `person` | The person as their database holds them: loading them, and starting someone (`minime new`). Only `DATABASE_URL` and `MINIME_KEY` are outside it. |
+| `secret` | Sealing their secrets with `MINIME_KEY` (AES-GCM). |
+| `self`, `config`, `setup` | Reading and checking a life and a judgment, the config, and `minime new`. |
 | `console` | The private mind console (localhost unless a token is set). |
 | `portfolio` | The public profile page they write themselves. |
 | `replay`, `pricing`, `perception` | Replaying labelled reads, model prices, the percept type. |
@@ -184,6 +185,10 @@ safe for concurrent use; a test of both loops orders every step through channels
 - Skills are trusted like prompts, since the owner installs them, but grant no permission,
   and their scripts are never run.
 - The console listens on localhost unless a token of 16+ characters is set.
+- Everything particular to a person is in their own database, never in files or the
+  code: their life, living, judgment, skills and secrets. Secrets are sealed with
+  `MINIME_KEY` before they're stored, and never reach System 2, a log, an export or the
+  console (which shows only that one is set).
 
 ## Docs to keep in step
 
@@ -196,5 +201,5 @@ safe for concurrent use; a test of both loops orders every step through channels
 ## Git
 
 - Commit only when asked. Never add a co-author or "generated with" line.
-- Never commit `.env` or the files in `self/` (they're gitignored; keep it so).
+- Never commit `.env` or `.env.<name>` (they're gitignored; keep it so).
 - Commit messages say what changed for the person or the owner, in plain words.

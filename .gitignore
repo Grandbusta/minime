@@ -1,9 +1,12 @@
 .env
+# A person moved aside by `minime new` (.env.daniel): their database URL and key.
+.env.*
+!.env.example
 /bin/
 .DS_Store
 /minime
 
-# Your own life and judgment: written by `minime new` (or by you), never committed.
+# A person's files on disk, if you keep any: never committed.
 /self/life.yaml
 /self/judgment.yaml
 /self/living.yaml

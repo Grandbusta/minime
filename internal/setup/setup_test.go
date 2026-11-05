@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"github.com/Grandbusta/minime/internal/secret"
 	"github.com/Grandbusta/minime/internal/self"
 )
 
@@ -38,14 +41,24 @@ func fakeDatabase(_ context.Context, url string) (string, error) {
 	return "", nil
 }
 
-func newSetup(t *testing.T, answers string) (*Setup, *bytes.Buffer, string) {
+type saved struct {
+	url, key string
+	files    map[string][]byte
+	secrets  map[string]string
+}
+
+func newSetup(t *testing.T, answers string) (*Setup, *bytes.Buffer, string, *saved) {
 	t.Helper()
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, ".env.example"), []byte("# Copy to .env.\nTELEGRAM_BOT_TOKEN=\n# Your ID.\nTELEGRAM_OWNER_ID=\nDATABASE_URL=\n"), 0o600)
-	out := &bytes.Buffer{}
-	return &Setup{Ask: &script{in: bufio.NewReader(strings.NewReader(answers)), out: out}, Out: out, Lives: "../../lives", Self: filepath.Join(dir, "self"),
-		Env: filepath.Join(dir, ".env"), Example: filepath.Join(dir, ".env.example"), BotName: fakeBotName, FirstMessage: fakeFirstMessage, Database: fakeDatabase,
-		Now: func() time.Time { return time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC) }}, out, dir
+	os.WriteFile(filepath.Join(dir, ".env.example"), []byte("# Where they live.\nDATABASE_URL=\n# The key to their secrets.\nMINIME_KEY=\n"), 0o600)
+	out, got := &bytes.Buffer{}, &saved{}
+	save := func(_ context.Context, url, key string, files map[string][]byte, secrets map[string]string) error {
+		*got = saved{url, key, files, secrets}
+		return nil
+	}
+	return &Setup{Ask: &script{in: bufio.NewReader(strings.NewReader(answers)), out: out}, Out: out, Lives: "../../lives",
+		Env: filepath.Join(dir, ".env"), Example: filepath.Join(dir, ".env.example"), BotName: fakeBotName, FirstMessage: fakeFirstMessage,
+		Database: fakeDatabase, Save: save, Now: func() time.Time { return time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC) }}, out, dir, got
 }
 
 func TestStartingMei(t *testing.T) {
@@ -62,6 +75,7 @@ func TestStartingMei(t *testing.T) {
 		}
 	}
 	answers := strings.Join([]string{
+		"y",            // Elsa lives in the database .env points to: start someone new anyway
 		"9", itoa(mei), // a life: out of range, then Mei
 		"123:bad", "123:good", // a bad token, then a good one
 		"sk-$ecret&key", "", // the key; the model's default
@@ -70,28 +84,39 @@ func TestStartingMei(t *testing.T) {
 		itoa(rel), // mentor
 		"y",       // start her now
 	}, "\n") + "\n"
-	s, out, dir := newSetup(t, answers)
+	s, out, dir, got := newSetup(t, answers)
+	elsas := "DATABASE_URL=postgres://elsas\nTELEGRAM_BOT_TOKEN=elsas-bot\nTELEGRAM_OWNER_ID=7\n"
+	os.WriteFile(filepath.Join(dir, ".env"), []byte(elsas), 0o600)
 	res, err := s.Run(context.Background())
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if res.Name != "Mei" || !res.Start || res.Env["TELEGRAM_OWNER_ID"] != "42" || res.Env["DATABASE_URL"] != "postgres://meis" ||
-		res.Env["OPENAI_MODEL"] != "gpt-6-luna" || len(res.Env["CONSOLE_TOKEN"]) < 16 {
+	if res.Name != "Mei" || !res.Start || res.Env["DATABASE_URL"] != "postgres://meis" || res.Env["MINIME_KEY"] != got.key ||
+		!slices.Contains(res.Dropped, "TELEGRAM_BOT_TOKEN") {
 		t.Errorf("result = %+v", res)
 	}
-	raw, _ := os.ReadFile(filepath.Join(dir, ".env"))
-	if !strings.Contains(string(raw), "# Your ID.\nTELEGRAM_OWNER_ID=42\n") || !strings.Contains(string(raw), "OPENAI_API_KEY=") {
-		t.Errorf(".env =\n%s", raw)
+	if got.url != "postgres://meis" || got.secrets["TELEGRAM_BOT_TOKEN"] != "123:good" || got.secrets["TELEGRAM_OWNER_ID"] != "42" ||
+		got.secrets["OPENAI_API_KEY"] != "sk-$ecret&key" || got.secrets["OPENAI_MODEL"] != "gpt-6-luna" || len(got.secrets["CONSOLE_TOKEN"]) < 16 {
+		t.Errorf("saved %s with %v", got.url, slices.Sorted(maps.Keys(got.secrets)))
 	}
+	if _, err := secret.ParseKey(got.key); err != nil {
+		t.Error(err)
+	}
+
+	// .env says only where Mei lives and holds her key; Elsa's waits beside it.
+	raw, _ := os.ReadFile(filepath.Join(dir, ".env"))
 	vars, err := godotenv.Unmarshal(string(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if vars["OPENAI_API_KEY"] != "sk-$ecret&key" {
-		t.Errorf("the key reads back as %q", vars["OPENAI_API_KEY"])
+	if len(vars) != 2 || vars["DATABASE_URL"] != "postgres://meis" || vars["MINIME_KEY"] != got.key || !strings.Contains(string(raw), "# Where they live.") {
+		t.Errorf(".env =\n%s", raw)
+	}
+	if old, _ := os.ReadFile(filepath.Join(dir, ".env.elsa")); string(old) != elsas {
+		t.Errorf(".env.elsa = %q", old)
 	}
 
-	life, err := self.Load(filepath.Join(dir, "self", "life.yaml"))
+	life, err := self.ParseLife(got.files["life.yaml"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,17 +127,13 @@ func TestStartingMei(t *testing.T) {
 }
 
 func TestSomeoneAlreadyLivesHere(t *testing.T) {
-	s, _, dir := newSetup(t, "n\n")
-	os.MkdirAll(filepath.Join(dir, "self"), 0o755)
-	os.WriteFile(filepath.Join(dir, "self", "life.yaml"), []byte("name: Daniel\nstory: [Daniel is 18.]\n"), 0o600)
+	s, _, dir, got := newSetup(t, "n\n")
+	os.WriteFile(filepath.Join(dir, ".env"), []byte("DATABASE_URL=postgres://elsas\n"), 0o600)
 	if _, err := s.Run(context.Background()); !Stopped(err) {
 		t.Fatalf("err = %v; want stopped", err)
 	}
-	if raw, _ := os.ReadFile(filepath.Join(dir, "self", "life.yaml")); !strings.Contains(string(raw), "Daniel") {
-		t.Error("Daniel's life was touched")
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".env")); err == nil {
-		t.Error(".env was written")
+	if raw, _ := os.ReadFile(filepath.Join(dir, ".env")); string(raw) != "DATABASE_URL=postgres://elsas\n" || got.url != "" {
+		t.Errorf(".env = %q; saved to %q", raw, got.url)
 	}
 }
 

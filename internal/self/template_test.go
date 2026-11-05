@@ -23,7 +23,6 @@ func TestLives(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s as %s: %v", tmpl.Key, rel, err)
 				}
-				dir := t.TempDir()
 				for name, raw := range files {
 					text := string(raw)
 					for _, p := range []string{"{owner}", "{relation}", "{account}", "{circle}"} {
@@ -34,22 +33,21 @@ func TestLives(t *testing.T) {
 					if strings.Contains(text, "—") {
 						t.Errorf("%s/%s: an em dash", tmpl.Key, name)
 					}
-					os.WriteFile(filepath.Join(dir, name), raw, 0o600)
 				}
-				l, err := Load(filepath.Join(dir, "life.yaml"))
+				l, err := ParseLife(files["life.yaml"])
 				if err != nil {
 					t.Fatalf("%s as %s: %v", tmpl.Key, rel, err)
 				}
 				if l.Name != tmpl.Name || l.Timezone == "" || len(l.Dreams) == 0 || len(l.Skills) == 0 || len(l.Makes) == 0 {
 					t.Errorf("%s: life = %+v", tmpl.Key, l)
 				}
-				if j, err := LoadJudgment(filepath.Join(dir, "judgment.yaml")); err != nil || len(j.Principles) < 3 || len(j.Cases) < 3 ||
+				if j, err := ParseJudgment(files["judgment.yaml"]); err != nil || len(j.Principles) < 3 || len(j.Cases) < 3 ||
 					len(j.Priorities) < 3 || len(j.Boundaries) < 1 {
 					t.Errorf("%s: judgment = %d principles, %d cases, %v; want a real start", tmpl.Key, len(j.Principles), len(j.Cases), err)
 				} else if !strings.Contains(string(files["judgment.yaml"]), "ask Sam first") {
 					t.Errorf("%s: judgment doesn't name its owner", tmpl.Key)
 				}
-				living(t, dir, l)
+				living(t, files["living.yaml"], l)
 				owner := l.Family[0]
 				if owner.Name != "Sam" || owner.Relation != rel || owner.Account != account || owner.Circle != CircleOf(rel) {
 					t.Errorf("%s as %s: owner = %+v", tmpl.Key, rel, owner)
@@ -63,11 +61,11 @@ func TestLives(t *testing.T) {
 }
 
 // living checks a person's living.yaml is read over the config.
-func living(t *testing.T, dir string, l Life) {
+func living(t *testing.T, doc []byte, l Life) {
 	t.Helper()
 	cfgPath := filepath.Join(t.TempDir(), "minime.yaml")
-	os.WriteFile(cfgPath, []byte("self:\n  dir: "+dir+"\ndatabase:\n  url: postgres://x\n"), 0o600)
-	cfg, err := config.Load(cfgPath)
+	os.WriteFile(cfgPath, []byte("database:\n  url: postgres://x\n"), 0o600)
+	cfg, err := config.Load(cfgPath, doc)
 	if err != nil {
 		t.Fatalf("%s: %v", l.Name, err)
 	}

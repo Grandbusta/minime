@@ -1,5 +1,7 @@
 // Package setup is `minime new`: it starts a person from one of the lives in
-// lives/. Nothing is written until every answer is in.
+// lives/, in their own database. Nothing is written until every answer is in;
+// then .env holds only where they live (DATABASE_URL) and the key to their
+// secrets (MINIME_KEY).
 package setup
 
 import (
@@ -10,13 +12,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
 
+	"github.com/Grandbusta/minime/internal/secret"
 	"github.com/Grandbusta/minime/internal/self"
 )
 
@@ -31,6 +33,10 @@ type Database func(ctx context.Context, url string) (whose string, err error)
 
 type LocalPostgres func(ctx context.Context, name string) (string, error)
 
+// Save makes the database at url theirs: files are their sections by file
+// name, secrets sealed with key.
+type Save func(ctx context.Context, url, key string, files map[string][]byte, secrets map[string]string) error
+
 type Prompter interface {
 	// Input asks for text; current is offered (masked when secret) and kept
 	// on an empty answer. There must be an answer.
@@ -44,7 +50,6 @@ type Setup struct {
 	Out io.Writer
 
 	Lives   string
-	Self    string
 	Env     string
 	Example string
 
@@ -52,13 +57,16 @@ type Setup struct {
 	FirstMessage FirstMessage
 	Database     Database
 	Postgres     LocalPostgres // nil: none offered
+	Save         Save
 	Now          func() time.Time
 }
 
 type Result struct {
-	Name  string
-	Env   map[string]string
-	Start bool
+	Name string
+	Env  map[string]string // all of .env now
+	// Dropped are what the .env before had besides: no longer theirs.
+	Dropped []string
+	Start   bool
 }
 
 var errStop = errors.New("stopped; nothing was written")
@@ -69,23 +77,29 @@ func (s *Setup) Run(ctx context.Context) (Result, error) {
 	}
 	s.say("Let's start a person.\n")
 
-	if old, err := self.Load(filepath.Join(s.Self, "life.yaml")); err == nil {
-		s.say("\n%s already lives in %s/. Starting someone new moves %s's files to %s/previous/ (their memory stays in their database).\n",
-			old.Name, s.Self, old.Name, s.Self)
+	before := s.readEnv()
+	have, whose := before, ""
+	if url := have["DATABASE_URL"]; url != "" {
+		whose, _ = s.Database(ctx, url)
+	}
+	if whose != "" {
+		s.say("\n%s lives in the database .env points to. Starting someone new leaves %s as they are, and moves their .env to "+
+			"%s: `cp %[3]s .env` brings them back.\n", whose, whose, s.Env+"."+strings.ToLower(whose))
 		if ok, err := s.Ask.Confirm("Start someone new instead?", false); err != nil || !ok {
 			return Result{}, errStop
 		}
+		have = map[string]string{} // their bot and their owner are theirs
 	}
 
 	tmpl, err := s.pickLife()
 	if err != nil {
 		return Result{}, err
 	}
-	env, err := s.keys(ctx, tmpl)
+	env, err := s.keys(ctx, tmpl, have)
 	if err != nil {
 		return Result{}, err
 	}
-	owner, err := s.owner(ctx, tmpl, env)
+	owner, err := s.owner(ctx, tmpl, env, have)
 	if err != nil {
 		return Result{}, err
 	}
@@ -94,15 +108,26 @@ func (s *Setup) Run(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 
-	if err := s.writeEnv(env); err != nil {
+	url, key := env["DATABASE_URL"], secret.NewKey()
+	delete(env, "DATABASE_URL")
+	if err := s.Save(ctx, url, key, files, env); err != nil {
 		return Result{}, err
 	}
-	if err := s.writeSelf(files); err != nil {
+	kept := map[string]string{"DATABASE_URL": url, secret.EnvKey: key}
+	if err := s.writeEnv(kept, whose); err != nil {
 		return Result{}, err
 	}
-	s.say("\n%s is ready: %s/ has their life, how they live, and a starting judgment for you to review in the console.\n", tmpl.Name, s.Self)
+	var dropped []string
+	for k := range before {
+		if _, ok := kept[k]; !ok {
+			dropped = append(dropped, k)
+		}
+	}
+	s.say("\n%s is ready. Everything about them is in their database: their life, how they live, their keys, and a starting "+
+		"judgment for you to review in the console. .env only says where that is (DATABASE_URL) and holds the key to their "+
+		"secrets (%s): keep both safe.\n", tmpl.Name, secret.EnvKey)
 	start, err := s.Ask.Confirm(fmt.Sprintf("Start %s now?", tmpl.Name), true)
-	return Result{Name: tmpl.Name, Env: env, Start: start && err == nil}, nil
+	return Result{Name: tmpl.Name, Env: kept, Dropped: dropped, Start: start && err == nil}, nil
 }
 
 func (s *Setup) pickLife() (self.Template, error) {
@@ -124,8 +149,8 @@ func (s *Setup) pickLife() (self.Template, error) {
 	return ts[n], nil
 }
 
-func (s *Setup) keys(ctx context.Context, tmpl self.Template) (map[string]string, error) {
-	have := s.readEnv()
+// keys are their secrets, and DATABASE_URL; have is what .env has now.
+func (s *Setup) keys(ctx context.Context, tmpl self.Template, have map[string]string) (map[string]string, error) {
 	env := map[string]string{}
 
 	s.say("\nTelegram: %s talks with you through a bot. Make one with @BotFather (/newbot) and paste its token.\n", tmpl.Name)
@@ -174,7 +199,7 @@ func (s *Setup) keys(ctx context.Context, tmpl self.Template) (map[string]string
 			s.say("  Can't connect to it (%v). Try again.\n", err)
 			have["DATABASE_URL"] = ""
 			continue
-		case whose != "" && whose != tmpl.Name:
+		case whose != "":
 			s.say("  That database holds %s's memory. %s needs their own: give another one.\n", whose, tmpl.Name)
 			have["DATABASE_URL"] = ""
 			continue
@@ -189,14 +214,13 @@ func (s *Setup) keys(ctx context.Context, tmpl self.Template) (map[string]string
 		rand.Read(b)
 		env["CONSOLE_TOKEN"] = hex.EncodeToString(b)
 	}
-	env["TELEGRAM_OWNER_ID"] = have["TELEGRAM_OWNER_ID"]
 	return env, nil
 }
 
-func (s *Setup) owner(ctx context.Context, tmpl self.Template, env map[string]string) (self.Owner, error) {
+func (s *Setup) owner(ctx context.Context, tmpl self.Template, env, have map[string]string) (self.Owner, error) {
 	firstName := ""
-	if id := env["TELEGRAM_OWNER_ID"]; id != "" && s.confirm(fmt.Sprintf("Keep %s as your Telegram user ID?", id), true) {
-		// kept
+	if id := have["TELEGRAM_OWNER_ID"]; id != "" && s.confirm(fmt.Sprintf("Keep %s as your Telegram user ID?", id), true) {
+		env["TELEGRAM_OWNER_ID"] = id
 	} else {
 		s.say("\nNow message @%s on Telegram (anything, like \"hi\") so I know it's you. Waiting...\n", env["bot"])
 		for {
@@ -228,23 +252,28 @@ func (s *Setup) owner(ctx context.Context, tmpl self.Template, env map[string]st
 	return self.Owner{Name: name, Relation: tmpl.Relations[n], Account: "telegram:" + env["TELEGRAM_OWNER_ID"]}, nil
 }
 
-// writeEnv keeps everything else in .env, or in the example for a new one.
-func (s *Setup) writeEnv(env map[string]string) error {
-	raw, err := os.ReadFile(s.Env)
-	if errors.Is(err, os.ErrNotExist) {
-		raw, err = os.ReadFile(s.Example)
-		if errors.Is(err, os.ErrNotExist) {
-			raw, err = nil, nil
+// writeEnv writes a new .env from the example. One already there is moved
+// aside first: to .env.<whose> if someone lived there, so they can come back.
+func (s *Setup) writeEnv(env map[string]string, whose string) error {
+	if _, err := os.Stat(s.Env); err == nil {
+		aside := s.Env + ".previous"
+		if whose != "" {
+			aside = s.Env + "." + strings.ToLower(whose)
+		}
+		if _, err := os.Stat(aside); err == nil {
+			aside += "-" + s.Now().Format("2006-01-02-150405")
+		}
+		if err := os.Rename(s.Env, aside); err != nil {
+			return err
 		}
 	}
-	if err != nil {
+	raw, err := os.ReadFile(s.Example)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	text := string(raw)
-	for _, k := range []string{"TELEGRAM_BOT_TOKEN", "TELEGRAM_OWNER_ID", "DATABASE_URL", "OPENAI_API_KEY", "OPENAI_MODEL", "CONSOLE_TOKEN"} {
-		if v, ok := env[k]; ok {
-			text = SetEnv(text, k, v)
-		}
+	for _, k := range []string{"DATABASE_URL", secret.EnvKey} {
+		text = SetEnv(text, k, env[k])
 	}
 	return os.WriteFile(s.Env, []byte(text), 0o600)
 }
@@ -267,37 +296,6 @@ func SetEnv(text, key, value string) string {
 		text += "\n"
 	}
 	return text + line + "\n"
-}
-
-// writeSelf moves anyone already there to previous/ first.
-func (s *Setup) writeSelf(files map[string][]byte) error {
-	if err := os.MkdirAll(s.Self, 0o755); err != nil {
-		return err
-	}
-	var moved bool
-	prev := filepath.Join(s.Self, "previous", s.Now().Format("2006-01-02-150405"))
-	for _, f := range self.Files {
-		path := filepath.Join(s.Self, f)
-		if _, err := os.Stat(path); err != nil {
-			continue
-		}
-		if err := os.MkdirAll(prev, 0o755); err != nil {
-			return err
-		}
-		if err := os.Rename(path, filepath.Join(prev, f)); err != nil {
-			return err
-		}
-		moved = true
-	}
-	if moved {
-		s.say("\nThe person who lived here is in %s/.\n", prev)
-	}
-	for _, f := range self.Files {
-		if err := os.WriteFile(filepath.Join(s.Self, f), files[f], 0o600); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *Setup) readEnv() map[string]string {

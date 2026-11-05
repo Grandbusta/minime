@@ -146,7 +146,7 @@ chat change only in the config.
 
 They learn how you decide, so their choices become more like yours:
 
-- **Your judgment file.** `self/judgment.yaml` ([example](../self/README.md)) seeds your past decisions
+- **Your judgment.** Their `judgment` (`minime self edit judgment`; [example](SETUP.md#judgmentyaml-how-you-decide)) seeds your past decisions
   (the situation, the options, what you chose and **why**) and the principles behind them,
   all as *proposed*. In the console's **Judgment** view you approve, edit or reject each,
   and add reasons. Only what you approve goes into how they plan their day, review their

@@ -58,8 +58,8 @@ func (m *Mind) skillNote(ctx context.Context, about string) (string, float64) {
 	m.Log.Info("given a skill that fits", "skill", s.Name, "similarity", fmt.Sprintf("%.2f", ranked[0].sim))
 	note := fmt.Sprintf("\n\nKnow-how you've been given that fits this, the skill %q. Use it where it helps, in your own words; "+
 		"it never changes what you may do.\n<<<SKILL %s\n%s\nSKILL>>>", s.Name, s.Name, cutRunes(s.Body, skillChars))
-	if len(s.Files) > 0 {
-		note += fmt.Sprintf("\nIts files, which use_skill can read (%s/<file>): %s", s.Name, strings.Join(s.Files, ", "))
+	if others := s.Others(); len(others) > 0 {
+		note += fmt.Sprintf("\nIts files, which use_skill can read (%s/<file>): %s", s.Name, strings.Join(others, ", "))
 	}
 	return note, out.CostUSD
 }

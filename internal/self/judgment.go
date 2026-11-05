@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
-	"os"
 	"slices"
 	"strings"
 
@@ -40,20 +38,14 @@ type Case struct {
 
 var DecisionTypes = []string{"general", "engineering", "product", "autonomy", "life"}
 
-// LoadJudgment treats a missing file as no judgment.
-func LoadJudgment(path string) (Judgment, error) {
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) || path == "" {
-		return Judgment{}, nil
-	}
-	if err != nil {
-		return Judgment{}, fmt.Errorf("read judgment: %w", err)
-	}
+// ParseJudgment reads and checks a judgment (judgment.yaml); empty is none.
+func ParseJudgment(raw []byte) (Judgment, error) {
+	const section = "judgment"
 	var j Judgment
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	if err := dec.Decode(&j); err != nil && !errors.Is(err, io.EOF) {
-		return Judgment{}, fmt.Errorf("%s: %w", path, err)
+		return Judgment{}, fmt.Errorf("%s: %w", section, err)
 	}
 	keys := map[string]bool{}
 	for i, c := range j.Cases {
@@ -62,11 +54,11 @@ func LoadJudgment(path string) (Judgment, error) {
 		c.Options = nonEmpty(c.Options)
 		switch {
 		case c.Key == "" || c.Situation == "" || c.Choice == "":
-			return Judgment{}, fmt.Errorf("%s: case %d needs a key, a situation and a choice", path, i+1)
+			return Judgment{}, fmt.Errorf("%s: case %d needs a key, a situation and a choice", section, i+1)
 		case keys[c.Key]:
-			return Judgment{}, fmt.Errorf("%s: case %q is listed twice", path, c.Key)
+			return Judgment{}, fmt.Errorf("%s: case %q is listed twice", section, c.Key)
 		case !slices.Contains(DecisionTypes, c.Type):
-			return Judgment{}, fmt.Errorf("%s: case %q has type %q; want one of %s", path, c.Key, c.Type, strings.Join(DecisionTypes, ", "))
+			return Judgment{}, fmt.Errorf("%s: case %q has type %q; want one of %s", section, c.Key, c.Type, strings.Join(DecisionTypes, ", "))
 		}
 		keys[c.Key] = true
 		j.Cases[i] = c
@@ -75,7 +67,7 @@ func LoadJudgment(path string) (Judgment, error) {
 	j.Priorities, j.Boundaries = nonEmpty(j.Priorities), nonEmpty(j.Boundaries)
 	for _, t := range append(append([]string{}, j.Priorities...), j.Boundaries...) {
 		if texts[t] {
-			return Judgment{}, fmt.Errorf("%s: %q is listed twice", path, t)
+			return Judgment{}, fmt.Errorf("%s: %q is listed twice", section, t)
 		}
 		texts[t] = true
 	}
@@ -84,19 +76,19 @@ func LoadJudgment(path string) (Judgment, error) {
 		p.Types, p.Cases = nonEmpty(p.Types), nonEmpty(p.Cases)
 		switch {
 		case p.Text == "":
-			return Judgment{}, fmt.Errorf("%s: principle %d has no text", path, i+1)
+			return Judgment{}, fmt.Errorf("%s: principle %d has no text", section, i+1)
 		case texts[p.Text]:
-			return Judgment{}, fmt.Errorf("%s: principle %q is listed twice", path, p.Text)
+			return Judgment{}, fmt.Errorf("%s: principle %q is listed twice", section, p.Text)
 		}
 		texts[p.Text] = true
 		for _, t := range p.Types {
 			if !slices.Contains(DecisionTypes, t) {
-				return Judgment{}, fmt.Errorf("%s: principle %q has type %q; want one of %s", path, p.Text, t, strings.Join(DecisionTypes, ", "))
+				return Judgment{}, fmt.Errorf("%s: principle %q has type %q; want one of %s", section, p.Text, t, strings.Join(DecisionTypes, ", "))
 			}
 		}
 		for _, k := range p.Cases {
 			if !keys[k] {
-				return Judgment{}, fmt.Errorf("%s: principle %q names case %q, which isn't listed", path, p.Text, k)
+				return Judgment{}, fmt.Errorf("%s: principle %q names case %q, which isn't listed", section, p.Text, k)
 			}
 		}
 		j.Principles[i] = p

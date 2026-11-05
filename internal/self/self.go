@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -95,28 +94,26 @@ func CircleOf(relation string) string {
 	return "family"
 }
 
-func Load(path string) (Life, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return Life{}, fmt.Errorf("read life story: %w", err)
-	}
+// ParseLife reads and checks a life (life.yaml).
+func ParseLife(raw []byte) (Life, error) {
+	const section = "life"
 	var l Life
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	if err := dec.Decode(&l); err != nil {
-		return Life{}, fmt.Errorf("%s: %w", path, err)
+		return Life{}, fmt.Errorf("%s: %w", section, err)
 	}
 	l.Name, l.Timezone = strings.TrimSpace(l.Name), strings.TrimSpace(l.Timezone)
 	if l.Timezone != "" {
 		if _, err := time.LoadLocation(l.Timezone); err != nil {
-			return Life{}, fmt.Errorf("%s: timezone must be a time zone like Africa/Lagos, have %q", path, l.Timezone)
+			return Life{}, fmt.Errorf("%s: timezone must be a time zone like Africa/Lagos, have %q", section, l.Timezone)
 		}
 	}
 	l.Story = nonEmpty(l.Story)
 	l.Personality = nonEmpty(l.Personality)
 	l.Routine = nonEmpty(l.Routine)
 	if l.Name == "" || len(l.Story) == 0 {
-		return Life{}, errors.New(path + ": write the agent's name and at least one line of its life story first")
+		return Life{}, errors.New(section + ": write the agent's name and at least one line of its life story first")
 	}
 	kinds := map[string]bool{}
 	for _, k := range Reserved {
@@ -129,9 +126,9 @@ func Load(path string) (Life, error) {
 		c.Kind, c.About = strings.TrimSpace(c.Kind), strings.TrimSpace(c.About)
 		switch {
 		case !kindName.MatchString(c.Kind) || c.About == "":
-			return Life{}, fmt.Errorf("%s: makes %d needs a kind in snake_case (like beat_idea) and what it is (about)", path, i+1)
+			return Life{}, fmt.Errorf("%s: makes %d needs a kind in snake_case (like beat_idea) and what it is (about)", section, i+1)
 		case kinds[c.Kind]:
-			return Life{}, fmt.Errorf("%s: makes %q is already a kind of work", path, c.Kind)
+			return Life{}, fmt.Errorf("%s: makes %q is already a kind of work", section, c.Kind)
 		}
 		kinds[c.Kind] = true
 		l.Makes[i] = c
@@ -142,15 +139,15 @@ func Load(path string) (Life, error) {
 		sk.Name = strings.TrimSpace(sk.Name)
 		switch {
 		case sk.Name == "" || sk.Level < 1 || sk.Level > 10:
-			return Life{}, fmt.Errorf("%s: skill %d needs a name and a level from 1 to 10", path, i+1)
+			return Life{}, fmt.Errorf("%s: skill %d needs a name and a level from 1 to 10", section, i+1)
 		case skills[strings.ToLower(sk.Name)]:
-			return Life{}, fmt.Errorf("%s: skill %q is listed twice", path, sk.Name)
+			return Life{}, fmt.Errorf("%s: skill %q is listed twice", section, sk.Name)
 		}
 		skills[strings.ToLower(sk.Name)] = true
 		for j, k := range sk.ShownBy {
 			k = strings.TrimSpace(k)
 			if !kinds[k] || k == "journal" || k == "review" {
-				return Life{}, fmt.Errorf("%s: skill %q is shown by %q, which isn't a kind of work it makes", path, sk.Name, k)
+				return Life{}, fmt.Errorf("%s: skill %q is shown by %q, which isn't a kind of work it makes", section, sk.Name, k)
 			}
 			sk.ShownBy[j] = k
 		}
@@ -164,14 +161,14 @@ func Load(path string) (Life, error) {
 			r.Circle = "family"
 		}
 		if !slices.Contains(Circles, r.Circle) {
-			return Life{}, fmt.Errorf("%s: %s's circle must be one of %s, have %q", path, r.Name, strings.Join(Circles, ", "), r.Circle)
+			return Life{}, fmt.Errorf("%s: %s's circle must be one of %s, have %q", section, r.Name, strings.Join(Circles, ", "), r.Circle)
 		}
 		if r.Name == "" || r.Relation == "" {
-			return Life{}, fmt.Errorf("%s: family member %d needs a name and a relation", path, i+1)
+			return Life{}, fmt.Errorf("%s: family member %d needs a name and a relation", section, i+1)
 		}
 		if r.Account != "" {
 			if accounts[r.Account] {
-				return Life{}, fmt.Errorf("%s: account %s belongs to two family members", path, r.Account)
+				return Life{}, fmt.Errorf("%s: account %s belongs to two family members", section, r.Account)
 			}
 			accounts[r.Account] = true
 		}

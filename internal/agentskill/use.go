@@ -34,8 +34,8 @@ func (u Use) Prepare(_ context.Context, a ability.Act) (ability.Material, error)
 		}
 		if file == "" {
 			note := fmt.Sprintf("\n\nYou read the skill %q, know-how you've been given:\n<<<SKILL %s\n%s\nSKILL>>>", s.Name, s.Name, s.Body)
-			if len(s.Files) > 0 {
-				note += fmt.Sprintf("\nIts files (use_skill %s/<file> reads one): %s", s.Name, strings.Join(s.Files, ", "))
+			if others := s.Others(); len(others) > 0 {
+				note += fmt.Sprintf("\nIts files (use_skill %s/<file> reads one): %s", s.Name, strings.Join(others, ", "))
 			}
 			return ability.Material{Note: note, Project: a.Project}, nil
 		}

@@ -1,10 +1,8 @@
-# ${VAR} references are filled in from the environment (see .env.example).
-
-# The person: a folder with their life (life.yaml), how they live
-# (living.yaml: their days, check-ins, abilities, what they may do on their
-# own) and your judgment (judgment.yaml), laid out like each life in lives/.
-self:
-  dir: self
+# The machinery every person shares. The person themself (their life, how
+# they live, your judgment, their skills) is in their database: see `minime
+# self`. ${VAR} references are filled in from the environment, and from
+# their secrets in their database where the environment doesn't set them
+# (`minime secret`).
 
 database:
   url: ${DATABASE_URL}
@@ -47,7 +45,7 @@ working_memory:
 memory:
   recall_candidates: 30
 
-# The prompts for its own day (when and what is in self/living.yaml).
+# The prompts for its own day (when and what is in their living).
 daily_life:
   plan_prompt: prompts/plan.md
   activity_prompt: prompts/activity.md
@@ -68,11 +66,6 @@ embedding:
 search:
   provider: openai
 
-# Know-how in the Agent Skills format (a folder with a SKILL.md each), read in
-# order; a later one wins on a name. Default: skills, then self/skills.
-# agent_skills:
-#   dirs: [skills, self/skills]
-
 # MCP servers whose tools they may use: only the tools listed, and only tools
 # that read for now. A local server gets PATH, HOME and the env listed, never
 # the rest of the environment. calls_per_day (all servers) grows with pace.
@@ -89,7 +82,7 @@ search:
 #       tools: {search: read}
 
 # Who approves what the person asks first: default, the first of
-# telegram.owner_ids. What they may do is in self/living.yaml.
+# telegram.owner_ids. What they may do is in their living.
 # autonomy:
 #   owner: telegram:123
 

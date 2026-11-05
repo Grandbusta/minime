@@ -59,7 +59,8 @@ go run ./cmd/minime new
 ```
 
 Pick a life, paste your token and key, message your bot once so it knows it's you, and say
-who you are to them. It writes `.env` and `self/` and starts them. After that:
+who you are to them. It puts them in their own database (`.env` only says where, and holds
+the key to their secrets) and starts them. After that:
 
 ```bash
 go run ./cmd/minime
