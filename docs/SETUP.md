@@ -366,11 +366,13 @@ go run ./cmd/minime skill add path/to/cold-email
 ```
 
 `minime skill list` shows theirs and `minime skill remove <name>` takes one away; changes
-apply when they next start. Adding a skill with a name they have replaces it.
+apply when they next start. Adding a skill with a name they have replaces it. Every file in
+the folder is kept, up to 100 files, 2 MB each and 10 MB in all.
 
 When what they're talking about or doing fits a skill's description, its instructions are
 put in front of them, and they use them in their own words. They can also read any skill,
-or one of its files, with `use_skill`, and see the list when they plan their day. The
+or one of its files, with `use_skill` (a file that isn't text, like an image, is only
+described), and see the list when they plan their day. The
 console lists them.
 
 **Only add skills you've read or trust: their instructions are followed.** A skill never

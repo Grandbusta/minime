@@ -324,7 +324,7 @@ and loaded at start; one that doesn't read is logged and left out.
 Each description is embedded the first time it's needed and kept in memory; the one most
 alike (at least 0.35, `rankAlike`) to a reply's talk or an activity's text has its
 instructions put in the note ([skills.go](../internal/mind/skills.go)). `use_skill` reads a
-skill, or one of its files (only those it lists), as material, and is chained so it can
+skill, or one of its files (only those it lists; one that isn't text is only described), as material, and is chained so it can
 read a file after the instructions. Skills are trusted like prompts; they grant nothing and
 their scripts never run.
 

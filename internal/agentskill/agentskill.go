@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -23,8 +24,9 @@ import (
 
 const (
 	maxFiles    = 100
-	maxStored   = 2 << 20 // bytes of one file kept
-	maxFileSize = 50_000  // bytes of a file it reads
+	maxStored   = 2 << 20  // bytes of one file kept
+	maxTotal    = 10 << 20 // bytes of a whole skill kept
+	maxFileSize = 50_000   // bytes of a file it reads
 )
 
 type Skill struct {
@@ -39,7 +41,7 @@ var name = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // FromDir reads a skill's folder, which must be named like the skill.
 func FromDir(dir string) (Skill, error) {
-	files := map[string][]byte{}
+	files, total := map[string][]byte{}, 0
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -54,8 +56,8 @@ func FromDir(dir string) (Skill, error) {
 		if err != nil {
 			return err
 		}
-		if len(raw) > maxStored {
-			return fmt.Errorf("%s is over %d bytes", p, maxStored)
+		if total += len(raw); len(raw) > maxStored || total > maxTotal {
+			return fmt.Errorf("too big: at most %d MB a file and %d MB in all", maxStored>>20, maxTotal>>20)
 		}
 		rel, _ := filepath.Rel(dir, p)
 		files[filepath.ToSlash(rel)] = raw
@@ -132,15 +134,28 @@ func frontmatter(raw []byte) (front, body []byte, ok bool) {
 	return front, body, true
 }
 
-// Read is one of its files besides SKILL.md.
+// Read is one of its files besides SKILL.md. One that isn't text (an
+// image, a PDF, a font) is only described: its bytes would mean nothing
+// read as words.
 func (s Skill) Read(file string) (string, error) {
 	file = path.Clean(strings.TrimPrefix(strings.TrimSpace(file), "./"))
 	raw, ok := s.Files[file]
 	if !ok || file == "SKILL.md" {
 		return "", fmt.Errorf("%s has no file %q (it has %s)", s.Name, file, strings.Join(s.Others(), ", "))
 	}
+	if !utf8.Valid(raw) || bytes.IndexByte(raw, 0) >= 0 {
+		kind, _, _ := strings.Cut(http.DetectContentType(raw), ";")
+		return fmt.Sprintf("%s isn't text (%s, %s): it can't be read as words, only used as it is.", file, kind, size(len(raw))), nil
+	}
 	if len(raw) > maxFileSize {
 		raw = raw[:maxFileSize]
 	}
-	return string(raw), nil
+	return strings.ToValidUTF8(string(raw), ""), nil
+}
+
+func size(n int) string {
+	if n < 1<<10 {
+		return fmt.Sprintf("%d bytes", n)
+	}
+	return fmt.Sprintf("%d KB", (n+1<<10-1)>>10)
 }

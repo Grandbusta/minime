@@ -1,6 +1,7 @@
 package agentskill
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,23 +29,31 @@ func TestFromDir(t *testing.T) {
 	write(t, filepath.Join(dir, "elsewhere", "SKILL.md"), "---\nname: cold-email\ndescription: x\n---\nbody")
 	write(t, filepath.Join(dir, "not-a-skill", "notes.md"), "x")
 	os.Symlink("/etc/passwd", filepath.Join(dir, "cold-email", "passwd"))
+	write(t, filepath.Join(dir, "cold-email", "logo.png"), "\x89PNG\r\n\x1a\n"+strings.Repeat("\x00", 3000))
+	for i := range 6 { // 12 MB in all
+		write(t, filepath.Join(dir, "huge", fmt.Sprintf("part%d.txt", i)), strings.Repeat("a", 2<<20))
+	}
+	write(t, filepath.Join(dir, "huge", "SKILL.md"), "---\nname: huge\ndescription: x\n---\nbody")
 
 	s, err := FromDir(filepath.Join(dir, "cold-email"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Body != "# Cold email\nLead with one real reason." || strings.Join(s.Others(), ",") != "examples.md,scripts/send.py" {
+	if s.Body != "# Cold email\nLead with one real reason." || strings.Join(s.Others(), ",") != "examples.md,logo.png,scripts/send.py" {
 		t.Errorf("skill = %+v, files %v", s, s.Others())
 	}
 	if text, err := s.Read("./examples.md"); err != nil || text != "Hi Ada," {
 		t.Errorf("read = %q, %v", text, err)
+	}
+	if text, err := s.Read("logo.png"); err != nil || text != "logo.png isn't text (image/png, 3 KB): it can't be read as words, only used as it is." {
+		t.Errorf("an image read as %q, %v", text, err)
 	}
 	for _, bad := range []string{"../no-front/SKILL.md", "SKILL.md", "/etc/passwd", "passwd", "missing.md"} {
 		if _, err := s.Read(bad); err == nil {
 			t.Errorf("read %s", bad)
 		}
 	}
-	for _, bad := range []string{"bad-name", "no-front", "no-description", "elsewhere", "not-a-skill"} {
+	for _, bad := range []string{"bad-name", "no-front", "no-description", "elsewhere", "not-a-skill", "huge"} {
 		if _, err := FromDir(filepath.Join(dir, bad)); err == nil {
 			t.Errorf("%s: a skill", bad)
 		}
