@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.3.1: doctor, backup and restore
+
+- **`minime doctor`** checks everything a person needs to run, one line each, and says
+  what's wrong:
+  - the database;
+  - that `MINIME_KEY` opens their secrets;
+  - the config with its prompts and question sets;
+  - that their OpenAI key reaches each model;
+  - the bot token, and that each owner has pressed Start;
+  - each tool server.
+
+  It changes nothing but bringing the database up to date. In Docker:
+  `docker exec <name> /minime doctor`.
+- **`minime backup [file]`** writes everything about them to one file, readable only by
+  you. It's taken at one moment, so they keep running while it's made. Their secrets are
+  in it sealed: keep `MINIME_KEY` safe too, apart from the backup.
+- **`minime restore <file>`** brings them back into a new, empty database. It never writes
+  over anyone. A backup from an older minime is brought up to date once it's loaded.
+
 ## v0.3.0: a person is their own database
 
 A person now lives entirely in their own database. Outside it, all they need is two
