@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.3.0: a person is their own database
+
+A person now lives entirely in their own database. Outside it, all they need is two
+lines: `DATABASE_URL` says where they are, and `MINIME_KEY` unlocks their keys. minime
+is also one binary now, with releases you can download.
+
+**A person is their own database**
+- Their life, how they live, your judgment, their skills and their keys are all kept in
+  their database. Two people never share a key, a database or an OpenAI account.
+- Each part of them is versioned: `minime self edit life` opens it in your editor and
+  refuses an edit that doesn't read. `minime self history` and `minime self rollback`
+  take you back. `minime self export` and `minime self import` move them in and out as files.
+- Keys and tokens are sealed with `MINIME_KEY` (AES-GCM) and are never stored as plain
+  text. `minime secret list | set | unset | rekey` manages them. A value already set in
+  the environment still wins.
+- Skills live in the database, every file of them, under `minime skill list | add | remove`.
+  Images and other files that aren't text are described rather than read as words. A
+  skill can be up to 10 MB, and its scripts are never run.
+- `minime new` writes a new person straight into their database. It moves an existing
+  `.env` aside to `.env.<name>` and never takes over a database that belongs to someone else.
+
+**One binary**
+- The config, prompts, question sets and the five lives are built in, so the binary
+  alone runs a person. A file on disk at the same path still wins, so you can change
+  them without a rebuild.
+- Download it from the release (Linux, macOS and Windows), or install it with
+  `go install github.com/Grandbusta/minime/cmd/minime@latest`.
+- The image is `ghcr.io/grandbusta/minime:v0.3.0`, for amd64 and arm64. `:latest` follows
+  the newest published release.
+
+**Upgrading**
+- Someone in `self/` moves into their database once, on their first start. If `.env` has
+  no `MINIME_KEY`, one is made and written there.
+- **Back up `MINIME_KEY`.** Without it, their keys can't be opened again. Keep it
+  somewhere safe and apart from the database.
+- After the move, `self/` is no longer read. Keep it as a backup or delete it.
+
 ## v0.2.0: launch
 
 The first release we're announcing: create an AI person, talk with them on Telegram, and
